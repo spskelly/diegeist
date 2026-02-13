@@ -136,6 +136,23 @@ export const SPRITE_DEFINITIONS = {
       ctx.fillRect(7, 6, 2, 4);
     },
   },
+  rat: {
+    size: 16,
+    draw(ctx) {
+      ctx.fillStyle = '#8b6040';
+      ctx.fillRect(4, 6, 8, 6);
+      ctx.fillStyle = '#6b4030';
+      ctx.fillRect(5, 5, 3, 2);
+      ctx.fillStyle = '#ff3030';
+      ctx.fillRect(5, 6, 1, 1);
+      ctx.fillRect(7, 6, 1, 1);
+      ctx.fillStyle = '#8b6040';
+      ctx.fillRect(2, 10, 2, 3);
+      ctx.fillRect(10, 10, 2, 3);
+      ctx.fillStyle = '#a07050';
+      ctx.fillRect(11, 8, 4, 1);
+    },
+  },
 };
 
 export const TILE_SPRITE_MAP = {

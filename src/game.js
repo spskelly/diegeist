@@ -11,6 +11,8 @@ import { HUD } from './hud.js';
 import { TILE, FOV_RADIUS } from './constants.js';
 import { Entity } from './entity.js';
 import { generateDungeon } from './dungeon-gen.js';
+import { resolveAttack } from './combat.js';
+import { getAIAction } from './ai.js';
 
 export class Game {
   constructor(canvas) {
@@ -84,8 +86,8 @@ export class Game {
 
       // Randomize enemy type
       const enemyTypes = [
-        { name: 'Rat', maxHp: 5, speed: 100, stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 }, spriteKey: 'trap' },
-        { name: 'Bat', maxHp: 3, speed: 150, stats: { STR: 2, DEX: 5, CON: 2, INT: 1, WIS: 1, LCK: 3 }, spriteKey: 'door' },
+        { name: 'Rat', maxHp: 5, speed: 100, stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 }, spriteKey: 'rat', behavior: 'rushdown' },
+        { name: 'Bat', maxHp: 3, speed: 150, stats: { STR: 2, DEX: 5, CON: 2, INT: 1, WIS: 1, LCK: 3 }, spriteKey: 'door', behavior: 'wander' },
       ];
       const enemyType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
 
@@ -97,7 +99,7 @@ export class Game {
         stats: enemyType.stats,
         maxHp: enemyType.maxHp,
         speed: enemyType.speed,
-        behavior: 'wander',
+        behavior: enemyType.behavior,
         name: enemyType.name,
       });
       enemy.spriteKey = enemyType.spriteKey;
@@ -117,12 +119,22 @@ export class Game {
       const nx = this.player.position.x + action.dx;
       const ny = this.player.position.y + action.dy;
 
-      // Check for enemy at target position (bump-to-attack placeholder)
+      // Check for enemy at target position (bump-to-attack)
       const enemy = this.map.entities.find(e =>
         e.type === 'enemy' && e.isAlive() && e.position.x === nx && e.position.y === ny
       );
       if (enemy) {
-        this.messageLog.add(`You bump into the ${enemy.name}!`, this.turnCount);
+        const result = resolveAttack(this.player, enemy, { baseDamage: 3, damageType: 'melee', weaponMultiplier: 1.0 });
+
+        if (result.dodged) {
+          this.messageLog.add(`The ${enemy.name} dodges your attack!`, this.turnCount);
+        } else if (result.killed) {
+          this.messageLog.add(`You killed the ${enemy.name}!`, this.turnCount);
+          this.turnSystem.removeEntity(enemy.id);
+        } else {
+          const critMsg = result.crit ? ' (CRITICAL!)' : '';
+          this.messageLog.add(`You hit the ${enemy.name} for ${result.damage} damage!${critMsg}`, this.turnCount);
+        }
         return true;
       }
 
@@ -140,31 +152,92 @@ export class Game {
       this.messageLog.add('You wait.', this.turnCount);
       return true;
     }
+    if (action.type === 'descend') {
+      return this.handleFloorTransition();
+    }
     return false;
   }
 
   processEnemyTurn(entity) {
-    if (entity.behavior === 'wander') {
-      const dirs = [{ dx: 0, dy: -1 }, { dx: 0, dy: 1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }];
-      const shuffled = dirs.sort(() => Math.random() - 0.5);
-      for (const d of shuffled) {
-        const nx = entity.position.x + d.dx;
-        const ny = entity.position.y + d.dy;
-        if (this.map.isWalkable(nx, ny)) {
-          // Don't move onto player or other enemies
-          const blocked = (nx === this.player.position.x && ny === this.player.position.y) ||
-            this.map.entities.some(e => e !== entity && e.isAlive() && e.position.x === nx && e.position.y === ny);
-          if (!blocked) {
-            entity.moveTo(nx, ny);
-            break;
-          }
-        }
+    const action = getAIAction(entity, this.player, this.map, this.map.entities);
+
+    if (action.type === 'move') {
+      entity.moveTo(action.x, action.y);
+    } else if (action.type === 'attack') {
+      const result = resolveAttack(entity, this.player, {
+        baseDamage: 2,
+        damageType: action.damageType || 'melee',
+        weaponMultiplier: 1.0
+      });
+
+      if (result.dodged) {
+        this.messageLog.add(`You dodge the ${entity.name}'s attack!`, this.turnCount);
+      } else if (result.killed) {
+        this.messageLog.add(`You have been slain by the ${entity.name}!`, this.turnCount);
+        this.state = 'gameover';
+      } else {
+        const critMsg = result.crit ? ' (CRITICAL!)' : '';
+        this.messageLog.add(`The ${entity.name} hits you for ${result.damage} damage!${critMsg}`, this.turnCount);
       }
+    } else if (action.type === 'summon') {
+      const minionId = `minion_${Date.now()}_${Math.random()}`;
+      const minion = new Entity({
+        id: minionId,
+        type: 'enemy',
+        x: action.spawnX,
+        y: action.spawnY,
+        stats: { STR: 2, DEX: 2, CON: 2, INT: 1, WIS: 1, LCK: 1 },
+        maxHp: 3,
+        speed: 100,
+        behavior: 'rushdown',
+        name: 'Minion',
+      });
+      minion.spriteKey = 'rat';
+      this.map.entities.push(minion);
+      this.turnSystem.addEntity(minion);
+      this.messageLog.add(`The ${entity.name} summons a ${minion.name}!`, this.turnCount);
     }
+    // If action.type === 'wait', do nothing
+
     entity.spendTurn();
   }
 
+  handleFloorTransition() {
+    const playerTile = this.map.getTile(this.player.position.x, this.player.position.y);
+    if (playerTile !== TILE.STAIRS_DOWN) {
+      this.messageLog.add('There are no stairs here.', this.turnCount);
+      return false;
+    }
+
+    // Check if boss room is cleared
+    const bossRoom = this.map.rooms.find(r => r.type === 'boss');
+    if (bossRoom) {
+      const enemiesInBossRoom = this.map.entities.filter(e => {
+        if (e.type !== 'enemy' || !e.isAlive()) return false;
+        return e.position.x >= bossRoom.x && e.position.x < bossRoom.x + bossRoom.width &&
+               e.position.y >= bossRoom.y && e.position.y < bossRoom.y + bossRoom.height;
+      });
+      if (enemiesInBossRoom.length > 0) {
+        this.messageLog.add('The stairs are blocked. Clear the boss room first.', this.turnCount);
+        return false;
+      }
+    }
+
+    // Descend to next floor
+    this.floorNumber++;
+    const archetypes = ['corridor-heavy', 'cavernous', 'hybrid'];
+    const archetype = archetypes[Math.floor(Math.random() * archetypes.length)];
+
+    // Clear old entities from turn system
+    this.turnSystem = new TurnSystem();
+
+    this.startFloor();
+    this.messageLog.add(`You descend to floor ${this.floorNumber}.`, this.turnCount);
+    return true;
+  }
+
   update() {
+    if (this.state === 'gameover') return;
     if (this.state !== 'playing') return;
 
     const action = this.input.consume();
@@ -189,9 +262,10 @@ export class Game {
           continue;
         }
         this.processEnemyTurn(entity);
+        if (this.state === 'gameover') break;
       }
 
-      if (playerReady) break;
+      if (playerReady || this.state === 'gameover') break;
     }
 
     computeFOV(this.map, this.player.position.x, this.player.position.y, FOV_RADIUS);
