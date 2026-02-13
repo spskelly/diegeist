@@ -12,6 +12,7 @@ const SOURCE_ORDER = [
   'turn-system.js',
   'camera.js',
   'fov.js',
+  'dungeon-gen.js',
   'message-log.js',
   'input.js',
   'sprites.js',

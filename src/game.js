@@ -10,6 +10,7 @@ import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
 import { TILE, FOV_RADIUS } from './constants.js';
 import { Entity } from './entity.js';
+import { generateDungeon } from './dungeon-gen.js';
 
 export class Game {
   constructor(canvas) {
@@ -26,6 +27,7 @@ export class Game {
     this.renderer = null;
     this.hud = null;
     this.turnCount = 0;
+    this.floorNumber = 1;
   }
 
   init() {
@@ -40,7 +42,7 @@ export class Game {
       this.resizeCanvas();
     });
 
-    this.startTestMap();
+    this.startFloor();
     this.state = 'playing';
     this.loop();
   }
@@ -52,69 +54,56 @@ export class Game {
     if (this.hud) this.hud.resize(this.canvas.width, this.canvas.height);
   }
 
-  startTestMap() {
-    const w = 40, h = 30;
-    this.map = new GameMap(w, h);
+  startFloor() {
+    // Pick a random archetype
+    const archetypes = ['corridor-heavy', 'cavernous', 'hybrid'];
+    const archetype = archetypes[Math.floor(Math.random() * archetypes.length)];
 
-    // Room 1
-    for (let y = 2; y < 10; y++)
-      for (let x = 2; x < 12; x++)
-        this.map.setTile(x, y, TILE.FLOOR);
+    // Generate the dungeon
+    this.map = generateDungeon(60, 50, archetype, this.floorNumber);
 
-    // Corridor
-    for (let x = 12; x < 20; x++)
-      this.map.setTile(x, 5, TILE.CORRIDOR);
+    // Find the start room and place the player at its center
+    const startRoom = this.map.rooms.find(r => r.type === 'start');
+    if (!startRoom) {
+      throw new Error('No start room found in generated dungeon');
+    }
+    const startX = Math.floor(startRoom.x + startRoom.width / 2);
+    const startY = Math.floor(startRoom.y + startRoom.height / 2);
 
-    // Room 2
-    for (let y = 2; y < 10; y++)
-      for (let x = 20; x < 30; x++)
-        this.map.setTile(x, y, TILE.FLOOR);
-
-    // Room 3 (connected to room 1 going south)
-    for (let y = 10; y < 11; y++)
-      for (let x = 5; x < 7; x++)
-        this.map.setTile(x, y, TILE.CORRIDOR);
-    for (let y = 11; y < 18; y++)
-      for (let x = 2; x < 10; x++)
-        this.map.setTile(x, y, TILE.FLOOR);
-
-    // Doors
-    this.map.setTile(12, 5, TILE.DOOR);
-    this.map.setTile(19, 5, TILE.DOOR);
-
-    // Stairs
-    this.map.setTile(25, 5, TILE.STAIRS_DOWN);
-
-    // Water hazard in room 3
-    this.map.setTile(4, 14, TILE.WATER);
-    this.map.setTile(5, 14, TILE.WATER);
-    this.map.setTile(6, 14, TILE.WATER);
-
-    // Trap in room 2
-    this.map.setTile(24, 7, TILE.TRAP);
-
-    // Player
-    this.player = createPlayer('fighter', 5, 5);
+    this.player = createPlayer('fighter', startX, startY);
     this.turnSystem.addEntity(this.player);
 
-    // Test NPC enemies
-    const rat = new Entity({
-      id: 'rat_1', type: 'enemy', x: 24, y: 4,
-      stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 },
-      maxHp: 5, speed: 100, behavior: 'wander', name: 'Rat',
-    });
-    rat.spriteKey = 'trap';
-    this.map.entities.push(rat);
-    this.turnSystem.addEntity(rat);
+    // Spawn 3-5 wandering enemies in standard rooms
+    const standardRooms = this.map.rooms.filter(r => r.type === 'standard');
+    const numEnemies = 3 + Math.floor(Math.random() * 3); // 3-5 enemies
 
-    const bat = new Entity({
-      id: 'bat_1', type: 'enemy', x: 22, y: 7,
-      stats: { STR: 2, DEX: 5, CON: 2, INT: 1, WIS: 1, LCK: 3 },
-      maxHp: 3, speed: 150, behavior: 'wander', name: 'Bat',
-    });
-    bat.spriteKey = 'door';
-    this.map.entities.push(bat);
-    this.turnSystem.addEntity(bat);
+    for (let i = 0; i < numEnemies && i < standardRooms.length; i++) {
+      const room = standardRooms[i];
+      const enemyX = room.x + Math.floor(Math.random() * room.width);
+      const enemyY = room.y + Math.floor(Math.random() * room.height);
+
+      // Randomize enemy type
+      const enemyTypes = [
+        { name: 'Rat', maxHp: 5, speed: 100, stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 }, spriteKey: 'trap' },
+        { name: 'Bat', maxHp: 3, speed: 150, stats: { STR: 2, DEX: 5, CON: 2, INT: 1, WIS: 1, LCK: 3 }, spriteKey: 'door' },
+      ];
+      const enemyType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
+
+      const enemy = new Entity({
+        id: `enemy_${i}`,
+        type: 'enemy',
+        x: enemyX,
+        y: enemyY,
+        stats: enemyType.stats,
+        maxHp: enemyType.maxHp,
+        speed: enemyType.speed,
+        behavior: 'wander',
+        name: enemyType.name,
+      });
+      enemy.spriteKey = enemyType.spriteKey;
+      this.map.entities.push(enemy);
+      this.turnSystem.addEntity(enemy);
+    }
 
     this.messageLog.add('Welcome to Diegeist. Move with arrow keys or WASD.', this.turnCount);
     this.messageLog.add('Press Space or . to wait a turn.', this.turnCount);
