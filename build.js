@@ -16,11 +16,16 @@ const SOURCE_ORDER = [
   'combat.js',
   'ai.js',
   'dungeon-gen.js',
+  'items.js',
+  'inventory.js',
+  'skills.js',
+  'progression.js',
   'message-log.js',
   'input.js',
   'sprites.js',
   'renderer.js',
   'hud.js',
+  'audio.js',
   'game.js',
 ];
 
