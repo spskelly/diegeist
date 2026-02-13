@@ -1,0 +1,14 @@
+{
+  "name": "diegeist",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "node build.js"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
+}
