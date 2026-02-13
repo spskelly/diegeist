@@ -1,0 +1,58 @@
+import { describe, it, expect } from 'vitest';
+import { mapKeyToAction } from '../src/input.js';
+
+describe('mapKeyToAction', () => {
+  it('maps arrow keys to movement', () => {
+    expect(mapKeyToAction('ArrowUp')).toEqual({ type: 'move', dx: 0, dy: -1 });
+    expect(mapKeyToAction('ArrowDown')).toEqual({ type: 'move', dx: 0, dy: 1 });
+    expect(mapKeyToAction('ArrowLeft')).toEqual({ type: 'move', dx: -1, dy: 0 });
+    expect(mapKeyToAction('ArrowRight')).toEqual({ type: 'move', dx: 1, dy: 0 });
+  });
+
+  it('maps WASD to movement', () => {
+    expect(mapKeyToAction('w')).toEqual({ type: 'move', dx: 0, dy: -1 });
+    expect(mapKeyToAction('s')).toEqual({ type: 'move', dx: 0, dy: 1 });
+    expect(mapKeyToAction('a')).toEqual({ type: 'move', dx: -1, dy: 0 });
+    expect(mapKeyToAction('d')).toEqual({ type: 'move', dx: 1, dy: 0 });
+  });
+
+  it('maps wait keys', () => {
+    expect(mapKeyToAction(' ')).toEqual({ type: 'wait' });
+    expect(mapKeyToAction('.')).toEqual({ type: 'wait' });
+  });
+
+  it('maps inventory key', () => {
+    expect(mapKeyToAction('i')).toEqual({ type: 'inventory' });
+    expect(mapKeyToAction('Tab')).toEqual({ type: 'inventory' });
+  });
+
+  it('maps belt keys', () => {
+    expect(mapKeyToAction('1')).toEqual({ type: 'belt', slot: 0 });
+    expect(mapKeyToAction('2')).toEqual({ type: 'belt', slot: 1 });
+    expect(mapKeyToAction('3')).toEqual({ type: 'belt', slot: 2 });
+  });
+
+  it('maps skill keys', () => {
+    expect(mapKeyToAction('q')).toEqual({ type: 'skill', slot: 0 });
+    expect(mapKeyToAction('e')).toEqual({ type: 'skill', slot: 1 });
+    expect(mapKeyToAction('r')).toEqual({ type: 'skill', slot: 2 });
+  });
+
+  it('maps pickup key', () => {
+    expect(mapKeyToAction('g')).toEqual({ type: 'pickup' });
+  });
+
+  it('maps descend key', () => {
+    expect(mapKeyToAction('>')).toEqual({ type: 'descend' });
+  });
+
+  it('maps escape', () => {
+    expect(mapKeyToAction('Escape')).toEqual({ type: 'close' });
+  });
+
+  it('returns null for unmapped keys', () => {
+    expect(mapKeyToAction('z')).toBeNull();
+    expect(mapKeyToAction('F1')).toBeNull();
+    expect(mapKeyToAction('x')).toBeNull();
+  });
+});
