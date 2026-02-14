@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateItem, generateConsumable, ITEM_TEMPLATES, CONSUMABLE_TYPES } from '../src/items.js';
+import { generateItem, generateConsumable, ITEM_TEMPLATES, CONSUMABLE_TYPES, createStarterWeapon } from '../src/items.js';
 
 describe('generateItem', () => {
   it('generates an item with required properties', () => {
@@ -72,6 +72,43 @@ describe('generateConsumable', () => {
     expect(c.effect).toBeDefined();
     expect(c.magnitude).toBeDefined();
     expect(c.name).toBeDefined();
+  });
+});
+
+describe('createStarterWeapon', () => {
+  it('creates a starter weapon for each class', () => {
+    const fighter = createStarterWeapon('fighter');
+    const archer = createStarterWeapon('archer');
+    const mage = createStarterWeapon('mage');
+
+    expect(fighter).toBeTruthy();
+    expect(archer).toBeTruthy();
+    expect(mage).toBeTruthy();
+    expect(fighter.slot).toBe('leftHand');
+    expect(archer.slot).toBe('leftHand');
+    expect(mage.slot).toBe('leftHand');
+    expect(fighter.rarity).toBe('common');
+    expect(archer.rarity).toBe('common');
+    expect(mage.rarity).toBe('common');
+  });
+
+  it('gives archer and mage ranged starter skills', () => {
+    const archer = createStarterWeapon('archer');
+    const mage = createStarterWeapon('mage');
+
+    expect(archer.skill).toBeTruthy();
+    expect(archer.skill.range).toBeGreaterThan(1);
+    expect(archer.skill.statScaling).toBe('DEX');
+    expect(archer.skill.cooldown).toBe(0);
+
+    expect(mage.skill).toBeTruthy();
+    expect(mage.skill.range).toBeGreaterThan(1);
+    expect(mage.skill.statScaling).toBe('INT');
+    expect(mage.skill.cooldown).toBe(0);
+  });
+
+  it('returns null for unknown class', () => {
+    expect(createStarterWeapon('rogue')).toBeNull();
   });
 });
 

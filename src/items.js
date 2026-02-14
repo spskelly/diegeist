@@ -37,6 +37,51 @@ const SKILL_POOL = [
   { name: 'Frost Nova', description: 'AoE around caster, slows enemies', range: 0, area: { type: 'circle', size: 3 }, statScaling: 'INT', baseDamage: 3 },
 ];
 
+const STARTER_CLASS_WEAPONS = {
+  fighter: {
+    name: 'Rusty Sword',
+    slot: 'leftHand',
+    type: 'weapon',
+    statBonuses: { STR: 1 },
+    skill: null,
+    description: 'A worn blade, but still reliable in close quarters.',
+  },
+  archer: {
+    name: 'Training Bow',
+    slot: 'leftHand',
+    type: 'weapon',
+    statBonuses: { DEX: 1 },
+    skill: {
+      name: 'Quick Shot',
+      description: 'Basic ranged attack against the nearest visible foe.',
+      cooldown: 0,
+      currentCooldown: 0,
+      range: 6,
+      area: { type: 'single', size: 1 },
+      damage: 3,
+      statScaling: 'DEX',
+    },
+    description: 'A simple short bow built for fast shots.',
+  },
+  mage: {
+    name: 'Apprentice Wand',
+    slot: 'leftHand',
+    type: 'weapon',
+    statBonuses: { INT: 1 },
+    skill: {
+      name: 'Arc Bolt',
+      description: 'Basic magical bolt against the nearest visible foe.',
+      cooldown: 0,
+      currentCooldown: 0,
+      range: 6,
+      area: { type: 'single', size: 1 },
+      damage: 3,
+      statScaling: 'INT',
+    },
+    description: 'A beginner focus for channeling raw arcane force.',
+  },
+};
+
 const RARITY_CONFIG = {
   common:    { statMultiplier: 1.0, maxBonuses: 2, skillChance: 0.10, cooldownRange: [6, 8], dropWeight: 50 },
   uncommon:  { statMultiplier: 1.3, maxBonuses: 3, skillChance: 0.30, cooldownRange: [5, 7], dropWeight: 30 },
@@ -165,5 +210,28 @@ export function generateConsumable(floorLevel) {
     description: `${template.name}.`,
     sprite: 'consumable',
     stackable: true,
+  };
+}
+
+export function createStarterWeapon(classKey) {
+  const template = STARTER_CLASS_WEAPONS[classKey];
+  if (!template) return null;
+
+  return {
+    id: `item_${nextItemId++}`,
+    name: template.name,
+    type: template.type,
+    rarity: 'common',
+    slot: template.slot,
+    statBonuses: { ...template.statBonuses },
+    skill: template.skill
+      ? {
+        ...template.skill,
+        area: { ...template.skill.area },
+      }
+      : null,
+    floorLevel: 1,
+    description: template.description,
+    sprite: template.name.toLowerCase().replace(/\s+/g, '_'),
   };
 }
