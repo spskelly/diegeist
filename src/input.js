@@ -20,6 +20,12 @@ const KEY_MAP = {
   '1':        { type: 'belt', slot: 0 },
   '2':        { type: 'belt', slot: 1 },
   '3':        { type: 'belt', slot: 2 },
+  Enter:      { type: 'inventoryConfirm' },
+  z:          { type: 'inventoryConfirm' },
+  x:          { type: 'inventoryDrop' },
+  c:          { type: 'inventoryBelt' },
+  u:          { type: 'inventoryUnequip' },
+  p:          { type: 'stats' },
 };
 
 export function mapKeyToAction(key) {

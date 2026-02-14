@@ -136,6 +136,36 @@ export const SPRITE_DEFINITIONS = {
       ctx.fillRect(7, 6, 2, 4);
     },
   },
+  bat: {
+    size: 16,
+    draw(ctx) {
+      ctx.fillStyle = '#2b2f44';
+      ctx.fillRect(2, 7, 5, 3);
+      ctx.fillRect(9, 7, 5, 3);
+      ctx.fillStyle = '#3e4663';
+      ctx.fillRect(5, 6, 6, 4);
+      ctx.fillStyle = '#252a3a';
+      ctx.fillRect(6, 10, 4, 2);
+      ctx.fillStyle = '#d84a4a';
+      ctx.fillRect(7, 7, 1, 1);
+      ctx.fillRect(9, 7, 1, 1);
+    },
+  },
+  cultist: {
+    size: 16,
+    draw(ctx) {
+      ctx.fillStyle = '#4a2b62';
+      ctx.fillRect(5, 5, 6, 8);
+      ctx.fillStyle = '#2d193b';
+      ctx.fillRect(4, 8, 8, 5);
+      ctx.fillStyle = '#d2b48c';
+      ctx.fillRect(6, 3, 4, 3);
+      ctx.fillStyle = '#6f4a8a';
+      ctx.fillRect(5, 2, 6, 2);
+      ctx.fillStyle = '#9a73b4';
+      ctx.fillRect(7, 8, 2, 3);
+    },
+  },
   rat: {
     size: 16,
     draw(ctx) {

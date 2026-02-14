@@ -51,8 +51,16 @@ describe('mapKeyToAction', () => {
   });
 
   it('returns null for unmapped keys', () => {
-    expect(mapKeyToAction('z')).toBeNull();
     expect(mapKeyToAction('F1')).toBeNull();
-    expect(mapKeyToAction('x')).toBeNull();
+    expect(mapKeyToAction('~')).toBeNull();
+  });
+
+  it('maps inventory overlay action keys', () => {
+    expect(mapKeyToAction('Enter')).toEqual({ type: 'inventoryConfirm' });
+    expect(mapKeyToAction('z')).toEqual({ type: 'inventoryConfirm' });
+    expect(mapKeyToAction('x')).toEqual({ type: 'inventoryDrop' });
+    expect(mapKeyToAction('c')).toEqual({ type: 'inventoryBelt' });
+    expect(mapKeyToAction('u')).toEqual({ type: 'inventoryUnequip' });
+    expect(mapKeyToAction('p')).toEqual({ type: 'stats' });
   });
 });
