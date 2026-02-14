@@ -20,12 +20,13 @@ import {
   autoEquipIfSlotEmpty,
   equipItem,
   getEquippedStats,
+  refillBeltSlotWithMatchingConsumable,
   removeFromInventory,
   unequipItem,
   useBeltSlot
 } from './inventory.js';
 import { canUseSkill, tickCooldowns, updateActiveSkills, useSkill } from './skills.js';
-import { loadSaveData, persistSaveData } from './progression.js';
+import { ACHIEVEMENTS, HubShop, loadSaveData, persistSaveData } from './progression.js';
 import { AudioManager } from './audio.js';
 
 export class Game {
@@ -58,6 +59,18 @@ export class Game {
     this.startMenuIndex = 0;
     this.postDeathMenuIndex = 0;
     this.deathSplashFrames = 0;
+    this.hubMenuIndex = 0;
+    this.hubShopCursor = 0;
+    this.hubStashCursor = 0;
+    this.hubRunItemsCursor = 0;
+    this.hubAchievementsCursor = 0;
+    this.hubStashPane = 'stash';
+    this.hubNotice = '';
+    this.hubRunCarryover = [];
+    this.hubCanStashMultipleFromRun = false;
+    this.hubStashedFromRunCount = 0;
+    this.pendingStashLoadoutItem = null;
+    this.hubShop = new HubShop();
     this.combatVfx = { floatingTexts: [], projectiles: [] };
   }
 
@@ -78,6 +91,8 @@ export class Game {
     this.audio = new AudioManager();
     this.audio.init();
     this.audio.setVolume(this.saveData.settings?.volume ?? 0.7);
+    if (!Array.isArray(this.saveData.pendingRunPurchases)) this.saveData.pendingRunPurchases = [];
+    this.refreshHubShop();
 
     this.resizeCanvas();
     this.sprites.init();
@@ -159,6 +174,278 @@ export class Game {
       legendary: '#ffd36a',
     };
     return colors[rarity] || fallback;
+  }
+
+  cloneItem(item) {
+    if (!item) return null;
+    return {
+      ...item,
+      statBonuses: { ...(item.statBonuses || {}) },
+      skill: item.skill
+        ? {
+          ...item.skill,
+          area: item.skill.area ? { ...item.skill.area } : null,
+        }
+        : null,
+    };
+  }
+
+  refreshHubShop() {
+    if (!this.hubShop) this.hubShop = new HubShop();
+    this.hubShop.generate(this.saveData?.shopPurchases || []);
+    this.hubShopCursor = 0;
+  }
+
+  enterHubMenu(notice = '') {
+    this.state = 'hubMenu';
+    this.hubMenuIndex = 0;
+    this.hubStashPane = 'stash';
+    this.hubStashCursor = 0;
+    this.hubRunItemsCursor = 0;
+    this.hubAchievementsCursor = 0;
+    if (notice) this.hubNotice = notice;
+    this.refreshHubShop();
+    if (this.audio) this.audio.uiClick();
+  }
+
+  captureRunItemsForHub(victory = false) {
+    const sourceItems = [];
+    if (this.player) {
+      for (const item of this.player.inventory) {
+        sourceItems.push(this.cloneItem(item));
+      }
+      for (const item of Object.values(this.player.equipment)) {
+        if (item) sourceItems.push(this.cloneItem(item));
+      }
+    }
+    this.hubRunCarryover = sourceItems;
+    this.hubCanStashMultipleFromRun = !!victory;
+    this.hubStashedFromRunCount = 0;
+    this.hubRunItemsCursor = 0;
+  }
+
+  ensureAchievementRecord(achievementId) {
+    if (!this.saveData.achievements[achievementId]) {
+      this.saveData.achievements[achievementId] = { progress: 0, unlocked: false };
+    }
+    return this.saveData.achievements[achievementId];
+  }
+
+  applyAchievementBonus(achievement) {
+    if (!achievement || !achievement.bonus || !this.saveData) return;
+    const bonus = achievement.bonus;
+    if (bonus.type === 'stat' && bonus.stat && bonus.value) {
+      this.saveData.addPermanentStat(bonus.stat, bonus.value);
+      return;
+    }
+    if (bonus.type === 'unlock' && bonus.item) {
+      if (!Array.isArray(this.saveData.shopPurchases)) this.saveData.shopPurchases = [];
+      if (!this.saveData.shopPurchases.includes(`unlock:${bonus.item}`)) {
+        this.saveData.shopPurchases.push(`unlock:${bonus.item}`);
+      }
+    }
+  }
+
+  addAchievementProgress(achievementId, amount = 1) {
+    if (!this.saveData) return;
+    const achievement = ACHIEVEMENTS.find(a => a.id === achievementId);
+    if (!achievement) return;
+    const record = this.ensureAchievementRecord(achievementId);
+    const current = record.progress || 0;
+    const next = Math.max(current, current + Math.max(0, amount));
+    record.progress = next;
+    if (!record.unlocked && next >= (achievement.condition?.count || 1)) {
+      record.unlocked = true;
+      this.applyAchievementBonus(achievement);
+      if (this.state === 'playing') {
+        this.messageLog.add(`Achievement unlocked: ${achievement.name}`, this.turnCount);
+      } else {
+        this.hubNotice = `Achievement unlocked: ${achievement.name}`;
+      }
+    }
+  }
+
+  setAchievementProgress(achievementId, value) {
+    if (!this.saveData) return;
+    const achievement = ACHIEVEMENTS.find(a => a.id === achievementId);
+    if (!achievement) return;
+    const record = this.ensureAchievementRecord(achievementId);
+    const next = Math.max(record.progress || 0, Math.max(0, value));
+    record.progress = next;
+    if (!record.unlocked && next >= (achievement.condition?.count || 1)) {
+      record.unlocked = true;
+      this.applyAchievementBonus(achievement);
+      this.hubNotice = `Achievement unlocked: ${achievement.name}`;
+    }
+  }
+
+  syncMilestoneAchievements() {
+    if (!this.saveData) return;
+    if (this.floorNumber >= 5) {
+      this.setAchievementProgress('descent', this.floorNumber);
+    }
+    if (this.floorNumber >= 10) {
+      this.setAchievementProgress('deep_dweller', this.floorNumber);
+    }
+  }
+
+  makeCommonSword() {
+    return {
+      id: `shop_item_${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
+      name: 'Common Sword',
+      type: 'weapon',
+      rarity: 'common',
+      slot: 'leftHand',
+      statBonuses: { STR: 1 },
+      skill: null,
+      floorLevel: 1,
+      description: 'A basic sword purchased from the hub.',
+      sprite: 'sword',
+    };
+  }
+
+  makeMinorHealthPotion() {
+    return {
+      id: `shop_item_${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
+      name: 'Minor Health Potion',
+      type: 'consumable',
+      rarity: 'common',
+      slot: null,
+      statBonuses: {},
+      skill: null,
+      effect: 'heal',
+      magnitude: 0.25,
+      floorLevel: 1,
+      description: 'Minor Health Potion.',
+      sprite: 'consumable',
+      stackable: true,
+    };
+  }
+
+  applyPendingHubLoadout() {
+    if (!this.player || !this.saveData) return;
+
+    if (this.pendingStashLoadoutItem) {
+      const stashItem = this.cloneItem(this.pendingStashLoadoutItem);
+      stashItem.id = `stash_loadout_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+      if (addToInventory(this.player, stashItem)) {
+        if (stashItem.slot && autoEquipIfSlotEmpty(this.player, stashItem.id)) {
+          updateActiveSkills(this.player);
+          this.messageLog.add(`Stash loadout equipped: ${stashItem.name}.`, this.turnCount);
+        } else {
+          this.messageLog.add(`Stash loadout added: ${stashItem.name}.`, this.turnCount);
+        }
+      }
+      this.pendingStashLoadoutItem = null;
+    }
+
+    if (!Array.isArray(this.saveData.pendingRunPurchases) || this.saveData.pendingRunPurchases.length === 0) return;
+
+    const queued = this.saveData.pendingRunPurchases.slice();
+    this.saveData.pendingRunPurchases = [];
+    for (const purchaseId of queued) {
+      if (purchaseId === 'starting_sword') {
+        const sword = this.makeCommonSword();
+        if (!addToInventory(this.player, sword)) continue;
+        if (autoEquipIfSlotEmpty(this.player, sword.id)) {
+          updateActiveSkills(this.player);
+        }
+        this.messageLog.add('Shop bonus applied: Common Sword.', this.turnCount);
+      } else if (purchaseId === 'starting_potions') {
+        let granted = 0;
+        for (let i = 0; i < 3; i++) {
+          const potion = this.makeMinorHealthPotion();
+          if (!addToInventory(this.player, potion)) break;
+          granted++;
+          const freeBeltSlot = this.player.belt.findIndex(s => s === null);
+          if (freeBeltSlot !== -1) assignToBelt(this.player, potion.id, freeBeltSlot);
+        }
+        if (granted > 0) this.messageLog.add(`Shop bonus applied: ${granted}x Minor Health Potion.`, this.turnCount);
+      }
+    }
+    persistSaveData(this.saveData);
+  }
+
+  getInventoryCapacity() {
+    return 12;
+  }
+
+  getInventoryGridColumns() {
+    return 4;
+  }
+
+  truncateLabel(text, maxChars = 12) {
+    if (!text) return '';
+    if (text.length <= maxChars) return text;
+    return `${text.slice(0, Math.max(1, maxChars - 1))}.`;
+  }
+
+  drawInventoryItemIcon(ctx, item, x, y, size) {
+    if (!item) return;
+
+    const sprite = item.sprite ? this.sprites.get(item.sprite) : null;
+    if (sprite) {
+      ctx.drawImage(sprite, x, y, size, size);
+      return;
+    }
+
+    const px = Math.floor(x);
+    const py = Math.floor(y);
+    const s = Math.floor(size);
+    const inner = Math.max(2, Math.floor(s * 0.2));
+    const w = s - inner * 2;
+    const h = s - inner * 2;
+
+    if (item.type === 'weapon') {
+      ctx.fillStyle = '#e4c580';
+      ctx.fillRect(px + inner + Math.floor(w * 0.52), py + inner, Math.max(2, Math.floor(w * 0.16)), h);
+      ctx.fillStyle = '#7d5b3f';
+      ctx.fillRect(px + inner + Math.floor(w * 0.45), py + inner + Math.floor(h * 0.58), Math.max(2, Math.floor(w * 0.3)), Math.max(2, Math.floor(h * 0.18)));
+      return;
+    }
+
+    if (item.type === 'armor') {
+      ctx.fillStyle = '#95b0c9';
+      if (item.slot === 'head') {
+        ctx.fillRect(px + inner + Math.floor(w * 0.2), py + inner + Math.floor(h * 0.2), Math.floor(w * 0.6), Math.floor(h * 0.45));
+        ctx.fillRect(px + inner + Math.floor(w * 0.3), py + inner + Math.floor(h * 0.62), Math.floor(w * 0.4), Math.floor(h * 0.18));
+      } else if (item.slot === 'legs') {
+        ctx.fillRect(px + inner + Math.floor(w * 0.25), py + inner + Math.floor(h * 0.15), Math.floor(w * 0.2), Math.floor(h * 0.7));
+        ctx.fillRect(px + inner + Math.floor(w * 0.55), py + inner + Math.floor(h * 0.15), Math.floor(w * 0.2), Math.floor(h * 0.7));
+      } else {
+        ctx.fillRect(px + inner + Math.floor(w * 0.18), py + inner + Math.floor(h * 0.12), Math.floor(w * 0.64), Math.floor(h * 0.76));
+      }
+      return;
+    }
+
+    if (item.type === 'accessory') {
+      ctx.strokeStyle = '#e9d48e';
+      ctx.lineWidth = Math.max(2, Math.floor(s * 0.09));
+      ctx.beginPath();
+      ctx.arc(px + Math.floor(s / 2), py + Math.floor(s / 2), Math.floor(w * 0.32), 0, Math.PI * 2);
+      ctx.stroke();
+      return;
+    }
+
+    if (item.type === 'consumable') {
+      const effectColor = item.effect === 'heal'
+        ? '#63d676'
+        : item.effect === 'aoe_damage'
+          ? '#ff9152'
+          : item.effect === 'teleport'
+            ? '#c092ff'
+            : item.effect === 'speed_boost'
+              ? '#ffd45a'
+              : '#7dc9ff';
+      ctx.fillStyle = effectColor;
+      ctx.fillRect(px + inner + Math.floor(w * 0.3), py + inner + Math.floor(h * 0.15), Math.floor(w * 0.4), Math.floor(h * 0.62));
+      ctx.fillStyle = '#d9e3ef';
+      ctx.fillRect(px + inner + Math.floor(w * 0.38), py + inner, Math.floor(w * 0.24), Math.floor(h * 0.16));
+      return;
+    }
+
+    ctx.fillStyle = '#8da1b5';
+    ctx.fillRect(px + inner, py + inner, w, h);
   }
 
   getPlayerWeaponMultiplier(damageType) {
@@ -400,7 +687,14 @@ export class Game {
   }
 
   clampInventoryCursor() {
-    const rows = this.inventoryTab === 'inventory' ? this.player.inventory : this.getEquipmentRows();
+    if (this.inventoryTab === 'inventory') {
+      const maxIndex = this.getInventoryCapacity() - 1;
+      const current = this.inventoryCursorByTab.inventory || 0;
+      this.inventoryCursorByTab.inventory = Math.max(0, Math.min(current, maxIndex));
+      return;
+    }
+
+    const rows = this.getEquipmentRows();
     const maxIndex = Math.max(0, rows.length - 1);
     const current = this.inventoryCursorByTab[this.inventoryTab] || 0;
     this.inventoryCursorByTab[this.inventoryTab] = Math.max(0, Math.min(current, maxIndex));
@@ -417,19 +711,42 @@ export class Game {
     if (this.audio) this.audio.uiClick();
   }
 
-  switchInventoryTab(direction) {
-    this.inventoryTab = direction > 0 ? 'equipment' : 'inventory';
+  switchInventoryTab(direction = 0) {
+    if (direction === 0) {
+      this.inventoryTab = this.inventoryTab === 'inventory' ? 'equipment' : 'inventory';
+    } else {
+      this.inventoryTab = direction > 0 ? 'equipment' : 'inventory';
+    }
     this.clampInventoryCursor();
     if (this.audio) this.audio.uiClick();
   }
 
-  moveInventoryCursor(delta) {
-    const rows = this.inventoryTab === 'inventory' ? this.player.inventory : this.getEquipmentRows();
+  moveEquipmentCursor(delta) {
+    const rows = this.getEquipmentRows();
     if (rows.length === 0) return;
     const current = this.inventoryCursorByTab[this.inventoryTab] || 0;
     const maxIndex = rows.length - 1;
     this.inventoryCursorByTab[this.inventoryTab] = Math.max(0, Math.min(current + delta, maxIndex));
     if (this.audio) this.audio.uiClick();
+  }
+
+  moveInventoryGridCursor(dx, dy) {
+    const cols = this.getInventoryGridColumns();
+    const capacity = this.getInventoryCapacity();
+    const rows = Math.ceil(capacity / cols);
+    const current = this.inventoryCursorByTab.inventory || 0;
+    let row = Math.floor(current / cols);
+    let col = current % cols;
+
+    row = Math.max(0, Math.min(rows - 1, row + (dy || 0)));
+    col = Math.max(0, Math.min(cols - 1, col + (dx || 0)));
+
+    let next = row * cols + col;
+    if (next >= capacity) next = capacity - 1;
+    this.inventoryCursorByTab.inventory = next;
+    if ((dx || 0) !== 0 || (dy || 0) !== 0) {
+      if (this.audio) this.audio.uiClick();
+    }
   }
 
   dropItemAtPlayer(item) {
@@ -471,13 +788,31 @@ export class Game {
       return;
     }
 
+    if (action.type === 'inventoryTab') {
+      this.switchInventoryTab(0);
+      return;
+    }
+
     if (action.type === 'move') {
-      if (action.dx !== 0) {
-        this.switchInventoryTab(action.dx);
+      if (this.inventoryTab === 'inventory') {
+        if (action.dx !== 0) {
+          const current = this.inventoryCursorByTab.inventory || 0;
+          const cols = this.getInventoryGridColumns();
+          const col = current % cols;
+          const atHorizontalEdge = (action.dx < 0 && col === 0) || (action.dx > 0 && col === cols - 1);
+          if (atHorizontalEdge) {
+            this.switchInventoryTab(0);
+            return;
+          }
+        }
+        this.moveInventoryGridCursor(action.dx, action.dy);
         return;
       }
-      if (action.dy !== 0) {
-        this.moveInventoryCursor(action.dy);
+
+      if (action.dx !== 0) {
+        this.switchInventoryTab(0);
+      } else if (action.dy !== 0) {
+        this.moveEquipmentCursor(action.dy);
       }
       return;
     }
@@ -562,6 +897,9 @@ export class Game {
         const amount = Math.max(1, Math.floor(this.player.maxHp * item.magnitude));
         this.player.heal(amount);
         const healed = this.player.hp - before;
+        if (healed > 0) {
+          this.addFloatingText(this.player.position.x, this.player.position.y, `+${healed} HP`, '#73e38e', 820);
+        }
         return `You drink ${item.name} and recover ${healed} HP.`;
       }
       case 'reveal_map': {
@@ -622,6 +960,10 @@ export class Game {
 
     const message = this.applyConsumable(item);
     this.messageLog.add(message, this.turnCount);
+    const replacement = refillBeltSlotWithMatchingConsumable(this.player, slot, item);
+    if (replacement) {
+      this.messageLog.add(`Belt slot ${slot + 1} refilled with ${replacement.name}.`, this.turnCount);
+    }
     if (this.audio) {
       if (item.effect === 'heal' || item.effect === 'speed_boost') this.audio.blessing();
       else if (item.effect === 'aoe_damage') this.audio.enemyHit();
@@ -682,6 +1024,12 @@ export class Game {
         weaponMultiplier,
       });
       this.addHitFeedback(enemy, result, 'player');
+      if (!result.dodged && damageType === 'magic') {
+        this.addAchievementProgress('arcane_mastery', result.damage);
+      }
+      if (this.player.playerClass === 'archer' && result.crit) {
+        this.addAchievementProgress('sharpshooter', 1);
+      }
       if (result.dodged) {
         dodgeCount++;
         continue;
@@ -711,6 +1059,9 @@ export class Game {
   handleEnemyDeath(enemy) {
     this.turnSystem.removeEntity(enemy.id);
     this.runSummary.enemiesKilled++;
+    if (enemy.name === 'Rat' || enemy.name === 'Elite Rat') {
+      this.addAchievementProgress('rat_slayer', 1);
+    }
 
     const killCurrency = (enemy.isElite ? 6 : 3) + Math.floor(Math.random() * (enemy.isElite ? 6 : 3));
     this.player.gold += killCurrency;
@@ -720,8 +1071,10 @@ export class Game {
       const victoryBonus = 120;
       this.player.gold += victoryBonus;
       this.runSummary.currencyEarned += victoryBonus;
+      this.addAchievementProgress('vanquisher', 1);
       this.messageLog.add('The Void Tyrant falls. You have conquered Diegeist.', this.turnCount);
       this.finalizeRun('Victory');
+      this.captureRunItemsForHub(true);
       this.state = 'victory';
       if (this.audio) this.audio.stopAmbient();
       return;
@@ -747,6 +1100,7 @@ export class Game {
     this.runFinalized = true;
     this.runSummary.causeOfDeath = causeOfDeath;
     this.runSummary.floorsReached = Math.max(this.runSummary.floorsReached, this.floorNumber);
+    this.syncMilestoneAchievements();
     this.saveData.addCurrency(this.runSummary.currencyEarned);
     this.saveData.addRunHistory({
       classKey: this.runSummary.classKey,
@@ -794,6 +1148,9 @@ export class Game {
     this.inventoryCursorByTab = { inventory: 0, equipment: 0 };
     this.deathSplashFrames = 0;
     this.postDeathMenuIndex = 0;
+    this.hubRunCarryover = [];
+    this.hubCanStashMultipleFromRun = false;
+    this.hubStashedFromRunCount = 0;
     this.runSummary = {
       classKey: this.selectedClass,
       floorsReached: 1,
@@ -811,6 +1168,10 @@ export class Game {
     if (action.type === 'move') {
       const delta = action.dy !== 0 ? action.dy : action.dx;
       if (delta !== 0) this.cycleClassSelection(delta);
+      return;
+    }
+    if (action.type === 'hub') {
+      this.enterHubMenu();
       return;
     }
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
@@ -833,7 +1194,7 @@ export class Game {
     if (action.type === 'move') {
       const delta = action.dy !== 0 ? action.dy : action.dx;
       if (delta !== 0) {
-        const optionCount = 2;
+        const optionCount = 3;
         this.postDeathMenuIndex = (this.postDeathMenuIndex + delta + optionCount) % optionCount;
         if (this.audio) this.audio.uiClick();
       }
@@ -846,6 +1207,8 @@ export class Game {
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
       if (this.postDeathMenuIndex === 0) {
         this.startNewRun();
+      } else if (this.postDeathMenuIndex === 1) {
+        this.enterHubMenu();
       } else {
         this.state = 'startMenu';
       }
@@ -854,9 +1217,175 @@ export class Game {
 
   handleVictoryAction(action) {
     if (!action) return;
+    if (action.type === 'hub') {
+      this.enterHubMenu('Victory rewards available in stash.');
+      return;
+    }
     if (action.type === 'inventoryConfirm' || action.type === 'wait' || action.type === 'close') {
       this.state = 'startMenu';
       if (this.audio) this.audio.uiClick();
+    }
+  }
+
+  getHubMenuOptions() {
+    return ['Start Run', 'Shop', 'Stash', 'Achievements', 'Back to Class Select'];
+  }
+
+  handleHubMenuAction(action) {
+    if (!action) return;
+    const options = this.getHubMenuOptions();
+    if (action.type === 'move') {
+      const delta = action.dy !== 0 ? action.dy : action.dx;
+      if (delta !== 0) {
+        this.hubMenuIndex = (this.hubMenuIndex + delta + options.length) % options.length;
+        if (this.audio) this.audio.uiClick();
+      }
+      return;
+    }
+    if (action.type === 'close') {
+      this.state = 'startMenu';
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      if (this.hubMenuIndex === 0) {
+        this.startNewRun();
+      } else if (this.hubMenuIndex === 1) {
+        this.state = 'hubShop';
+      } else if (this.hubMenuIndex === 2) {
+        this.state = 'hubStash';
+      } else if (this.hubMenuIndex === 3) {
+        this.state = 'hubAchievements';
+      } else {
+        this.state = 'startMenu';
+      }
+      if (this.audio) this.audio.uiClick();
+    }
+  }
+
+  handleHubShopAction(action) {
+    if (!action) return;
+    if (action.type === 'close') {
+      this.state = 'hubMenu';
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+    if (action.type === 'move') {
+      const delta = action.dy !== 0 ? action.dy : action.dx;
+      if (delta !== 0 && this.hubShop.items.length > 0) {
+        const count = this.hubShop.items.length;
+        this.hubShopCursor = (this.hubShopCursor + delta + count) % count;
+        if (this.audio) this.audio.uiClick();
+      }
+      return;
+    }
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      const item = this.hubShop.items[this.hubShopCursor];
+      if (!item) return;
+      const success = this.hubShop.purchase(this.saveData, item.id);
+      if (!success) {
+        this.hubNotice = `Not enough essence for ${item.name}.`;
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      this.hubNotice = `Purchased: ${item.name}.`;
+      persistSaveData(this.saveData);
+      this.hubShopCursor = Math.max(0, Math.min(this.hubShopCursor, this.hubShop.items.length - 1));
+      if (this.audio) this.audio.blessing();
+    }
+  }
+
+  getSelectedAchievement() {
+    if (ACHIEVEMENTS.length === 0) return null;
+    const idx = Math.max(0, Math.min(this.hubAchievementsCursor, ACHIEVEMENTS.length - 1));
+    return ACHIEVEMENTS[idx];
+  }
+
+  handleHubAchievementsAction(action) {
+    if (!action) return;
+    if (action.type === 'close') {
+      this.state = 'hubMenu';
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+    if (action.type === 'move') {
+      const delta = action.dy !== 0 ? action.dy : action.dx;
+      if (delta !== 0 && ACHIEVEMENTS.length > 0) {
+        this.hubAchievementsCursor = (this.hubAchievementsCursor + delta + ACHIEVEMENTS.length) % ACHIEVEMENTS.length;
+        if (this.audio) this.audio.uiClick();
+      }
+    }
+  }
+
+  getStashPaneItems() {
+    if (this.hubStashPane === 'stash') return this.saveData.stash || [];
+    return this.hubRunCarryover || [];
+  }
+
+  handleHubStashAction(action) {
+    if (!action) return;
+    if (action.type === 'close') {
+      this.state = 'hubMenu';
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+    if (action.type === 'move') {
+      if (action.dx !== 0 && this.hubRunCarryover.length > 0) {
+        this.hubStashPane = this.hubStashPane === 'stash' ? 'run' : 'stash';
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      if (action.dy !== 0) {
+        const items = this.getStashPaneItems();
+        if (items.length === 0) return;
+        if (this.hubStashPane === 'stash') {
+          this.hubStashCursor = (this.hubStashCursor + action.dy + items.length) % items.length;
+        } else {
+          this.hubRunItemsCursor = (this.hubRunItemsCursor + action.dy + items.length) % items.length;
+        }
+        if (this.audio) this.audio.uiClick();
+      }
+      return;
+    }
+
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      if (this.hubStashPane === 'stash') {
+        if (!this.saveData.stash || this.saveData.stash.length === 0) return;
+        const idx = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
+        const removed = this.saveData.removeFromStash(this.saveData.stash[idx].id);
+        if (!removed) return;
+        if (this.pendingStashLoadoutItem) {
+          this.saveData.addToStash(this.pendingStashLoadoutItem);
+        }
+        this.pendingStashLoadoutItem = this.cloneItem(removed);
+        this.hubNotice = `Selected run loadout: ${removed.name}.`;
+        this.hubStashCursor = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
+        persistSaveData(this.saveData);
+        if (this.audio) this.audio.itemPickup();
+        return;
+      }
+
+      if (!this.hubCanStashMultipleFromRun && this.hubStashedFromRunCount >= 1) {
+        this.hubNotice = 'Only one run item can be stashed after death.';
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      if (this.hubRunCarryover.length === 0) return;
+      const idx = Math.max(0, Math.min(this.hubRunItemsCursor, this.hubRunCarryover.length - 1));
+      const item = this.hubRunCarryover[idx];
+      const added = this.saveData.addToStash(this.cloneItem(item));
+      if (!added) {
+        this.hubNotice = 'Stash is full.';
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      this.hubRunCarryover.splice(idx, 1);
+      this.hubStashedFromRunCount++;
+      this.hubNotice = `Stashed: ${item.name}.`;
+      this.hubRunItemsCursor = Math.max(0, Math.min(this.hubRunItemsCursor, this.hubRunCarryover.length - 1));
+      this.setAchievementProgress('collector', this.saveData.stash.length);
+      persistSaveData(this.saveData);
+      if (this.audio) this.audio.itemPickup();
     }
   }
 
@@ -873,6 +1402,7 @@ export class Game {
     if (this.regenCounter < interval) return;
     this.regenCounter = 0;
     this.player.heal(1);
+    this.addFloatingText(this.player.position.x, this.player.position.y, '+1 HP', '#73e38e', 780);
     this.messageLog.add('You recover 1 HP naturally.', this.turnCount);
   }
 
@@ -1179,6 +1709,7 @@ export class Game {
       this.player.floorNumber = this.floorNumber;
       this.runSummary.classKey = this.player.playerClass;
       this.applyStarterLoadout();
+      this.applyPendingHubLoadout();
     } else {
       this.player.moveTo(startX, startY);
       this.player.floorNumber = this.floorNumber;
@@ -1327,6 +1858,9 @@ export class Game {
           weaponMultiplier: this.getPlayerWeaponMultiplier('melee'),
         });
         this.addHitFeedback(enemy, result, 'player');
+        if (this.player.playerClass === 'archer' && result.crit) {
+          this.addAchievementProgress('sharpshooter', 1);
+        }
 
         if (result.dodged) {
           this.messageLog.add(`The ${enemy.name} dodges your attack!`, this.turnCount);
@@ -1390,6 +1924,7 @@ export class Game {
       } else if (result.killed) {
         this.messageLog.add(`You have been slain by the ${entity.name}!`, this.turnCount);
         this.finalizeRun(entity.name);
+        this.captureRunItemsForHub(false);
         this.deathSplashFrames = 0;
         this.state = 'deathSplash';
         if (this.audio) this.audio.stopAmbient();
@@ -1456,6 +1991,8 @@ export class Game {
     this.runSummary.currencyEarned += floorReward;
     this.floorNumber++;
     this.runSummary.floorsReached = Math.max(this.runSummary.floorsReached, this.floorNumber);
+    this.syncMilestoneAchievements();
+    persistSaveData(this.saveData);
 
     // Clear old entities from turn system
     this.turnSystem = new TurnSystem();
@@ -1486,6 +2023,22 @@ export class Game {
       this.handleVictoryAction(action);
       return;
     }
+    if (this.state === 'hubMenu') {
+      this.handleHubMenuAction(action);
+      return;
+    }
+    if (this.state === 'hubShop') {
+      this.handleHubShopAction(action);
+      return;
+    }
+    if (this.state === 'hubStash') {
+      this.handleHubStashAction(action);
+      return;
+    }
+    if (this.state === 'hubAchievements') {
+      this.handleHubAchievementsAction(action);
+      return;
+    }
     if (this.state !== 'playing') return;
     if (!action) return;
 
@@ -1500,7 +2053,7 @@ export class Game {
       return;
     }
 
-    if (action.type === 'inventory') {
+    if (action.type === 'inventory' || action.type === 'inventoryTab') {
       this.toggleInventoryOverlay();
       return;
     }
@@ -1583,49 +2136,94 @@ export class Game {
     ctx.lineTo(x + listW, y + panelH - Math.round(56 * uiScale));
     ctx.stroke();
 
-    const rows = this.inventoryTab === 'inventory' ? this.player.inventory : this.getEquipmentRows();
-    const cursor = this.inventoryCursorByTab[this.inventoryTab] || 0;
-    const startY = y + Math.round(74 * uiScale);
-    const lineH = Math.round(21 * uiScale);
-    const visibleRows = Math.max(1, Math.floor((panelH - Math.round(140 * uiScale)) / lineH));
-    const startIndex = Math.max(0, Math.min(cursor - Math.floor(visibleRows / 2), Math.max(0, rows.length - visibleRows)));
-    const endIndex = Math.min(rows.length, startIndex + visibleRows);
+    if (this.inventoryTab === 'inventory') {
+      const capacity = this.getInventoryCapacity();
+      const cols = this.getInventoryGridColumns();
+      const rows = Math.ceil(capacity / cols);
+      const cursor = this.inventoryCursorByTab.inventory || 0;
+      const gridX = x + Math.round(20 * uiScale);
+      const gridY = y + Math.round(74 * uiScale);
+      const gridW = listW - Math.round(32 * uiScale);
+      const gridH = panelH - Math.round(150 * uiScale);
+      const gap = Math.max(4, Math.round(8 * uiScale));
+      const cellW = Math.floor((gridW - gap * (cols - 1)) / cols);
+      const cellH = Math.floor((gridH - gap * (rows - 1)) / rows);
+      const cellSize = Math.max(22, Math.min(cellW, cellH));
+      const iconSize = Math.max(12, Math.floor(cellSize * 0.42));
+      const titleY = gridY - Math.round(8 * uiScale);
 
-    ctx.font = `${Math.round(14 * uiScale)}px monospace`;
-    if (rows.length === 0) {
-      ctx.fillStyle = '#7d8894';
-      ctx.fillText(this.inventoryTab === 'inventory' ? '(no items)' : '(no equipment slots)', x + Math.round(20 * uiScale), startY);
-    }
+      ctx.fillStyle = '#a8b4c1';
+      ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+      ctx.fillText('Inventory Grid (Tab: switch panel)', gridX, titleY);
 
-    for (let i = startIndex; i < endIndex; i++) {
-      const rowY = startY + (i - startIndex) * lineH;
-      const selected = i === cursor;
-      if (selected) {
-        ctx.fillStyle = '#2a313a';
-        ctx.fillRect(
-          x + Math.round(14 * uiScale),
-          rowY - Math.round(14 * uiScale),
-          listW - Math.round(20 * uiScale),
-          Math.round(18 * uiScale)
-        );
+      for (let slotIndex = 0; slotIndex < capacity; slotIndex++) {
+        const col = slotIndex % cols;
+        const row = Math.floor(slotIndex / cols);
+        const cellX = gridX + col * (cellSize + gap);
+        const cellY = gridY + row * (cellSize + gap);
+        const item = this.player.inventory[slotIndex] || null;
+        const selected = slotIndex === cursor;
+
+        ctx.fillStyle = '#1d242d';
+        ctx.fillRect(cellX, cellY, cellSize, cellSize);
+        ctx.strokeStyle = selected ? '#f4f7fa' : '#495664';
+        ctx.lineWidth = selected ? Math.max(2, Math.floor(uiScale * 2)) : 1;
+        ctx.strokeRect(cellX, cellY, cellSize, cellSize);
+
+        if (item) {
+          const rarityColor = this.getRarityColor(item.rarity, '#768493');
+          const savedAlpha = ctx.globalAlpha;
+          ctx.globalAlpha = 0.26;
+          ctx.fillStyle = rarityColor;
+          ctx.fillRect(cellX + 1, cellY + 1, cellSize - 2, cellSize - 2);
+          ctx.globalAlpha = savedAlpha;
+
+          const iconX = cellX + Math.floor((cellSize - iconSize) / 2);
+          const iconY = cellY + Math.round(6 * uiScale);
+          this.drawInventoryItemIcon(ctx, item, iconX, iconY, iconSize);
+
+          ctx.fillStyle = selected ? '#ffffff' : this.getRarityColor(item.rarity, '#c3cbd4');
+          ctx.font = `${Math.max(8, Math.round(9 * uiScale))}px monospace`;
+          const label = this.truncateLabel(item.name, 12);
+          ctx.fillText(label, cellX + Math.round(4 * uiScale), cellY + cellSize - Math.round(6 * uiScale));
+        } else {
+          ctx.fillStyle = '#6f7b89';
+          ctx.font = `${Math.max(8, Math.round(9 * uiScale))}px monospace`;
+          ctx.fillText('(empty)', cellX + Math.round(4 * uiScale), cellY + cellSize - Math.round(6 * uiScale));
+        }
+
+        ctx.fillStyle = '#8e99a7';
+        ctx.font = `${Math.max(7, Math.round(8 * uiScale))}px monospace`;
+        ctx.fillText(`${slotIndex + 1}`, cellX + Math.round(3 * uiScale), cellY + Math.round(10 * uiScale));
+      }
+    } else {
+      const rows = this.getEquipmentRows();
+      const cursor = this.inventoryCursorByTab.equipment || 0;
+      const startY = y + Math.round(74 * uiScale);
+      const lineH = Math.round(21 * uiScale);
+      const visibleRows = Math.max(1, Math.floor((panelH - Math.round(140 * uiScale)) / lineH));
+      const startIndex = Math.max(0, Math.min(cursor - Math.floor(visibleRows / 2), Math.max(0, rows.length - visibleRows)));
+      const endIndex = Math.min(rows.length, startIndex + visibleRows);
+
+      ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+      if (rows.length === 0) {
+        ctx.fillStyle = '#7d8894';
+        ctx.fillText('(no equipment slots)', x + Math.round(20 * uiScale), startY);
       }
 
-      if (this.inventoryTab === 'inventory') {
-        const item = rows[i];
-        const slotText = item.slot ? ` [${this.formatSlotName(item.slot)}]` : '';
-        const baseX = x + Math.round(20 * uiScale);
-        const prefix = `${i + 1}. `;
-        ctx.fillStyle = selected ? '#ffffff' : '#c3cbd4';
-        ctx.fillText(prefix, baseX, rowY);
-        const nameX = baseX + ctx.measureText(prefix).width;
-        ctx.fillStyle = this.getRarityColor(item.rarity, selected ? '#ffffff' : '#c3cbd4');
-        ctx.fillText(item.name, nameX, rowY);
-        if (slotText) {
-          const suffixX = nameX + ctx.measureText(item.name).width;
-          ctx.fillStyle = selected ? '#ffffff' : '#c3cbd4';
-          ctx.fillText(slotText, suffixX, rowY);
+      for (let i = startIndex; i < endIndex; i++) {
+        const rowY = startY + (i - startIndex) * lineH;
+        const selected = i === cursor;
+        if (selected) {
+          ctx.fillStyle = '#2a313a';
+          ctx.fillRect(
+            x + Math.round(14 * uiScale),
+            rowY - Math.round(14 * uiScale),
+            listW - Math.round(20 * uiScale),
+            Math.round(18 * uiScale)
+          );
         }
-      } else {
+
         const row = rows[i];
         const baseX = x + Math.round(20 * uiScale);
         const label = `${this.formatSlotName(row.slot)}: `;
@@ -1664,7 +2262,7 @@ export class Game {
     ctx.fillStyle = '#94a0ad';
     ctx.font = `${Math.round(12 * uiScale)}px monospace`;
     ctx.fillText(
-      'Left/Right: switch tab  Up/Down: select  Z or Enter: equip/unequip',
+      'Arrows/WASD: move cursor  Tab/Left/Right: switch panel  Z/Enter: equip/unequip',
       x + Math.round(16 * uiScale),
       y + panelH - Math.round(40 * uiScale)
     );
@@ -1809,6 +2407,7 @@ export class Game {
     ctx.fillText(`Stored Essence: ${essence}`, x + Math.round(26 * uiScale), y + panelH - Math.round(46 * uiScale));
     ctx.fillStyle = '#7f94ab';
     ctx.fillText('Enter/Z: Start Run', x + Math.round(26 * uiScale), y + panelH - Math.round(22 * uiScale));
+    ctx.fillText('H: Hub Menu', x + Math.round(210 * uiScale), y + panelH - Math.round(22 * uiScale));
   }
 
   drawDeathSplash() {
@@ -1865,7 +2464,7 @@ export class Game {
     ctx.fillText(`Enemies Killed: ${this.runSummary?.enemiesKilled || 0}`, x + Math.round(20 * uiScale), y + Math.round(122 * uiScale));
     ctx.fillText(`Essence Earned: ${this.runSummary?.currencyEarned || 0}`, x + Math.round(20 * uiScale), y + Math.round(144 * uiScale));
 
-    const options = ['Retry', 'Main Menu'];
+    const options = ['Retry', 'Hub', 'Main Menu'];
     for (let i = 0; i < options.length; i++) {
       const selected = i === this.postDeathMenuIndex;
       if (selected) {
@@ -1917,6 +2516,257 @@ export class Game {
     ctx.fillStyle = '#86c99b';
     ctx.font = `${Math.round(12 * uiScale)}px monospace`;
     ctx.fillText('Press Enter to return to main menu', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
+    ctx.fillText('Press H to open Hub', x + Math.round(20 * uiScale), y + panelH - Math.round(36 * uiScale));
+  }
+
+  drawHubMenu() {
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+    const panelW = Math.min(Math.round(740 * uiScale), w - 40);
+    const panelH = Math.min(Math.round(430 * uiScale), h - 40);
+    const x = Math.floor((w - panelW) / 2);
+    const y = Math.floor((h - panelH) / 2);
+    const options = this.getHubMenuOptions();
+
+    ctx.fillStyle = '#0b0f16';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#171d28';
+    ctx.fillRect(x, y, panelW, panelH);
+    ctx.strokeStyle = '#4f6075';
+    ctx.strokeRect(x, y, panelW, panelH);
+
+    ctx.fillStyle = '#e8eef5';
+    ctx.font = `${Math.round(32 * uiScale)}px monospace`;
+    ctx.fillText('HUB', x + Math.round(20 * uiScale), y + Math.round(46 * uiScale));
+
+    ctx.fillStyle = '#b7c7d8';
+    ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+    ctx.fillText(`Essence: ${this.saveData?.currency || 0}`, x + Math.round(20 * uiScale), y + Math.round(78 * uiScale));
+    const pendingText = this.pendingStashLoadoutItem
+      ? `Pending loadout: ${this.pendingStashLoadoutItem.name}`
+      : 'Pending loadout: none';
+    ctx.fillText(pendingText, x + Math.round(220 * uiScale), y + Math.round(78 * uiScale));
+
+    const optionY = y + Math.round(130 * uiScale);
+    for (let i = 0; i < options.length; i++) {
+      const selected = i === this.hubMenuIndex;
+      if (selected) {
+        ctx.fillStyle = '#2b3a4d';
+        ctx.fillRect(x + Math.round(20 * uiScale), optionY - Math.round(20 * uiScale) + i * Math.round(38 * uiScale), Math.round(280 * uiScale), Math.round(28 * uiScale));
+      }
+      ctx.fillStyle = selected ? '#ffffff' : '#9db0c4';
+      ctx.font = `${Math.round(18 * uiScale)}px monospace`;
+      ctx.fillText(options[i], x + Math.round(30 * uiScale), optionY + i * Math.round(38 * uiScale));
+    }
+
+    ctx.fillStyle = '#9fb2c5';
+    ctx.font = `${Math.round(13 * uiScale)}px monospace`;
+    ctx.fillText(`Run stash candidates: ${this.hubRunCarryover.length}`, x + Math.round(340 * uiScale), y + Math.round(134 * uiScale));
+    ctx.fillText(`Last run: ${this.runSummary?.causeOfDeath || 'N/A'}`, x + Math.round(340 * uiScale), y + Math.round(156 * uiScale));
+    if (this.hubNotice) {
+      ctx.fillStyle = '#d9e7f5';
+      ctx.fillText(this.hubNotice, x + Math.round(340 * uiScale), y + Math.round(188 * uiScale));
+    }
+
+    ctx.fillStyle = '#7d8e9f';
+    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    ctx.fillText('Up/Down: Select  Enter/Z: Confirm  ESC: Back', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
+  }
+
+  drawHubShop() {
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+    const panelW = Math.min(Math.round(760 * uiScale), w - 40);
+    const panelH = Math.min(Math.round(450 * uiScale), h - 40);
+    const x = Math.floor((w - panelW) / 2);
+    const y = Math.floor((h - panelH) / 2);
+
+    ctx.fillStyle = '#0b0f16';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#171d28';
+    ctx.fillRect(x, y, panelW, panelH);
+    ctx.strokeStyle = '#4f6075';
+    ctx.strokeRect(x, y, panelW, panelH);
+
+    ctx.fillStyle = '#e8eef5';
+    ctx.font = `${Math.round(28 * uiScale)}px monospace`;
+    ctx.fillText('Hub Shop', x + Math.round(20 * uiScale), y + Math.round(42 * uiScale));
+    ctx.fillStyle = '#b7c7d8';
+    ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+    ctx.fillText(`Essence: ${this.saveData?.currency || 0}`, x + Math.round(20 * uiScale), y + Math.round(68 * uiScale));
+
+    const startY = y + Math.round(100 * uiScale);
+    const lineH = Math.round(32 * uiScale);
+    for (let i = 0; i < this.hubShop.items.length; i++) {
+      const item = this.hubShop.items[i];
+      const selected = i === this.hubShopCursor;
+      if (selected) {
+        ctx.fillStyle = '#2b3a4d';
+        ctx.fillRect(x + Math.round(18 * uiScale), startY - Math.round(18 * uiScale) + i * lineH, panelW - Math.round(36 * uiScale), Math.round(24 * uiScale));
+      }
+      ctx.fillStyle = selected ? '#ffffff' : '#b8c7d7';
+      ctx.font = `${Math.round(15 * uiScale)}px monospace`;
+      ctx.fillText(item.name, x + Math.round(28 * uiScale), startY + i * lineH);
+      ctx.fillStyle = '#8fa5bb';
+      ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+      ctx.fillText(`${item.category}  |  cost ${item.cost}`, x + Math.round(320 * uiScale), startY + i * lineH);
+    }
+    if (this.hubShop.items.length === 0) {
+      ctx.fillStyle = '#94a7bb';
+      ctx.fillText('No items available. Return to hub and refresh later.', x + Math.round(24 * uiScale), startY);
+    }
+    if (this.hubNotice) {
+      ctx.fillStyle = '#d9e7f5';
+      ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+      ctx.fillText(this.hubNotice, x + Math.round(20 * uiScale), y + panelH - Math.round(48 * uiScale));
+    }
+    ctx.fillStyle = '#7d8e9f';
+    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    ctx.fillText('Up/Down: Select  Enter/Z: Buy  ESC: Back', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
+  }
+
+  drawHubStash() {
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+    const panelW = Math.min(Math.round(860 * uiScale), w - 40);
+    const panelH = Math.min(Math.round(460 * uiScale), h - 40);
+    const x = Math.floor((w - panelW) / 2);
+    const y = Math.floor((h - panelH) / 2);
+    const paneW = Math.floor((panelW - Math.round(56 * uiScale)) / 2);
+    const leftX = x + Math.round(20 * uiScale);
+    const rightX = leftX + paneW + Math.round(16 * uiScale);
+    const startY = y + Math.round(90 * uiScale);
+    const lineH = Math.round(24 * uiScale);
+
+    ctx.fillStyle = '#0b0f16';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#171d28';
+    ctx.fillRect(x, y, panelW, panelH);
+    ctx.strokeStyle = '#4f6075';
+    ctx.strokeRect(x, y, panelW, panelH);
+
+    ctx.fillStyle = '#e8eef5';
+    ctx.font = `${Math.round(28 * uiScale)}px monospace`;
+    ctx.fillText('Stash', x + Math.round(20 * uiScale), y + Math.round(42 * uiScale));
+    ctx.fillStyle = '#a7b7c7';
+    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    ctx.fillText('Left pane: persistent stash  |  Right pane: last run items', x + Math.round(20 * uiScale), y + Math.round(66 * uiScale));
+
+    ctx.strokeStyle = this.hubStashPane === 'stash' ? '#d9ecff' : '#394754';
+    ctx.strokeRect(leftX, y + Math.round(78 * uiScale), paneW, panelH - Math.round(132 * uiScale));
+    ctx.strokeStyle = this.hubStashPane === 'run' ? '#d9ecff' : '#394754';
+    ctx.strokeRect(rightX, y + Math.round(78 * uiScale), paneW, panelH - Math.round(132 * uiScale));
+
+    ctx.fillStyle = '#d7e3f0';
+    ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+    ctx.fillText(`Stash (${this.saveData.stash.length})`, leftX + Math.round(8 * uiScale), y + Math.round(98 * uiScale));
+    ctx.fillText(`Run Items (${this.hubRunCarryover.length})`, rightX + Math.round(8 * uiScale), y + Math.round(98 * uiScale));
+
+    const stashItems = this.saveData.stash || [];
+    for (let i = 0; i < Math.min(12, stashItems.length); i++) {
+      const selected = this.hubStashPane === 'stash' && i === this.hubStashCursor;
+      if (selected) {
+        ctx.fillStyle = '#2b3a4d';
+        ctx.fillRect(leftX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + i * lineH, paneW - Math.round(12 * uiScale), Math.round(20 * uiScale));
+      }
+      ctx.fillStyle = selected ? '#ffffff' : this.getRarityColor(stashItems[i].rarity, '#b6c6d6');
+      ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+      ctx.fillText(this.truncateLabel(stashItems[i].name, 24), leftX + Math.round(10 * uiScale), startY + i * lineH);
+    }
+
+    for (let i = 0; i < Math.min(12, this.hubRunCarryover.length); i++) {
+      const selected = this.hubStashPane === 'run' && i === this.hubRunItemsCursor;
+      if (selected) {
+        ctx.fillStyle = '#2b3a4d';
+        ctx.fillRect(rightX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + i * lineH, paneW - Math.round(12 * uiScale), Math.round(20 * uiScale));
+      }
+      const item = this.hubRunCarryover[i];
+      ctx.fillStyle = selected ? '#ffffff' : this.getRarityColor(item.rarity, '#b6c6d6');
+      ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+      ctx.fillText(this.truncateLabel(item.name, 24), rightX + Math.round(10 * uiScale), startY + i * lineH);
+    }
+
+    ctx.fillStyle = '#d9e7f5';
+    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    const pending = this.pendingStashLoadoutItem ? this.pendingStashLoadoutItem.name : 'none';
+    ctx.fillText(`Pending loadout item: ${pending}`, x + Math.round(20 * uiScale), y + panelH - Math.round(48 * uiScale));
+    if (this.hubNotice) ctx.fillText(this.hubNotice, x + Math.round(20 * uiScale), y + panelH - Math.round(30 * uiScale));
+
+    ctx.fillStyle = '#7d8e9f';
+    ctx.fillText('Left/Right: switch pane  Up/Down: select  Enter/Z: move item  ESC: Back', x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
+  }
+
+  drawHubAchievements() {
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+    const panelW = Math.min(Math.round(860 * uiScale), w - 40);
+    const panelH = Math.min(Math.round(460 * uiScale), h - 40);
+    const x = Math.floor((w - panelW) / 2);
+    const y = Math.floor((h - panelH) / 2);
+    const listW = Math.round(panelW * 0.48);
+    const detailX = x + listW + Math.round(20 * uiScale);
+    const startY = y + Math.round(90 * uiScale);
+    const lineH = Math.round(26 * uiScale);
+
+    ctx.fillStyle = '#0b0f16';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#171d28';
+    ctx.fillRect(x, y, panelW, panelH);
+    ctx.strokeStyle = '#4f6075';
+    ctx.strokeRect(x, y, panelW, panelH);
+    ctx.beginPath();
+    ctx.moveTo(x + listW, y + Math.round(70 * uiScale));
+    ctx.lineTo(x + listW, y + panelH - Math.round(20 * uiScale));
+    ctx.stroke();
+
+    ctx.fillStyle = '#e8eef5';
+    ctx.font = `${Math.round(28 * uiScale)}px monospace`;
+    ctx.fillText('Achievements', x + Math.round(20 * uiScale), y + Math.round(42 * uiScale));
+
+    for (let i = 0; i < ACHIEVEMENTS.length; i++) {
+      const ach = ACHIEVEMENTS[i];
+      const record = this.saveData.achievements[ach.id] || { progress: 0, unlocked: false };
+      const selected = i === this.hubAchievementsCursor;
+      if (selected) {
+        ctx.fillStyle = '#2b3a4d';
+        ctx.fillRect(x + Math.round(16 * uiScale), startY - Math.round(17 * uiScale) + i * lineH, listW - Math.round(28 * uiScale), Math.round(22 * uiScale));
+      }
+      ctx.fillStyle = record.unlocked ? '#9ce2a3' : (selected ? '#ffffff' : '#b8c7d7');
+      ctx.font = `${Math.round(13 * uiScale)}px monospace`;
+      ctx.fillText(`${ach.name}`, x + Math.round(22 * uiScale), startY + i * lineH);
+    }
+
+    const selectedAchievement = this.getSelectedAchievement();
+    if (selectedAchievement) {
+      const record = this.saveData.achievements[selectedAchievement.id] || { progress: 0, unlocked: false };
+      const target = selectedAchievement.condition?.count || 1;
+      ctx.fillStyle = '#d7e3f0';
+      ctx.font = `${Math.round(16 * uiScale)}px monospace`;
+      ctx.fillText(selectedAchievement.name, detailX, y + Math.round(96 * uiScale));
+      ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+      ctx.fillStyle = '#afc0d2';
+      ctx.fillText(selectedAchievement.description, detailX, y + Math.round(124 * uiScale));
+      ctx.fillText(`Progress: ${Math.min(record.progress || 0, target)} / ${target}`, detailX, y + Math.round(148 * uiScale));
+      ctx.fillStyle = record.unlocked ? '#9ce2a3' : '#c8d4e0';
+      ctx.fillText(record.unlocked ? 'Unlocked' : 'Locked', detailX, y + Math.round(172 * uiScale));
+    }
+
+    if (this.hubNotice) {
+      ctx.fillStyle = '#d9e7f5';
+      ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+      ctx.fillText(this.hubNotice, x + Math.round(20 * uiScale), y + panelH - Math.round(34 * uiScale));
+    }
+    ctx.fillStyle = '#7d8e9f';
+    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    ctx.fillText('Up/Down: Select  ESC: Back', x + Math.round(20 * uiScale), y + panelH - Math.round(14 * uiScale));
   }
 
   draw(nowMs = this.getNowMs()) {
@@ -1932,6 +2782,22 @@ export class Game {
 
     if (this.state === 'victory') {
       this.drawVictoryScreen();
+      return;
+    }
+    if (this.state === 'hubMenu') {
+      this.drawHubMenu();
+      return;
+    }
+    if (this.state === 'hubShop') {
+      this.drawHubShop();
+      return;
+    }
+    if (this.state === 'hubStash') {
+      this.drawHubStash();
+      return;
+    }
+    if (this.state === 'hubAchievements') {
+      this.drawHubAchievements();
       return;
     }
 

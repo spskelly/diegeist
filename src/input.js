@@ -10,7 +10,7 @@ const KEY_MAP = {
   ' ':        { type: 'wait' },
   '.':        { type: 'wait' },
   i:          { type: 'inventory' },
-  Tab:        { type: 'inventory' },
+  Tab:        { type: 'inventoryTab' },
   g:          { type: 'pickup' },
   '>':        { type: 'descend' },
   Escape:     { type: 'close' },
@@ -26,6 +26,7 @@ const KEY_MAP = {
   c:          { type: 'inventoryBelt' },
   u:          { type: 'inventoryUnequip' },
   p:          { type: 'stats' },
+  h:          { type: 'hub' },
 };
 
 export function mapKeyToAction(key) {

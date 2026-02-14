@@ -12,6 +12,7 @@ describe('SaveData', () => {
     expect(save.stash).toEqual([]);
     expect(save.achievements).toEqual({});
     expect(save.shopPurchases).toEqual([]);
+    expect(save.pendingRunPurchases).toEqual([]);
     expect(save.permanentStats).toEqual({});
     expect(save.permanentPerks).toEqual([]);
     expect(save.runHistory).toEqual([]);
@@ -116,6 +117,18 @@ describe('HubShop', () => {
       expect(item.cost).toBeGreaterThan(0);
       expect(item.category).toBeDefined();
     }
+  });
+
+  it('queues non-permanent purchases for next run', () => {
+    const shop = new HubShop();
+    const save = new SaveData();
+    save.addCurrency(1000);
+    shop.items = [{ id: 'starting_potions', name: 'Start with 3x Health Potions', cost: 40, category: 'consumable_pack', oneTime: false }];
+
+    const result = shop.purchase(save, 'starting_potions');
+
+    expect(result).toBe(true);
+    expect(save.pendingRunPurchases).toContain('starting_potions');
   });
 });
 

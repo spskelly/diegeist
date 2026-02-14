@@ -23,7 +23,7 @@ describe('mapKeyToAction', () => {
 
   it('maps inventory key', () => {
     expect(mapKeyToAction('i')).toEqual({ type: 'inventory' });
-    expect(mapKeyToAction('Tab')).toEqual({ type: 'inventory' });
+    expect(mapKeyToAction('Tab')).toEqual({ type: 'inventoryTab' });
   });
 
   it('maps belt keys', () => {
@@ -40,6 +40,10 @@ describe('mapKeyToAction', () => {
 
   it('maps pickup key', () => {
     expect(mapKeyToAction('g')).toEqual({ type: 'pickup' });
+  });
+
+  it('maps hub key', () => {
+    expect(mapKeyToAction('h')).toEqual({ type: 'hub' });
   });
 
   it('maps descend key', () => {

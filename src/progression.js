@@ -33,6 +33,7 @@ export class SaveData {
     this.stash = [];
     this.achievements = {};
     this.shopPurchases = [];
+    this.pendingRunPurchases = [];
     this.permanentStats = {};
     this.permanentPerks = [];
     this.runHistory = [];
@@ -88,6 +89,7 @@ export class SaveData {
       stash: this.stash,
       achievements: this.achievements,
       shopPurchases: this.shopPurchases,
+      pendingRunPurchases: this.pendingRunPurchases,
       permanentStats: this.permanentStats,
       permanentPerks: this.permanentPerks,
       runHistory: this.runHistory,
@@ -132,6 +134,9 @@ export class HubShop {
     } else if (item.category === 'permanent_perk') {
       save.addPerk(item.perkId);
       save.shopPurchases.push(item.id);
+    } else if (item.category === 'starting_gear' || item.category === 'consumable_pack') {
+      if (!Array.isArray(save.pendingRunPurchases)) save.pendingRunPurchases = [];
+      save.pendingRunPurchases.push(item.id);
     }
 
     this.items = this.items.filter(i => i.id !== itemId);
