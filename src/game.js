@@ -14,7 +14,16 @@ import { generateDungeon } from './dungeon-gen.js';
 import { resolveAttack } from './combat.js';
 import { getAIAction } from './ai.js';
 import { generateItem, generateConsumable, createStarterWeapon } from './items.js';
-import { addToInventory, assignToBelt, equipItem, getEquippedStats, removeFromInventory, unequipItem, useBeltSlot } from './inventory.js';
+import {
+  addToInventory,
+  assignToBelt,
+  autoEquipIfSlotEmpty,
+  equipItem,
+  getEquippedStats,
+  removeFromInventory,
+  unequipItem,
+  useBeltSlot
+} from './inventory.js';
 import { canUseSkill, tickCooldowns, updateActiveSkills, useSkill } from './skills.js';
 import { loadSaveData, persistSaveData } from './progression.js';
 import { AudioManager } from './audio.js';
@@ -139,6 +148,17 @@ export class Game {
       legendary: 0.38,
     };
     return table[rarity] || 0;
+  }
+
+  getRarityColor(rarity, fallback = '#c3cbd4') {
+    const colors = {
+      common: '#c3cbd4',
+      uncommon: '#79d27e',
+      rare: '#6fb4ff',
+      epic: '#ff8f5b',
+      legendary: '#ffd36a',
+    };
+    return colors[rarity] || fallback;
   }
 
   getPlayerWeaponMultiplier(damageType) {
@@ -342,7 +362,15 @@ export class Game {
 
     this.map.items.splice(itemIndex, 1);
     this.messageLog.add(`You pick up ${item.name}.`, this.turnCount);
+    this.addFloatingText(x, y, item.name, this.getRarityColor(item.rarity, '#d6dce3'), 1050);
     if (this.audio) this.audio.itemPickup();
+
+    if (item.slot && autoEquipIfSlotEmpty(this.player, item.id)) {
+      updateActiveSkills(this.player);
+      this.messageLog.add(`${item.name} auto-equipped to ${this.formatSlotName(item.slot)}.`, this.turnCount);
+      if (this.audio) this.audio.uiClick();
+      return true;
+    }
 
     if (item.type === 'consumable') {
       const freeBeltSlot = this.player.belt.findIndex(s => s === null);
@@ -412,6 +440,30 @@ export class Game {
     this.messageLog.add(`You drop ${item.name}.`, this.turnCount);
   }
 
+  tryAssignSelectedInventoryItemToBelt(slot = null) {
+    if (this.inventoryTab !== 'inventory') {
+      this.messageLog.add('Switch to Items tab to assign belt slots.', this.turnCount);
+      return false;
+    }
+
+    const idx = this.inventoryCursorByTab.inventory || 0;
+    const item = this.player.inventory[idx];
+    if (!item) return false;
+    if (item.type !== 'consumable') {
+      this.messageLog.add('Only consumables can go in the belt.', this.turnCount);
+      return false;
+    }
+
+    let beltSlot = Number.isInteger(slot) ? slot : this.player.belt.findIndex(s => s === null);
+    if (beltSlot === -1) beltSlot = 0;
+    if (!assignToBelt(this.player, item.id, beltSlot)) return false;
+
+    this.messageLog.add(`${item.name} assigned to belt slot ${beltSlot + 1}.`, this.turnCount);
+    this.clampInventoryCursor();
+    if (this.audio) this.audio.uiClick();
+    return true;
+  }
+
   handleInventoryOverlayAction(action) {
     if (action.type === 'inventory' || action.type === 'close') {
       this.inventoryOpen = false;
@@ -427,6 +479,11 @@ export class Game {
       if (action.dy !== 0) {
         this.moveInventoryCursor(action.dy);
       }
+      return;
+    }
+
+    if (action.type === 'belt') {
+      this.tryAssignSelectedInventoryItemToBelt(action.slot);
       return;
     }
 
@@ -450,17 +507,7 @@ export class Game {
       }
 
       if (action.type === 'inventoryBelt') {
-        if (item.type !== 'consumable') {
-          this.messageLog.add('Only consumables can go in the belt.', this.turnCount);
-          return;
-        }
-        let beltSlot = this.player.belt.findIndex(s => s === null);
-        if (beltSlot === -1) beltSlot = 0;
-        if (assignToBelt(this.player, item.id, beltSlot)) {
-          this.messageLog.add(`${item.name} assigned to belt slot ${beltSlot + 1}.`, this.turnCount);
-          this.clampInventoryCursor();
-          if (this.audio) this.audio.uiClick();
-        }
+        this.tryAssignSelectedInventoryItemToBelt();
         return;
       }
 
@@ -899,6 +946,73 @@ export class Game {
 
     if (item.description) {
       lines.push(...this.wrapTextLines(item.description, 30));
+    }
+
+    const compareLines = this.getItemComparisonLines(item);
+    if (compareLines.length > 0) {
+      lines.push('');
+      lines.push(...compareLines);
+    }
+
+    return lines;
+  }
+
+  getItemComparisonLines(item) {
+    if (!this.player || !item || !item.slot) return [];
+
+    const equipped = this.player.equipment[item.slot] || null;
+    const slotName = this.formatSlotName(item.slot);
+
+    if (!equipped) {
+      return [`Compare (${slotName}): slot empty`];
+    }
+
+    const lines = [`Compare (${slotName}): ${equipped.name}`];
+    const candidateBonuses = item.statBonuses || {};
+    const equippedBonuses = equipped.statBonuses || {};
+    const statSet = new Set([
+      ...Object.keys(candidateBonuses),
+      ...Object.keys(equippedBonuses),
+    ]);
+
+    if (statSet.size === 0) {
+      lines.push('Stats: no bonus changes');
+    } else {
+      const sortedStats = Array.from(statSet).sort((a, b) => a.localeCompare(b));
+      for (const stat of sortedStats) {
+        const nextValue = candidateBonuses[stat] || 0;
+        const currentValue = equippedBonuses[stat] || 0;
+        const delta = nextValue - currentValue;
+        const deltaPrefix = delta > 0 ? '+' : '';
+        const direction = delta > 0 ? 'up' : delta < 0 ? 'down' : 'same';
+        lines.push(`${stat}: ${deltaPrefix}${delta} (${direction})`);
+      }
+    }
+
+    const rarityOrder = { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 };
+    const candidateRank = rarityOrder[item.rarity] ?? -1;
+    const equippedRank = rarityOrder[equipped.rarity] ?? -1;
+    if (candidateRank >= 0 && equippedRank >= 0) {
+      const rarityDelta = candidateRank - equippedRank;
+      if (rarityDelta > 0) {
+        lines.push(`Rarity: +${rarityDelta} tier`);
+      } else if (rarityDelta < 0) {
+        lines.push(`Rarity: ${rarityDelta} tier`);
+      } else {
+        lines.push('Rarity: same tier');
+      }
+    }
+
+    const nextSkill = item.skill?.name || null;
+    const currentSkill = equipped.skill?.name || null;
+    if (nextSkill && !currentSkill) {
+      lines.push(`Skill: gain ${nextSkill}`);
+    } else if (!nextSkill && currentSkill) {
+      lines.push(`Skill: lose ${currentSkill}`);
+    } else if (nextSkill && currentSkill && nextSkill !== currentSkill) {
+      lines.push(`Skill: ${currentSkill} -> ${nextSkill}`);
+    } else if (nextSkill && currentSkill && nextSkill === currentSkill) {
+      lines.push(`Skill: keep ${nextSkill}`);
     }
 
     return lines;
@@ -1499,14 +1613,32 @@ export class Game {
       if (this.inventoryTab === 'inventory') {
         const item = rows[i];
         const slotText = item.slot ? ` [${this.formatSlotName(item.slot)}]` : '';
+        const baseX = x + Math.round(20 * uiScale);
+        const prefix = `${i + 1}. `;
         ctx.fillStyle = selected ? '#ffffff' : '#c3cbd4';
-        ctx.fillText(`${i + 1}. ${item.name}${slotText}`, x + Math.round(20 * uiScale), rowY);
+        ctx.fillText(prefix, baseX, rowY);
+        const nameX = baseX + ctx.measureText(prefix).width;
+        ctx.fillStyle = this.getRarityColor(item.rarity, selected ? '#ffffff' : '#c3cbd4');
+        ctx.fillText(item.name, nameX, rowY);
+        if (slotText) {
+          const suffixX = nameX + ctx.measureText(item.name).width;
+          ctx.fillStyle = selected ? '#ffffff' : '#c3cbd4';
+          ctx.fillText(slotText, suffixX, rowY);
+        }
       } else {
         const row = rows[i];
-        const itemText = row.item ? row.item.name : '(empty)';
-        const color = row.item ? (selected ? '#ffffff' : '#c3cbd4') : '#7d8894';
-        ctx.fillStyle = color;
-        ctx.fillText(`${this.formatSlotName(row.slot)}: ${itemText}`, x + Math.round(20 * uiScale), rowY);
+        const baseX = x + Math.round(20 * uiScale);
+        const label = `${this.formatSlotName(row.slot)}: `;
+        ctx.fillStyle = selected ? '#ffffff' : '#c3cbd4';
+        ctx.fillText(label, baseX, rowY);
+        const itemX = baseX + ctx.measureText(label).width;
+        if (row.item) {
+          ctx.fillStyle = this.getRarityColor(row.item.rarity, selected ? '#ffffff' : '#c3cbd4');
+          ctx.fillText(row.item.name, itemX, rowY);
+        } else {
+          ctx.fillStyle = '#7d8894';
+          ctx.fillText('(empty)', itemX, rowY);
+        }
       }
     }
 
@@ -1521,7 +1653,11 @@ export class Game {
     for (let i = 0; i < Math.min(details.length, maxDetailRows); i++) {
       const line = details[i];
       const isTitle = i === 0;
-      ctx.fillStyle = isTitle ? '#ffffff' : '#b8c0ca';
+      if (isTitle && inspectTarget.item) {
+        ctx.fillStyle = this.getRarityColor(inspectTarget.item.rarity, '#ffffff');
+      } else {
+        ctx.fillStyle = isTitle ? '#ffffff' : '#b8c0ca';
+      }
       ctx.fillText(line, detailX, y + Math.round(90 * uiScale) + i * detailLineH);
     }
 
@@ -1533,7 +1669,7 @@ export class Game {
       y + panelH - Math.round(40 * uiScale)
     );
     ctx.fillText(
-      'X: drop  C: belt (consumable)  U: unequip  I/ESC: close',
+      '1/2/3: assign to belt slot  C: auto belt  X: drop  U: unequip  I/ESC: close',
       x + Math.round(16 * uiScale),
       y + panelH - Math.round(20 * uiScale)
     );
