@@ -5,6 +5,7 @@ import {
   addToInventory,
   removeFromInventory,
   assignToBelt,
+  refillBeltSlotWithMatchingConsumable,
   useBeltSlot,
   getEquippedStats,
   autoEquipIfSlotEmpty,
@@ -78,9 +79,12 @@ describe('equipItem', () => {
     addToInventory(p, item2);
     equipItem(p, item1.id);
     expect(p.equipment[item1.slot]).toEqual(item1);
+    const item2IndexBefore = p.inventory.findIndex(i => i.id === item2.id);
     equipItem(p, item2.id);
     expect(p.equipment[item1.slot]).toEqual(item2);
     expect(p.inventory).toContain(item1); // old item goes back to inventory
+    const item1IndexAfter = p.inventory.findIndex(i => i.id === item1.id);
+    expect(item1IndexAfter).toBe(item2IndexBefore);
   });
 });
 
@@ -194,6 +198,40 @@ describe('belt', () => {
     expect(p.belt[2]).toEqual(second);
     expect(p.inventory).toContain(first);
     expect(p.inventory).not.toContain(second);
+  });
+
+  it('auto-refills belt slot with matching consumable from inventory', () => {
+    const p = makePlayer();
+    const consumed = { id: 'c1', name: 'Minor Health Potion', type: 'consumable', effect: 'heal', rarity: 'common' };
+    const replacement = { id: 'c2', name: 'Minor Health Potion', type: 'consumable', effect: 'heal', rarity: 'common' };
+    const other = { id: 'c3', name: 'Bomb', type: 'consumable', effect: 'aoe_damage', rarity: 'uncommon' };
+    p.belt[1] = consumed;
+    p.inventory.push(replacement, other);
+
+    const used = useBeltSlot(p, 1);
+    const refilled = refillBeltSlotWithMatchingConsumable(p, 1, used);
+
+    expect(used).toEqual(consumed);
+    expect(refilled).toEqual(replacement);
+    expect(p.belt[1]).toEqual(replacement);
+    expect(p.inventory).toContain(other);
+    expect(p.inventory).not.toContain(replacement);
+  });
+
+  it('does not auto-refill when no matching consumable exists', () => {
+    const p = makePlayer();
+    const consumed = { id: 'c1', name: 'Minor Health Potion', type: 'consumable', effect: 'heal', rarity: 'common' };
+    const other = { id: 'c3', name: 'Major Health Potion', type: 'consumable', effect: 'heal', rarity: 'uncommon' };
+    p.belt[0] = consumed;
+    p.inventory.push(other);
+
+    const used = useBeltSlot(p, 0);
+    const refilled = refillBeltSlotWithMatchingConsumable(p, 0, used);
+
+    expect(used).toEqual(consumed);
+    expect(refilled).toBeNull();
+    expect(p.belt[0]).toBeNull();
+    expect(p.inventory).toContain(other);
   });
 
   it('returns null for empty belt slot', () => {

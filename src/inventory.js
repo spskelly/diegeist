@@ -11,12 +11,17 @@ export function removeFromInventory(entity, itemId) {
 }
 
 export function equipItem(entity, itemId) {
-  const item = removeFromInventory(entity, itemId);
+  const sourceIndex = entity.inventory.findIndex(i => i.id === itemId);
+  if (sourceIndex === -1) return false;
+  const item = entity.inventory[sourceIndex];
   if (!item || !item.slot) return false;
+
+  entity.inventory.splice(sourceIndex, 1);
 
   const currentlyEquipped = entity.equipment[item.slot];
   if (currentlyEquipped) {
-    entity.inventory.push(currentlyEquipped);
+    // Preserve the original grid slot when swapping gear.
+    entity.inventory.splice(Math.min(sourceIndex, entity.inventory.length), 0, currentlyEquipped);
   }
 
   entity.equipment[item.slot] = item;
@@ -77,4 +82,22 @@ export function useBeltSlot(entity, beltSlot) {
   if (!item) return null;
   entity.belt[beltSlot] = null;
   return item;
+}
+
+export function refillBeltSlotWithMatchingConsumable(entity, beltSlot, consumedItem) {
+  if (!consumedItem || consumedItem.type !== 'consumable') return null;
+  if (beltSlot < 0 || beltSlot > 2) return null;
+  if (entity.belt[beltSlot]) return null;
+
+  const idx = entity.inventory.findIndex(i =>
+    i.type === 'consumable' &&
+    i.name === consumedItem.name &&
+    i.effect === consumedItem.effect &&
+    i.rarity === consumedItem.rarity
+  );
+  if (idx === -1) return null;
+
+  const replacement = entity.inventory.splice(idx, 1)[0];
+  entity.belt[beltSlot] = replacement;
+  return replacement;
 }
