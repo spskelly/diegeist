@@ -19,6 +19,86 @@ export class HUD {
     this.hudHeight = Math.round(this.baseHudHeight * this.uiScale);
   }
 
+  drawBeltIcon(ctx, item, x, y, size) {
+    ctx.fillStyle = '#242a32';
+    ctx.fillRect(x, y, size, size);
+    if (!item) return;
+
+    const effect = item.effect || '';
+    if (effect === 'heal') {
+      ctx.fillStyle = '#56d26d';
+      ctx.fillRect(x + Math.floor(size * 0.4), y + Math.floor(size * 0.2), Math.max(2, Math.floor(size * 0.2)), Math.floor(size * 0.6));
+      ctx.fillRect(x + Math.floor(size * 0.2), y + Math.floor(size * 0.4), Math.floor(size * 0.6), Math.max(2, Math.floor(size * 0.2)));
+      return;
+    }
+    if (effect === 'aoe_damage') {
+      ctx.fillStyle = '#ff8840';
+      ctx.beginPath();
+      ctx.arc(x + size / 2, y + size / 2, Math.floor(size * 0.28), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffd27a';
+      ctx.fillRect(x + Math.floor(size * 0.45), y + Math.floor(size * 0.12), Math.max(2, Math.floor(size * 0.1)), Math.floor(size * 0.2));
+      return;
+    }
+    if (effect === 'reveal_map') {
+      ctx.fillStyle = '#70b7ff';
+      ctx.fillRect(x + Math.floor(size * 0.2), y + Math.floor(size * 0.2), Math.floor(size * 0.6), Math.floor(size * 0.6));
+      ctx.fillStyle = '#cde8ff';
+      ctx.fillRect(x + Math.floor(size * 0.32), y + Math.floor(size * 0.32), Math.floor(size * 0.12), Math.floor(size * 0.12));
+      ctx.fillRect(x + Math.floor(size * 0.56), y + Math.floor(size * 0.5), Math.floor(size * 0.12), Math.floor(size * 0.12));
+      return;
+    }
+    if (effect === 'teleport') {
+      ctx.fillStyle = '#d090ff';
+      ctx.fillRect(x + Math.floor(size * 0.45), y + Math.floor(size * 0.15), Math.max(2, Math.floor(size * 0.1)), Math.floor(size * 0.7));
+      ctx.fillRect(x + Math.floor(size * 0.25), y + Math.floor(size * 0.35), Math.floor(size * 0.5), Math.max(2, Math.floor(size * 0.1)));
+      return;
+    }
+    if (effect === 'speed_boost') {
+      ctx.fillStyle = '#ffd24a';
+      ctx.fillRect(x + Math.floor(size * 0.3), y + Math.floor(size * 0.2), Math.floor(size * 0.4), Math.floor(size * 0.22));
+      ctx.fillRect(x + Math.floor(size * 0.45), y + Math.floor(size * 0.38), Math.floor(size * 0.15), Math.floor(size * 0.42));
+      return;
+    }
+    if (effect === 'invisibility') {
+      ctx.fillStyle = '#9aa3b2';
+      ctx.fillRect(x + Math.floor(size * 0.2), y + Math.floor(size * 0.45), Math.floor(size * 0.6), Math.floor(size * 0.2));
+      ctx.fillStyle = '#c8cfdb';
+      ctx.fillRect(x + Math.floor(size * 0.5), y + Math.floor(size * 0.3), Math.floor(size * 0.16), Math.floor(size * 0.16));
+      return;
+    }
+
+    ctx.fillStyle = '#7ad1d1';
+    ctx.fillRect(x + Math.floor(size * 0.25), y + Math.floor(size * 0.25), Math.floor(size * 0.5), Math.floor(size * 0.5));
+  }
+
+  drawSkillIcon(ctx, skill, x, y, size) {
+    ctx.fillStyle = '#202833';
+    ctx.fillRect(x, y, size, size);
+    if (!skill) return;
+
+    const scaling = skill.statScaling || 'STR';
+    if (scaling === 'DEX') {
+      ctx.fillStyle = '#d6b35c';
+      ctx.fillRect(x + Math.floor(size * 0.18), y + Math.floor(size * 0.45), Math.floor(size * 0.56), Math.max(2, Math.floor(size * 0.1)));
+      ctx.fillRect(x + Math.floor(size * 0.65), y + Math.floor(size * 0.34), Math.floor(size * 0.2), Math.floor(size * 0.3));
+      ctx.fillStyle = '#8b6b3b';
+      ctx.fillRect(x + Math.floor(size * 0.12), y + Math.floor(size * 0.34), Math.floor(size * 0.08), Math.floor(size * 0.3));
+    } else if (scaling === 'INT') {
+      ctx.fillStyle = '#4ed6ff';
+      ctx.fillRect(x + Math.floor(size * 0.42), y + Math.floor(size * 0.12), Math.floor(size * 0.16), Math.floor(size * 0.72));
+      ctx.fillRect(x + Math.floor(size * 0.2), y + Math.floor(size * 0.42), Math.floor(size * 0.6), Math.floor(size * 0.16));
+      ctx.fillStyle = '#b8f4ff';
+      ctx.fillRect(x + Math.floor(size * 0.45), y + Math.floor(size * 0.2), Math.floor(size * 0.1), Math.floor(size * 0.1));
+    } else {
+      ctx.fillStyle = '#ef6666';
+      ctx.fillRect(x + Math.floor(size * 0.28), y + Math.floor(size * 0.15), Math.floor(size * 0.14), Math.floor(size * 0.66));
+      ctx.fillRect(x + Math.floor(size * 0.42), y + Math.floor(size * 0.56), Math.floor(size * 0.36), Math.floor(size * 0.14));
+      ctx.fillStyle = '#f4bfbf';
+      ctx.fillRect(x + Math.floor(size * 0.3), y + Math.floor(size * 0.2), Math.floor(size * 0.1), Math.floor(size * 0.1));
+    }
+  }
+
   draw(player, messageLog, derivedStats = null) {
     const ctx = this.ctx;
     const s = this.uiScale;
@@ -50,26 +130,42 @@ export class HUD {
     ctx.fillText(`Floor ${player.floorNumber}`, hpBarX + hpBarW + Math.round(20 * s), hpBarY + Math.round(11 * s));
     ctx.fillText(`Essence: ${player.gold}`, hpBarX + hpBarW + Math.round(80 * s), hpBarY + Math.round(11 * s));
 
-    const beltSlotW = Math.round(30 * s);
-    const beltSlotH = Math.round(14 * s);
-    const beltGap = Math.round(6 * s);
-    const beltCount = 3;
-    const beltAreaW = beltCount * beltSlotW + (beltCount - 1) * beltGap;
-    const beltX = this.canvasWidth - beltAreaW - Math.round(12 * s);
+    const slotSize = Math.round(18 * s);
+    const slotGap = Math.round(6 * s);
+    const slotCount = 3;
+    const slotAreaW = slotCount * slotSize + (slotCount - 1) * slotGap;
+    const rightInset = Math.round(12 * s);
+    const beltY = hpBarY;
+    const skillY = hpBarY + slotSize + Math.round(4 * s);
+    const beltX = this.canvasWidth - slotAreaW - rightInset;
+    const skillX = beltX;
+
     for (let i = 0; i < 3; i++) {
-      const slotX = beltX + i * (beltSlotW + beltGap);
+      const slotX = beltX + i * (slotSize + slotGap);
       ctx.strokeStyle = '#555';
-      ctx.strokeRect(slotX, hpBarY, beltSlotW, beltSlotH);
-      ctx.fillStyle = '#888';
-      ctx.fillText(`${i + 1}`, slotX + Math.round(2 * s), hpBarY + Math.round(11 * s));
-      if (player.belt[i]) {
-        ctx.fillStyle = '#0ff';
-        ctx.fillRect(
-          slotX + Math.round(12 * s),
-          hpBarY + Math.round(3 * s),
-          Math.round(14 * s),
-          Math.round(8 * s)
-        );
+      ctx.strokeRect(slotX, beltY, slotSize, slotSize);
+      this.drawBeltIcon(ctx, player.belt[i], slotX + 1, beltY + 1, slotSize - 2);
+      ctx.fillStyle = '#b3bec9';
+      ctx.font = `${Math.round(8 * s)}px monospace`;
+      ctx.fillText(`${i + 1}`, slotX + Math.round(2 * s), beltY + slotSize - Math.round(2 * s));
+    }
+
+    const skills = player.activeSkills || [];
+    for (let i = 0; i < 3; i++) {
+      const slotX = skillX + i * (slotSize + slotGap);
+      const skill = skills[i] || null;
+      ctx.strokeStyle = '#555';
+      ctx.strokeRect(slotX, skillY, slotSize, slotSize);
+      this.drawSkillIcon(ctx, skill, slotX + 1, skillY + 1, slotSize - 2);
+      ctx.fillStyle = '#b3bec9';
+      ctx.font = `${Math.round(8 * s)}px monospace`;
+      ctx.fillText(i === 0 ? 'Q' : i === 1 ? 'E' : 'R', slotX + Math.round(2 * s), skillY + slotSize - Math.round(2 * s));
+      if (skill && skill.currentCooldown > 0) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        ctx.fillRect(slotX + 1, skillY + 1, slotSize - 2, slotSize - 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `${Math.round(9 * s)}px monospace`;
+        ctx.fillText(`${skill.currentCooldown}`, slotX + Math.round(6 * s), skillY + Math.round(12 * s));
       }
     }
 
