@@ -23,6 +23,13 @@ export function equipItem(entity, itemId) {
   return true;
 }
 
+export function autoEquipIfSlotEmpty(entity, itemId) {
+  const item = entity.inventory.find(i => i.id === itemId);
+  if (!item || !item.slot) return false;
+  if (entity.equipment[item.slot]) return false;
+  return equipItem(entity, itemId);
+}
+
 export function unequipItem(entity, slot) {
   const item = entity.equipment[slot];
   if (!item) return false;

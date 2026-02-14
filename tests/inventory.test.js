@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { equipItem, unequipItem, addToInventory, removeFromInventory, assignToBelt, useBeltSlot, getEquippedStats } from '../src/inventory.js';
+import {
+  equipItem,
+  unequipItem,
+  addToInventory,
+  removeFromInventory,
+  assignToBelt,
+  useBeltSlot,
+  getEquippedStats,
+  autoEquipIfSlotEmpty,
+} from '../src/inventory.js';
 import { Entity } from '../src/entity.js';
 import { generateItem, generateConsumable } from '../src/items.js';
 
@@ -75,6 +84,36 @@ describe('equipItem', () => {
   });
 });
 
+describe('autoEquipIfSlotEmpty', () => {
+  it('equips the item when its slot is empty', () => {
+    const p = makePlayer();
+    const item = generateItem({ floorLevel: 1 });
+    addToInventory(p, item);
+
+    const result = autoEquipIfSlotEmpty(p, item.id);
+
+    expect(result).toBe(true);
+    expect(p.equipment[item.slot]).toEqual(item);
+    expect(p.inventory).not.toContain(item);
+  });
+
+  it('does not equip when the slot is already occupied', () => {
+    const p = makePlayer();
+    const item1 = generateItem({ floorLevel: 1 });
+    const item2 = generateItem({ floorLevel: 1 });
+    item2.slot = item1.slot;
+    addToInventory(p, item1);
+    addToInventory(p, item2);
+    equipItem(p, item1.id);
+
+    const result = autoEquipIfSlotEmpty(p, item2.id);
+
+    expect(result).toBe(false);
+    expect(p.equipment[item1.slot]).toEqual(item1);
+    expect(p.inventory).toContain(item2);
+  });
+});
+
 describe('unequipItem', () => {
   it('moves equipped item back to inventory', () => {
     const p = makePlayer();
@@ -139,6 +178,22 @@ describe('belt', () => {
     const used = useBeltSlot(p, 1);
     expect(used).toEqual(potion);
     expect(p.belt[1]).toBeNull();
+  });
+
+  it('replaces occupied belt slot and returns previous item to inventory', () => {
+    const p = makePlayer();
+    const first = generateConsumable(1);
+    const second = generateConsumable(1);
+    addToInventory(p, first);
+    addToInventory(p, second);
+
+    assignToBelt(p, first.id, 2);
+    const result = assignToBelt(p, second.id, 2);
+
+    expect(result).toBe(true);
+    expect(p.belt[2]).toEqual(second);
+    expect(p.inventory).toContain(first);
+    expect(p.inventory).not.toContain(second);
   });
 
   it('returns null for empty belt slot', () => {
