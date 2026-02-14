@@ -9,11 +9,11 @@ describe('mapKeyToAction', () => {
     expect(mapKeyToAction('ArrowRight')).toEqual({ type: 'move', dx: 1, dy: 0 });
   });
 
-  it('maps WASD to movement', () => {
-    expect(mapKeyToAction('w')).toEqual({ type: 'move', dx: 0, dy: -1 });
-    expect(mapKeyToAction('s')).toEqual({ type: 'move', dx: 0, dy: 1 });
-    expect(mapKeyToAction('a')).toEqual({ type: 'move', dx: -1, dy: 0 });
-    expect(mapKeyToAction('d')).toEqual({ type: 'move', dx: 1, dy: 0 });
+  it('maps WASD to attack', () => {
+    expect(mapKeyToAction('w')).toEqual({ type: 'attack', dx: 0, dy: -1 });
+    expect(mapKeyToAction('s')).toEqual({ type: 'attack', dx: 0, dy: 1 });
+    expect(mapKeyToAction('a')).toEqual({ type: 'attack', dx: -1, dy: 0 });
+    expect(mapKeyToAction('d')).toEqual({ type: 'attack', dx: 1, dy: 0 });
   });
 
   it('maps wait keys', () => {

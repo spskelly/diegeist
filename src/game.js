@@ -29,6 +29,10 @@ import { canUseSkill, tickCooldowns, updateActiveSkills, useSkill } from './skil
 import { ACHIEVEMENTS, HubShop, loadSaveData, persistSaveData } from './progression.js';
 import { AudioManager } from './audio.js';
 
+function isDirectionalAction(action) {
+  return action.type === 'move' || action.type === 'attack';
+}
+
 export class Game {
   constructor(canvas) {
     this.canvas = canvas;
@@ -793,7 +797,7 @@ export class Game {
       return;
     }
 
-    if (action.type === 'move') {
+    if (isDirectionalAction(action)) {
       if (this.inventoryTab === 'inventory') {
         if (action.dx !== 0) {
           const current = this.inventoryCursorByTab.inventory || 0;
@@ -1165,7 +1169,7 @@ export class Game {
 
   handleStartMenuAction(action) {
     if (!action) return;
-    if (action.type === 'move') {
+    if (isDirectionalAction(action)) {
       const delta = action.dy !== 0 ? action.dy : action.dx;
       if (delta !== 0) this.cycleClassSelection(delta);
       return;
@@ -1191,7 +1195,7 @@ export class Game {
 
   handlePostDeathMenuAction(action) {
     if (!action) return;
-    if (action.type === 'move') {
+    if (isDirectionalAction(action)) {
       const delta = action.dy !== 0 ? action.dy : action.dx;
       if (delta !== 0) {
         const optionCount = 3;
@@ -1234,7 +1238,7 @@ export class Game {
   handleHubMenuAction(action) {
     if (!action) return;
     const options = this.getHubMenuOptions();
-    if (action.type === 'move') {
+    if (isDirectionalAction(action)) {
       const delta = action.dy !== 0 ? action.dy : action.dx;
       if (delta !== 0) {
         this.hubMenuIndex = (this.hubMenuIndex + delta + options.length) % options.length;
@@ -1270,7 +1274,7 @@ export class Game {
       if (this.audio) this.audio.uiClick();
       return;
     }
-    if (action.type === 'move') {
+    if (isDirectionalAction(action)) {
       const delta = action.dy !== 0 ? action.dy : action.dx;
       if (delta !== 0 && this.hubShop.items.length > 0) {
         const count = this.hubShop.items.length;
@@ -1308,7 +1312,7 @@ export class Game {
       if (this.audio) this.audio.uiClick();
       return;
     }
-    if (action.type === 'move') {
+    if (isDirectionalAction(action)) {
       const delta = action.dy !== 0 ? action.dy : action.dx;
       if (delta !== 0 && ACHIEVEMENTS.length > 0) {
         this.hubAchievementsCursor = (this.hubAchievementsCursor + delta + ACHIEVEMENTS.length) % ACHIEVEMENTS.length;
@@ -1329,7 +1333,7 @@ export class Game {
       if (this.audio) this.audio.uiClick();
       return;
     }
-    if (action.type === 'move') {
+    if (isDirectionalAction(action)) {
       if (action.dx !== 0 && this.hubRunCarryover.length > 0) {
         this.hubStashPane = this.hubStashPane === 'stash' ? 'run' : 'stash';
         if (this.audio) this.audio.uiClick();
@@ -1847,32 +1851,12 @@ export class Game {
         return true;
       }
 
-      // Check for enemy at target position (bump-to-attack)
       const enemy = this.map.entities.find(e =>
         e.type === 'enemy' && e.isAlive() && e.position.x === nx && e.position.y === ny
       );
       if (enemy) {
-        const result = this.resolveCombat(this.player, enemy, {
-          baseDamage: 3,
-          damageType: 'melee',
-          weaponMultiplier: this.getPlayerWeaponMultiplier('melee'),
-        });
-        this.addHitFeedback(enemy, result, 'player');
-        if (this.player.playerClass === 'archer' && result.crit) {
-          this.addAchievementProgress('sharpshooter', 1);
-        }
-
-        if (result.dodged) {
-          this.messageLog.add(`The ${enemy.name} dodges your attack!`, this.turnCount);
-        } else if (result.killed) {
-          this.messageLog.add(`You killed the ${enemy.name}!`, this.turnCount);
-          this.handleEnemyDeath(enemy);
-        } else {
-          const critMsg = result.crit ? ' (CRITICAL!)' : '';
-          this.messageLog.add(`You hit the ${enemy.name} for ${result.damage} damage!${critMsg}`, this.turnCount);
-        }
-        if (this.audio) this.audio.meleeHit();
-        return true;
+        this.messageLog.add(`The ${enemy.name} blocks your path.`, this.turnCount);
+        return false;
       }
 
       if (this.map.isWalkable(nx, ny)) {
@@ -1885,6 +1869,37 @@ export class Game {
         this.messageLog.add('You bump into a wall.', this.turnCount);
         return false;
       }
+    }
+    if (action.type === 'attack') {
+      const nx = this.player.position.x + action.dx;
+      const ny = this.player.position.y + action.dy;
+      const enemy = this.map.entities.find(e =>
+        e.type === 'enemy' && e.isAlive() && e.position.x === nx && e.position.y === ny
+      );
+      if (!enemy) {
+        this.messageLog.add('You swing at empty air.', this.turnCount);
+        return false;
+      }
+      const result = this.resolveCombat(this.player, enemy, {
+        baseDamage: 3,
+        damageType: 'melee',
+        weaponMultiplier: this.getPlayerWeaponMultiplier('melee'),
+      });
+      this.addHitFeedback(enemy, result, 'player');
+      if (this.player.playerClass === 'archer' && result.crit) {
+        this.addAchievementProgress('sharpshooter', 1);
+      }
+      if (result.dodged) {
+        this.messageLog.add(`The ${enemy.name} dodges your attack!`, this.turnCount);
+      } else if (result.killed) {
+        this.messageLog.add(`You killed the ${enemy.name}!`, this.turnCount);
+        this.handleEnemyDeath(enemy);
+      } else {
+        const critMsg = result.crit ? ' (CRITICAL!)' : '';
+        this.messageLog.add(`You hit the ${enemy.name} for ${result.damage} damage!${critMsg}`, this.turnCount);
+      }
+      if (this.audio) this.audio.meleeHit();
+      return true;
     }
     if (action.type === 'wait') {
       this.messageLog.add('You wait.', this.turnCount);
