@@ -25,7 +25,7 @@ import {
   unequipItem,
   useBeltSlot
 } from './inventory.js';
-import { assignSkillToSlot, canUseSkill, tickCooldowns, updateActiveSkills, useSkill } from './skills.js';
+import { assignSkillToSlot, canUseSkill, syncClassSkillCooldown, tickCooldowns, updateActiveSkills, useSkill } from './skills.js';
 import { ACHIEVEMENTS, HubShop, loadSaveData, persistSaveData } from './progression.js';
 import { AudioManager } from './audio.js';
 
@@ -1100,6 +1100,7 @@ export class Game {
     }
 
     if (!useSkill(skill)) return false;
+    syncClassSkillCooldown(this.player);
 
     let totalDamage = 0;
     let killCount = 0;
@@ -1554,6 +1555,7 @@ export class Game {
       affinityStats: entity.affinityStats ? [...entity.affinityStats] : null,
       gold: entity.gold || 0,
       floorNumber: entity.floorNumber || 1,
+      classSkillCooldown: entity.classSkillCooldown || 0,
       // Enemy-specific
       spriteKey: entity.spriteKey || null,
       isElite: entity.isElite || false,
@@ -1595,6 +1597,7 @@ export class Game {
       entity.affinityStats = data.affinityStats || [];
       entity.gold = data.gold || 0;
       entity.floorNumber = data.floorNumber || 1;
+      entity.classSkillCooldown = data.classSkillCooldown || 0;
     }
     if (data.spriteKey) entity.spriteKey = data.spriteKey;
     if (data.isElite) entity.isElite = data.isElite;

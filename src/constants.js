@@ -20,6 +20,29 @@ export const PLAYER_CLASSES = {
   mage: { name: 'Mage', baseStats: { STR: 3, DEX: 4, CON: 4, INT: 8, WIS: 7, LCK: 4 }, baseHp: 10, affinityStats: ['INT', 'WIS'] },
 };
 
+export const CLASS_SKILLS = {
+  archer: {
+    name: 'Quick Shot',
+    description: 'Basic ranged attack against the nearest visible foe.',
+    cooldown: 0,
+    range: 6,
+    area: { type: 'single', size: 1 },
+    damage: 3,
+    statScaling: 'DEX',
+    requiredAttackType: 'ranged',
+  },
+  mage: {
+    name: 'Arc Bolt',
+    description: 'Basic magical bolt against the nearest visible foe.',
+    cooldown: 0,
+    range: 6,
+    area: { type: 'single', size: 1 },
+    damage: 3,
+    statScaling: 'INT',
+    requiredAttackType: 'magic',
+  },
+};
+
 export function getBiome(floorNumber) {
   if (floorNumber <= 3) return 'jungle';
   if (floorNumber <= 6) return 'dirt_cave';

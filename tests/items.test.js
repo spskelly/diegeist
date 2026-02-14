@@ -92,19 +92,18 @@ describe('createStarterWeapon', () => {
     expect(mage.rarity).toBe('common');
   });
 
-  it('gives archer and mage ranged starter skills', () => {
+  it('starter weapons have no embedded skills (class skills are intrinsic)', () => {
     const archer = createStarterWeapon('archer');
     const mage = createStarterWeapon('mage');
+    const fighter = createStarterWeapon('fighter');
 
-    expect(archer.skill).toBeTruthy();
-    expect(archer.skill.range).toBeGreaterThan(1);
-    expect(archer.skill.statScaling).toBe('DEX');
-    expect(archer.skill.cooldown).toBe(0);
+    expect(archer.skill).toBeNull();
+    expect(mage.skill).toBeNull();
+    expect(fighter.skill).toBeNull();
 
-    expect(mage.skill).toBeTruthy();
-    expect(mage.skill.range).toBeGreaterThan(1);
-    expect(mage.skill.statScaling).toBe('INT');
-    expect(mage.skill.cooldown).toBe(0);
+    expect(archer.attackType).toBe('ranged');
+    expect(mage.attackType).toBe('magic');
+    expect(fighter.attackType).toBe('melee');
   });
 
   it('returns null for unknown class', () => {
