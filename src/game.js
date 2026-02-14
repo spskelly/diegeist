@@ -8,7 +8,7 @@ import { InputHandler } from './input.js';
 import { SpriteRegistry } from './sprites.js';
 import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
-import { TILE, FOV_RADIUS, PLAYER_CLASSES, STAT_NAMES } from './constants.js';
+import { TILE, FOV_RADIUS, PLAYER_CLASSES, STAT_NAMES, getBiome, BIOME_THEMES } from './constants.js';
 import { Entity } from './entity.js';
 import { generateDungeon } from './dungeon-gen.js';
 import { resolveAttack } from './combat.js';
@@ -510,44 +510,56 @@ export class Game {
 
   getEnemyBaseTemplatesForFloor() {
     const floor = this.floorNumber;
-    return [
-      {
-        name: 'Rat',
-        maxHp: 5,
-        speed: 100,
-        stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 },
-        spriteKey: 'rat',
-        behavior: 'rushdown',
-        weight: Math.max(12, 52 - floor * 3),
-      },
-      {
-        name: 'Bat',
-        maxHp: 3,
-        speed: 145,
-        stats: { STR: 2, DEX: 3, CON: 2, INT: 1, WIS: 1, LCK: 3 },
-        spriteKey: 'bat',
-        behavior: 'rushdown',
-        weight: 22 + floor * 1.2,
-      },
-      {
-        name: 'Shade',
-        maxHp: 6,
-        speed: 120,
-        stats: { STR: 4, DEX: 4, CON: 3, INT: 2, WIS: 2, LCK: 3 },
-        spriteKey: 'trap',
-        behavior: 'ambush',
-        weight: 16 + floor * 1.8,
-      },
-      {
-        name: 'Cultist',
-        maxHp: 7,
-        speed: 90,
-        stats: { STR: 2, DEX: 2, CON: 4, INT: 5, WIS: 4, LCK: 2 },
-        spriteKey: 'cultist',
-        behavior: 'summoner',
-        weight: 10 + floor * 1.9,
-      },
-    ];
+    const biome = getBiome(floor);
+
+    const ENEMY_POOLS = {
+      jungle: [
+        {
+          name: 'Leech', maxHp: 5, speed: 80, behavior: 'rushdown',
+          stats: { STR: 3, DEX: 2, CON: 4, INT: 1, WIS: 1, LCK: 2 },
+          spriteKey: 'leech', weight: 40,
+        },
+        {
+          name: 'Slime', maxHp: 8, speed: 70, behavior: 'ambush',
+          stats: { STR: 2, DEX: 1, CON: 6, INT: 1, WIS: 1, LCK: 2 },
+          spriteKey: 'slime', weight: 35,
+        },
+      ],
+      dirt_cave: [
+        {
+          name: 'Rat', maxHp: 5, speed: 100, behavior: 'rushdown',
+          stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 },
+          spriteKey: 'rat', weight: Math.max(12, 52 - floor * 3),
+        },
+        {
+          name: 'Bat', maxHp: 3, speed: 145, behavior: 'rushdown',
+          stats: { STR: 2, DEX: 3, CON: 2, INT: 1, WIS: 1, LCK: 3 },
+          spriteKey: 'bat', weight: 22 + floor * 1.2,
+        },
+      ],
+      stone_cave: [
+        {
+          name: 'Skeleton', maxHp: 7, speed: 100, behavior: 'rushdown',
+          stats: { STR: 5, DEX: 4, CON: 4, INT: 2, WIS: 2, LCK: 2 },
+          spriteKey: 'skeleton', weight: 40,
+        },
+        {
+          name: 'Zombie', maxHp: 12, speed: 65, behavior: 'rushdown',
+          stats: { STR: 6, DEX: 1, CON: 7, INT: 1, WIS: 1, LCK: 1 },
+          spriteKey: 'zombie', weight: 35,
+        },
+      ],
+      dungeon: [
+        {
+          name: 'Demon', maxHp: 10, speed: 95, behavior: 'summoner',
+          stats: { STR: 5, DEX: 3, CON: 5, INT: 6, WIS: 5, LCK: 3 },
+          spriteKey: 'demon', weight: 50,
+          summonTemplate: { name: 'Imp', spriteKey: 'leech', stats: { STR: 3, DEX: 2, CON: 2, INT: 1, WIS: 1, LCK: 1 }, maxHp: 4 },
+        },
+      ],
+    };
+
+    return ENEMY_POOLS[biome] || ENEMY_POOLS.dirt_cave;
   }
 
   chooseWeightedEnemyTemplate(templates) {
@@ -592,7 +604,39 @@ export class Game {
     return enemy;
   }
 
-  spawnFloor10Boss() {
+  getFloorBossTemplate() {
+    const BOSS_TEMPLATES = {
+      3: {
+        name: 'Brood Mother', spriteKey: 'boss_brood_mother', behavior: 'summoner',
+        stats: { STR: 8, DEX: 4, CON: 10, INT: 6, WIS: 4, LCK: 3 }, maxHp: 60, speed: 80,
+        renderScale: 1.5, auraColor: 'rgba(50, 180, 50, 0.25)',
+        summonTemplate: { name: 'Leech', spriteKey: 'leech', stats: { STR: 3, DEX: 2, CON: 4, INT: 1, WIS: 1, LCK: 2 }, maxHp: 5 },
+      },
+      6: {
+        name: 'Rat King', spriteKey: 'boss_rat_king', behavior: 'summoner',
+        stats: { STR: 10, DEX: 8, CON: 10, INT: 4, WIS: 4, LCK: 6 }, maxHp: 100, speed: 95,
+        renderScale: 1.5, auraColor: 'rgba(160, 120, 60, 0.25)',
+        summonTemplate: { name: 'Rat', spriteKey: 'rat', stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 }, maxHp: 5 },
+      },
+      9: {
+        name: 'Bone Lord', spriteKey: 'boss_bone_lord', behavior: 'summoner',
+        stats: { STR: 14, DEX: 8, CON: 14, INT: 10, WIS: 8, LCK: 4 }, maxHp: 140, speed: 100,
+        renderScale: 1.5, auraColor: 'rgba(80, 80, 200, 0.25)',
+        summonTemplate: { name: 'Skeleton', spriteKey: 'skeleton', stats: { STR: 5, DEX: 4, CON: 4, INT: 2, WIS: 2, LCK: 2 }, maxHp: 7 },
+      },
+      10: {
+        name: 'Void Tyrant', spriteKey: 'boss_tyrant', behavior: 'rushdown',
+        stats: { STR: 18, DEX: 10, CON: 16, INT: 12, WIS: 10, LCK: 8 }, maxHp: 180, speed: 125,
+        renderScale: 2.0, auraColor: 'rgba(200, 40, 40, 0.25)',
+      },
+    };
+    return BOSS_TEMPLATES[this.floorNumber] || null;
+  }
+
+  spawnFloorBoss() {
+    const template = this.getFloorBossTemplate();
+    if (!template) return false;
+
     const bossRoom = this.map.rooms.find(r => r.type === 'boss');
     if (!bossRoom) return false;
     const centerX = Math.floor(bossRoom.x + bossRoom.width / 2);
@@ -613,22 +657,28 @@ export class Game {
     );
     if (!spot) return false;
 
-    const finalBoss = new Entity({
-      id: `floor10_boss_${Date.now()}`,
+    const boss = new Entity({
+      id: `boss_floor${this.floorNumber}_${Date.now()}`,
       type: 'enemy',
       x: spot.x,
       y: spot.y,
-      stats: { STR: 18, DEX: 10, CON: 16, INT: 12, WIS: 10, LCK: 8 },
-      maxHp: 180,
-      speed: 125,
-      behavior: 'rushdown',
-      name: 'Void Tyrant',
+      stats: { ...template.stats },
+      maxHp: template.maxHp,
+      speed: template.speed,
+      behavior: template.behavior,
+      name: template.name,
     });
-    finalBoss.spriteKey = 'boss_tyrant';
-    finalBoss.isFloorBoss = true;
-    this.map.entities.push(finalBoss);
-    this.turnSystem.addEntity(finalBoss);
-    this.messageLog.add('A Void Tyrant rises in the boss chamber.', this.turnCount);
+    boss.spriteKey = template.spriteKey;
+    boss.isFloorBoss = true;
+    boss.renderScale = template.renderScale || 1;
+    boss.auraColor = template.auraColor || 'rgba(200, 40, 40, 0.25)';
+    if (template.summonTemplate) {
+      boss.summonTemplate = template.summonTemplate;
+      boss.summonCooldown = Math.max(1, 3 - Math.floor(this.floorNumber / 5));
+    }
+    this.map.entities.push(boss);
+    this.turnSystem.addEntity(boss);
+    this.messageLog.add(`${template.name} lurks in the boss chamber!`, this.turnCount);
     if (this.audio) this.audio.bossEntrance();
     return true;
   }
@@ -1511,6 +1561,9 @@ export class Game {
       isFloorBoss: entity.isFloorBoss || false,
       isSummonedMinion: entity.isSummonedMinion || false,
       summonedBy: entity.summonedBy || null,
+      renderScale: entity.renderScale || null,
+      auraColor: entity.auraColor || null,
+      summonTemplate: entity.summonTemplate || null,
     };
   }
 
@@ -1549,6 +1602,9 @@ export class Game {
     if (data.isFloorBoss) entity.isFloorBoss = data.isFloorBoss;
     if (data.isSummonedMinion) entity.isSummonedMinion = data.isSummonedMinion;
     if (data.summonedBy) entity.summonedBy = data.summonedBy;
+    if (data.renderScale) entity.renderScale = data.renderScale;
+    if (data.auraColor) entity.auraColor = data.auraColor;
+    if (data.summonTemplate) entity.summonTemplate = data.summonTemplate;
     return entity;
   }
 
@@ -2008,12 +2064,25 @@ export class Game {
   }
 
   startFloor() {
-    // Pick a random archetype
-    const archetypes = ['corridor-heavy', 'cavernous', 'hybrid'];
-    const archetype = archetypes[Math.floor(Math.random() * archetypes.length)];
+    // Determine biome and pick archetype from biome weights
+    const biome = getBiome(this.floorNumber);
+    const theme = BIOME_THEMES[biome];
+    const archetypeEntries = Object.entries(theme.archetypeWeights);
+    const totalWeight = archetypeEntries.reduce((sum, [, w]) => sum + w, 0);
+    let roll = Math.random() * totalWeight;
+    let archetype = 'hybrid';
+    for (const [arch, weight] of archetypeEntries) {
+      roll -= weight;
+      if (roll <= 0) { archetype = arch; break; }
+    }
 
-    // Generate the dungeon
-    this.map = generateDungeon(60, 50, archetype, this.floorNumber);
+    // Generate the dungeon with biome config
+    this.map = generateDungeon(60, 50, archetype, this.floorNumber, theme);
+
+    // Apply biome palette to tile sprites
+    if (this.sprites) {
+      this.sprites.setBiome(theme.palette);
+    }
 
     // Find the start room and place the player at its center
     const startRoom = this.map.rooms.find(r => r.type === 'start');
@@ -2084,6 +2153,9 @@ export class Game {
       enemy.isElite = scaled.isElite;
       if (enemy.behavior === 'summoner') {
         enemy.summonCooldown = Math.max(1, 2 + Math.floor(Math.random() * 2) - Math.floor(this.floorNumber / 5));
+        if (enemyType.summonTemplate) {
+          enemy.summonTemplate = enemyType.summonTemplate;
+        }
       }
       this.map.entities.push(enemy);
       this.turnSystem.addEntity(enemy);
@@ -2104,7 +2176,7 @@ export class Game {
       const first = spawnEnemyAt(enemyType, anchor.x, anchor.y);
       if (!first) continue;
 
-      if (enemyType.name !== 'Bat') continue;
+      if (enemyType.name !== 'Bat' && enemyType.name !== 'Leech') continue;
 
       const packSize = Math.min(5, 2 + Math.floor(Math.random() * 2) + Math.floor((this.floorNumber - 1) / 6));
       const packTiles = [{ x: anchor.x, y: anchor.y }];
@@ -2131,8 +2203,10 @@ export class Game {
       }
     }
 
+    if (this.getFloorBossTemplate()) {
+      this.spawnFloorBoss();
+    }
     if (this.floorNumber === 10) {
-      this.spawnFloor10Boss();
       this.messageLog.add('Final floor. Defeat the Void Tyrant to win.', this.turnCount);
     }
     this.spawnFloorItems(standardRooms);
@@ -2289,19 +2363,20 @@ export class Game {
       }
       if (this.audio) this.audio.playerHurt();
     } else if (action.type === 'summon') {
+      const st = entity.summonTemplate || { name: 'Minion', spriteKey: 'rat', stats: { STR: 2, DEX: 2, CON: 2, INT: 1, WIS: 1, LCK: 1 }, maxHp: 3 };
       const minionId = `minion_${Date.now()}_${Math.random()}`;
       const minion = new Entity({
         id: minionId,
         type: 'enemy',
         x: action.spawnX,
         y: action.spawnY,
-        stats: { STR: 2, DEX: 2, CON: 2, INT: 1, WIS: 1, LCK: 1 },
-        maxHp: 3,
+        stats: { ...st.stats },
+        maxHp: st.maxHp,
         speed: 100,
         behavior: 'rushdown',
-        name: 'Minion',
+        name: st.name,
       });
-      minion.spriteKey = 'rat';
+      minion.spriteKey = st.spriteKey;
       minion.isSummonedMinion = true;
       minion.summonedBy = entity.id;
       this.map.entities.push(minion);

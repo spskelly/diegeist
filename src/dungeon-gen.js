@@ -186,7 +186,7 @@ function roomDist(a, b) {
   return Math.sqrt((ac.x - bc.x) ** 2 + (ac.y - bc.y) ** 2);
 }
 
-export function generateDungeon(width, height, archetype, floorNumber) {
+export function generateDungeon(width, height, archetype, floorNumber, biomeConfig = null) {
   const params = ARCHETYPE_PARAMS[archetype] || ARCHETYPE_PARAMS.hybrid;
   const map = new GameMap(width, height);
 
@@ -261,6 +261,23 @@ export function generateDungeon(width, height, archetype, floorNumber) {
 
   // Place doors at room-corridor junctions
   placeDoors(map, rooms);
+
+  // Place biome-specific environmental tiles
+  if (biomeConfig) {
+    for (const room of rooms) {
+      if (room.type === 'start' || room.type === 'boss') continue;
+      for (let y = room.y; y < room.y + room.height; y++) {
+        for (let x = room.x; x < room.x + room.width; x++) {
+          if (map.getTile(x, y) !== TILE.FLOOR) continue;
+          if (biomeConfig.waterChance && Math.random() < biomeConfig.waterChance) {
+            map.setTile(x, y, TILE.WATER);
+          } else if (biomeConfig.trapChance && Math.random() < biomeConfig.trapChance) {
+            map.setTile(x, y, TILE.TRAP);
+          }
+        }
+      }
+    }
+  }
 
   // Store rooms on map
   for (const room of rooms) {

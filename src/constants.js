@@ -20,6 +20,84 @@ export const PLAYER_CLASSES = {
   mage: { name: 'Mage', baseStats: { STR: 3, DEX: 4, CON: 4, INT: 8, WIS: 7, LCK: 4 }, baseHp: 10, affinityStats: ['INT', 'WIS'] },
 };
 
+export function getBiome(floorNumber) {
+  if (floorNumber <= 3) return 'jungle';
+  if (floorNumber <= 6) return 'dirt_cave';
+  if (floorNumber <= 9) return 'stone_cave';
+  return 'dungeon';
+}
+
+export const BIOME_THEMES = {
+  jungle: {
+    name: 'Jungle',
+    floors: [1, 2, 3],
+    palette: {
+      wall:      { primary: '#2a4a2a', secondary: '#1e3a1e', outline: '#152515' },
+      floor:     { primary: '#3a4a3a', secondary: '#354535' },
+      corridor:  { primary: '#33403a', secondary: '#2e3a35' },
+      door:      { frame: '#5a3a0a', panel: '#7a5a18', knob: '#c8a000' },
+      door_open: { frame: '#5a3a0a', panel: '#7a5a18', interior: '#2d3d2d' },
+      stairs:    { bg: '#3a4a3a', steps: '#667' },
+      water:     { primary: '#1a3a3a', wave: '#2a4a4a' },
+      trap:      { bg: '#3a4a3a', markings: '#804040' },
+    },
+    archetypeWeights: { 'corridor-heavy': 50, 'cavernous': 20, 'hybrid': 30 },
+    waterChance: 0.12,
+    trapChance: 0.03,
+  },
+  dirt_cave: {
+    name: 'Dirt Cave',
+    floors: [4, 5, 6],
+    palette: {
+      wall:      { primary: '#4a3a2a', secondary: '#3a2e1e', outline: '#2a2015' },
+      floor:     { primary: '#4a4030', secondary: '#453b2b' },
+      corridor:  { primary: '#403830', secondary: '#3a332a' },
+      door:      { frame: '#6b4914', panel: '#8b6918', knob: '#c8a000' },
+      door_open: { frame: '#6b4914', panel: '#8b6918', interior: '#38302a' },
+      stairs:    { bg: '#4a4030', steps: '#777' },
+      water:     { primary: '#2a2a1a', wave: '#3a3a2a' },
+      trap:      { bg: '#4a4030', markings: '#804040' },
+    },
+    archetypeWeights: { 'corridor-heavy': 25, 'cavernous': 25, 'hybrid': 50 },
+    waterChance: 0.04,
+    trapChance: 0.06,
+  },
+  stone_cave: {
+    name: 'Stone Cave',
+    floors: [7, 8, 9],
+    palette: {
+      wall:      { primary: '#2a2a4a', secondary: '#1e1e3e', outline: '#151535' },
+      floor:     { primary: '#3a3a5a', secondary: '#353555' },
+      corridor:  { primary: '#33334f', secondary: '#2e2e4a' },
+      door:      { frame: '#5a5a7a', panel: '#7a7a9a', knob: '#a0a0d0' },
+      door_open: { frame: '#5a5a7a', panel: '#7a7a9a', interior: '#2d2d48' },
+      stairs:    { bg: '#3a3a5a', steps: '#8888aa' },
+      water:     { primary: '#1a1a4a', wave: '#2a2a5a' },
+      trap:      { bg: '#3a3a5a', markings: '#605080' },
+    },
+    archetypeWeights: { 'corridor-heavy': 20, 'cavernous': 50, 'hybrid': 30 },
+    waterChance: 0.06,
+    trapChance: 0.08,
+  },
+  dungeon: {
+    name: 'Dungeon',
+    floors: [10],
+    palette: {
+      wall:      { primary: '#3a1a2a', secondary: '#2e1020', outline: '#200a18' },
+      floor:     { primary: '#3a2a3a', secondary: '#352535' },
+      corridor:  { primary: '#33233f', secondary: '#2e1e3a' },
+      door:      { frame: '#6b1434', panel: '#8b2848', knob: '#d04060' },
+      door_open: { frame: '#6b1434', panel: '#8b2848', interior: '#2d1828' },
+      stairs:    { bg: '#3a2a3a', steps: '#886' },
+      water:     { primary: '#2a1a3a', wave: '#3a2a4a' },
+      trap:      { bg: '#3a2a3a', markings: '#a04040' },
+    },
+    archetypeWeights: { 'corridor-heavy': 50, 'cavernous': 15, 'hybrid': 35 },
+    waterChance: 0.02,
+    trapChance: 0.10,
+  },
+};
+
 export const TILE = {
   WALL: 0, FLOOR: 1, CORRIDOR: 2, DOOR: 3, STAIRS_DOWN: 4, WATER: 5, TRAP: 6, DOOR_OPEN: 7,
   properties: {

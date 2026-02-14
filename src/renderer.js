@@ -43,8 +43,18 @@ export class Renderer {
 
     const sprite = this.sprites.get(entity.spriteKey || 'trap');
     const { sx, sy } = this.camera.tileToScreen(entity.position.x, entity.position.y);
-    if (sprite) {
-      this.ctx.drawImage(sprite, sx, sy, this.camera.tileSize, this.camera.tileSize);
+    const ts = this.camera.tileSize;
+
+    if (entity.renderScale && entity.renderScale > 1 && sprite) {
+      const scaledSize = ts * entity.renderScale;
+      const offset = (scaledSize - ts) / 2;
+      // Draw aura glow behind boss
+      this.ctx.fillStyle = entity.auraColor || 'rgba(200, 40, 40, 0.25)';
+      this.ctx.fillRect(sx - offset - 2, sy - offset - 2, scaledSize + 4, scaledSize + 4);
+      // Draw scaled sprite
+      this.ctx.drawImage(sprite, sx - offset, sy - offset, scaledSize, scaledSize);
+    } else if (sprite) {
+      this.ctx.drawImage(sprite, sx, sy, ts, ts);
     }
   }
 

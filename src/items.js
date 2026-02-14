@@ -24,8 +24,33 @@ export const ITEM_TEMPLATES = [
   { baseName: 'Amulet', slot: 'accessory2', baseType: 'accessory', primaryStat: 'WIS' },
 ];
 
-const PREFIXES = ['Iron', 'Steel', 'Blessed', 'Cursed', 'Ancient', 'Dark', 'Shadow', 'Flame', 'Frost', 'Thunder', 'Bone', 'Crystal'];
-const SUFFIXES = ['of Power', 'of Speed', 'of Fortitude', 'of Insight', 'of Wisdom', 'of Fortune', 'of Cleaving', 'of Piercing', 'of the Mage'];
+export const STAT_PREFIXES = {
+  STR: ['Mighty', 'Heavy', 'Brutal'],
+  DEX: ['Swift', 'Keen', 'Agile'],
+  CON: ['Hardy', 'Stout', 'Fortified'],
+  INT: ['Arcane', 'Mystic', 'Enchanted'],
+  WIS: ['Wise', 'Blessed', 'Sacred'],
+  LCK: ['Lucky', 'Charmed', 'Fortunate'],
+};
+
+export const SKILL_SUFFIXES = {
+  'Cleave':          'of Cleaving',
+  'Shield Bash':     'of the Aegis',
+  'Power Shot':      'of Piercing',
+  'Multishot':       'of the Volley',
+  'Fireball':        'of the Inferno',
+  'Chain Lightning': 'of Storms',
+  'Frost Nova':      'of the Blizzard',
+};
+
+export const STAT_SUFFIXES = {
+  STR: 'of Power',
+  DEX: 'of Speed',
+  CON: 'of Fortitude',
+  INT: 'of Insight',
+  WIS: 'of Wisdom',
+  LCK: 'of Fortune',
+};
 
 const SKILL_POOL = [
   { name: 'Cleave', description: 'Hit all adjacent enemies', range: 1, area: { type: 'cone', size: 3 }, statScaling: 'STR', baseDamage: 4 },
@@ -155,14 +180,47 @@ function generateSkill(rarity) {
   };
 }
 
-function generateName(template, rarity) {
+function getPrimaryStatFromBonuses(statBonuses) {
+  let maxStat = null;
+  let maxVal = -1;
+  for (const [stat, val] of Object.entries(statBonuses)) {
+    if (val > maxVal) { maxVal = val; maxStat = stat; }
+  }
+  return maxStat;
+}
+
+function getSecondaryStatFromBonuses(statBonuses, primaryStat) {
+  let secondStat = null;
+  let secondVal = -1;
+  for (const [stat, val] of Object.entries(statBonuses)) {
+    if (stat === primaryStat) continue;
+    if (val > secondVal) { secondVal = val; secondStat = stat; }
+  }
+  return secondStat;
+}
+
+function generateName(template, rarity, statBonuses, skill) {
   let name = template.baseName;
+
   if (rarity !== 'common' && Math.random() > 0.3) {
-    name = PREFIXES[Math.floor(Math.random() * PREFIXES.length)] + ' ' + name;
+    const primaryStat = getPrimaryStatFromBonuses(statBonuses);
+    if (primaryStat && STAT_PREFIXES[primaryStat]) {
+      const pool = STAT_PREFIXES[primaryStat];
+      name = pool[Math.floor(Math.random() * pool.length)] + ' ' + name;
+    }
   }
+
   if ((rarity === 'rare' || rarity === 'epic' || rarity === 'legendary') && Math.random() > 0.4) {
-    name += ' ' + SUFFIXES[Math.floor(Math.random() * SUFFIXES.length)];
+    if (skill && SKILL_SUFFIXES[skill.name]) {
+      name += ' ' + SKILL_SUFFIXES[skill.name];
+    } else {
+      const secondaryStat = getSecondaryStatFromBonuses(statBonuses, getPrimaryStatFromBonuses(statBonuses));
+      if (secondaryStat && STAT_SUFFIXES[secondaryStat]) {
+        name += ' ' + STAT_SUFFIXES[secondaryStat];
+      }
+    }
   }
+
   return name;
 }
 
@@ -171,7 +229,7 @@ export function generateItem({ floorLevel, luck = 0, context = 'drop', forceRari
   const rarity = forceRarity || rollRarity(floorLevel, luck, context);
   const statBonuses = generateStatBonuses(rarity, floorLevel, template.primaryStat);
   const skill = generateSkill(rarity);
-  const name = generateName(template, rarity);
+  const name = generateName(template, rarity, statBonuses, skill);
 
   return {
     id: `item_${nextItemId++}`,
