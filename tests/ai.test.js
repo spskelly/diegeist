@@ -140,4 +140,19 @@ describe('getAIAction - summoner', () => {
     const action = getAIAction(enemy, player, map, []);
     expect(action.type).toBe('attack');
   });
+
+  it('does not summon when it already has too many minions', () => {
+    const map = makeOpenMap();
+    const enemy = makeEnemy(5, 5, 'summoner');
+    enemy.summonCooldown = 0;
+    const player = makePlayer(9, 5);
+    const minionA = makeEnemy(6, 6, 'rushdown');
+    minionA.isSummonedMinion = true;
+    minionA.summonedBy = enemy.id;
+    const minionB = makeEnemy(7, 6, 'rushdown');
+    minionB.isSummonedMinion = true;
+    minionB.summonedBy = enemy.id;
+    const action = getAIAction(enemy, player, map, [enemy, minionA, minionB]);
+    expect(action.type).not.toBe('summon');
+  });
 });

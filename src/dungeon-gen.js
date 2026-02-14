@@ -135,11 +135,46 @@ function placeDoors(map, rooms) {
   }
 }
 
-function checkAndPlaceDoor(map, corridorX, corridorY, floorX, floorY) {
-  if (map.getTile(corridorX, corridorY) === TILE.CORRIDOR &&
-      map.getTile(floorX, floorY) === TILE.FLOOR) {
-    map.setTile(corridorX, corridorY, TILE.DOOR);
+function isWalkableTile(map, x, y) {
+  return map.inBounds(x, y) && map.isWalkable(x, y);
+}
+
+function hasAdjacentDoor(map, x, y) {
+  const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+  for (const [dx, dy] of dirs) {
+    if (map.getTile(x + dx, y + dy) === TILE.DOOR) return true;
   }
+  return false;
+}
+
+function isValidDoorGeometry(map, x, y) {
+  const northOpen = isWalkableTile(map, x, y - 1);
+  const southOpen = isWalkableTile(map, x, y + 1);
+  const westOpen = isWalkableTile(map, x - 1, y);
+  const eastOpen = isWalkableTile(map, x + 1, y);
+
+  const verticalDoor = northOpen && southOpen && !westOpen && !eastOpen;
+  const horizontalDoor = westOpen && eastOpen && !northOpen && !southOpen;
+  return verticalDoor || horizontalDoor;
+}
+
+function checkAndPlaceDoor(map, corridorX, corridorY, floorX, floorY) {
+  if (!map.inBounds(corridorX, corridorY) || !map.inBounds(floorX, floorY)) return;
+  if (map.getTile(corridorX, corridorY) !== TILE.CORRIDOR) return;
+  if (map.getTile(floorX, floorY) !== TILE.FLOOR) return;
+
+  const dx = corridorX - floorX;
+  const dy = corridorY - floorY;
+  if (Math.abs(dx) + Math.abs(dy) !== 1) return;
+
+  const oppositeX = corridorX + dx;
+  const oppositeY = corridorY + dy;
+  if (!map.inBounds(oppositeX, oppositeY)) return;
+  if (!isWalkableTile(map, oppositeX, oppositeY)) return;
+  if (hasAdjacentDoor(map, corridorX, corridorY)) return;
+  if (!isValidDoorGeometry(map, corridorX, corridorY)) return;
+
+  map.setTile(corridorX, corridorY, TILE.DOOR);
 }
 
 function roomCenter(room) {

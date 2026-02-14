@@ -155,6 +155,35 @@ describe('generateDungeon', () => {
     expect(doorCount).toBeGreaterThan(0);
   });
 
+  it('places doors with two open sides and two wall sides', () => {
+    const map = generateDungeon(60, 60, 'hybrid', 1);
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        if (map.getTile(x, y) !== TILE.DOOR) continue;
+        const northOpen = map.isWalkable(x, y - 1);
+        const southOpen = map.isWalkable(x, y + 1);
+        const westOpen = map.isWalkable(x - 1, y);
+        const eastOpen = map.isWalkable(x + 1, y);
+        const verticalDoor = northOpen && southOpen && !westOpen && !eastOpen;
+        const horizontalDoor = westOpen && eastOpen && !northOpen && !southOpen;
+        expect(verticalDoor || horizontalDoor).toBe(true);
+      }
+    }
+  });
+
+  it('does not place doors adjacent to other doors', () => {
+    const map = generateDungeon(60, 60, 'hybrid', 1);
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        if (map.getTile(x, y) !== TILE.DOOR) continue;
+        expect(map.getTile(x + 1, y)).not.toBe(TILE.DOOR);
+        expect(map.getTile(x - 1, y)).not.toBe(TILE.DOOR);
+        expect(map.getTile(x, y + 1)).not.toBe(TILE.DOOR);
+        expect(map.getTile(x, y - 1)).not.toBe(TILE.DOOR);
+      }
+    }
+  });
+
   it('start room is far from boss room', () => {
     const map = generateDungeon(60, 60, 'hybrid', 1);
     const bossRoom = map.rooms.find(r => r.type === 'boss');

@@ -5,8 +5,20 @@ function distance(x1, y1, x2, y2) {
   return Math.abs(x1 - x2) + Math.abs(y1 - y2);
 }
 
-function euclideanDist(x1, y1, x2, y2) {
-  return Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2);
+const SUMMONER_COOLDOWN_TURNS = 6;
+const MAX_SUMMONED_MINIONS_TOTAL = 8;
+const MAX_SUMMONED_MINIONS_PER_SUMMONER = 2;
+
+function countSummonedMinions(allEntities, summonerId = null) {
+  return allEntities.filter(e => {
+    if (e.type !== 'enemy' || !e.isAlive()) return false;
+    const looksLikeSummonedMinion = e.isSummonedMinion || e.name === 'Minion';
+    if (!looksLikeSummonedMinion) return false;
+    if (summonerId === null) return true;
+    if (e.summonedBy) return e.summonedBy === summonerId;
+    // Fallback for legacy minions without ownership tags.
+    return true;
+  }).length;
 }
 
 function getWanderAction(enemy, map, allEntities) {
@@ -113,7 +125,13 @@ function getSummonerAction(enemy, player, map, allEntities) {
   }
 
   // Summon if off cooldown
-  if (enemy.summonCooldown === 0) {
+  const summonedByThis = countSummonedMinions(allEntities, enemy.id);
+  const summonedTotal = countSummonedMinions(allEntities);
+  if (
+    enemy.summonCooldown === 0 &&
+    summonedByThis < MAX_SUMMONED_MINIONS_PER_SUMMONER &&
+    summonedTotal < MAX_SUMMONED_MINIONS_TOTAL
+  ) {
     // Find an adjacent empty tile to spawn
     const dirs = [{ dx: 0, dy: -1 }, { dx: 0, dy: 1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }];
     for (const d of dirs) {
@@ -122,7 +140,7 @@ function getSummonerAction(enemy, player, map, allEntities) {
       if (map.isWalkable(nx, ny)) {
         const occupied = allEntities.some(e => e.isAlive() && e.position.x === nx && e.position.y === ny);
         if (!occupied) {
-          enemy.summonCooldown = 4;
+          enemy.summonCooldown = SUMMONER_COOLDOWN_TURNS;
           return { type: 'summon', spawnX: nx, spawnY: ny };
         }
       }
