@@ -2228,6 +2228,23 @@ export class Game {
     this.camera.centerOn(this.player.position.x, this.player.position.y, this.map.width, this.map.height);
   }
 
+  checkTrapTile(x, y) {
+    if (this.map.getTile(x, y) !== TILE.TRAP) return;
+    const damage = 2 + this.floorNumber;
+    this.player.takeDamage(damage);
+    this.messageLog.add(`You trigger a trap! ${damage} damage.`, this.turnCount);
+    this.map.setTile(x, y, TILE.FLOOR);
+    if (this.audio) this.audio.playerHurt();
+    if (!this.player.isAlive()) {
+      this.messageLog.add('You have been slain by a trap!', this.turnCount);
+      this.finalizeRun('a trap');
+      this.captureRunItemsForHub(false);
+      this.deathSplashFrames = 0;
+      this.state = 'deathSplash';
+      if (this.audio) this.audio.stopAmbient();
+    }
+  }
+
   processPlayerAction(action) {
     if (action.type === 'move') {
       const nx = this.player.position.x + action.dx;
@@ -2255,6 +2272,7 @@ export class Game {
         const dirs = { '0,-1': 'north', '0,1': 'south', '-1,0': 'west', '1,0': 'east' };
         this.messageLog.add(`You move ${dirs[`${action.dx},${action.dy}`]}.`, this.turnCount);
         if (this.audio) this.audio.footstep();
+        this.checkTrapTile(nx, ny);
         return true;
       } else {
         this.messageLog.add('You bump into a wall.', this.turnCount);
