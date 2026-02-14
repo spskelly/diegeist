@@ -95,6 +95,15 @@ describe('getAIAction - kiting', () => {
     expect(action.type).toBe('move');
     expect(action.x).toBeGreaterThan(5); // moves toward player
   });
+
+  it('does not ranged attack when line of sight is blocked', () => {
+    const map = makeOpenMap();
+    map.setTile(7, 5, TILE.WALL); // blocks LOS between enemy and player
+    const enemy = makeEnemy(5, 5, 'kiting');
+    const player = makePlayer(9, 5); // in ideal range but blocked
+    const action = getAIAction(enemy, player, map, []);
+    expect(action.type).not.toBe('attack');
+  });
 });
 
 describe('getAIAction - ambush', () => {
@@ -139,6 +148,16 @@ describe('getAIAction - summoner', () => {
     const player = makePlayer(9, 5);
     const action = getAIAction(enemy, player, map, []);
     expect(action.type).toBe('attack');
+  });
+
+  it('does not magic attack when line of sight is blocked', () => {
+    const map = makeOpenMap();
+    map.setTile(7, 5, TILE.WALL); // blocks LOS between enemy and player
+    const enemy = makeEnemy(5, 5, 'summoner');
+    enemy.summonCooldown = 3;
+    const player = makePlayer(9, 5);
+    const action = getAIAction(enemy, player, map, []);
+    expect(action.type).not.toBe('attack');
   });
 
   it('does not summon when it already has too many minions', () => {

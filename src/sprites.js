@@ -49,6 +49,21 @@ export const SPRITE_DEFINITIONS = {
       ctx.fillRect(10, 7, 2, 2);
     },
   },
+  door_open: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = '#3a3a4a';
+      ctx.fillRect(0, 0, 16, 16);
+      ctx.fillStyle = '#8b6914';
+      ctx.fillRect(2, 2, 2, 12);
+      ctx.fillRect(12, 2, 2, 12);
+      ctx.fillStyle = '#a07818';
+      ctx.fillRect(3, 2, 1, 12);
+      ctx.fillRect(12, 2, 1, 12);
+      ctx.fillStyle = '#2d2d38';
+      ctx.fillRect(5, 2, 6, 12);
+    },
+  },
   stairs_down: {
     size: TILE_SIZE,
     draw(ctx) {
@@ -136,6 +151,36 @@ export const SPRITE_DEFINITIONS = {
       ctx.fillRect(7, 6, 2, 4);
     },
   },
+  arrow_projectile: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = 'rgba(0,0,0,0)';
+      ctx.fillRect(0, 0, 16, 16);
+      ctx.fillStyle = '#d6b35c';
+      ctx.fillRect(4, 7, 8, 2);
+      ctx.fillStyle = '#f0d388';
+      ctx.fillRect(11, 6, 3, 4);
+      ctx.fillStyle = '#80624a';
+      ctx.fillRect(2, 6, 2, 4);
+      ctx.fillRect(1, 5, 1, 6);
+    },
+  },
+  arcbolt_projectile: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = 'rgba(0,0,0,0)';
+      ctx.fillRect(0, 0, 16, 16);
+      ctx.fillStyle = '#3ce0ff';
+      ctx.fillRect(7, 2, 2, 4);
+      ctx.fillRect(5, 5, 2, 4);
+      ctx.fillRect(8, 6, 2, 4);
+      ctx.fillRect(6, 9, 2, 4);
+      ctx.fillRect(8, 10, 2, 4);
+      ctx.fillStyle = '#9ff3ff';
+      ctx.fillRect(7, 4, 2, 2);
+      ctx.fillRect(7, 8, 2, 2);
+    },
+  },
   bat: {
     size: 16,
     draw(ctx) {
@@ -166,6 +211,27 @@ export const SPRITE_DEFINITIONS = {
       ctx.fillRect(7, 8, 2, 3);
     },
   },
+  boss_tyrant: {
+    size: 16,
+    draw(ctx) {
+      ctx.fillStyle = '#2b1a1a';
+      ctx.fillRect(2, 4, 12, 10);
+      ctx.fillStyle = '#4a2b2b';
+      ctx.fillRect(1, 8, 14, 6);
+      ctx.fillStyle = '#d9c7a0';
+      ctx.fillRect(5, 2, 6, 4);
+      ctx.fillStyle = '#7f1d1d';
+      ctx.fillRect(4, 0, 8, 2);
+      ctx.fillRect(3, 1, 2, 2);
+      ctx.fillRect(11, 1, 2, 2);
+      ctx.fillStyle = '#ff5c5c';
+      ctx.fillRect(6, 3, 1, 1);
+      ctx.fillRect(9, 3, 1, 1);
+      ctx.fillStyle = '#9f2b2b';
+      ctx.fillRect(4, 11, 3, 3);
+      ctx.fillRect(9, 11, 3, 3);
+    },
+  },
   rat: {
     size: 16,
     draw(ctx) {
@@ -193,6 +259,7 @@ export const TILE_SPRITE_MAP = {
   4: 'stairs_down',
   5: 'water',
   6: 'trap',
+  7: 'door_open',
 };
 
 export class SpriteRegistry {

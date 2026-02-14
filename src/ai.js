@@ -5,6 +5,32 @@ function distance(x1, y1, x2, y2) {
   return Math.abs(x1 - x2) + Math.abs(y1 - y2);
 }
 
+function hasLineOfSight(map, x0, y0, x1, y1) {
+  let x = x0;
+  let y = y0;
+  const dx = Math.abs(x1 - x0);
+  const dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+
+  while (!(x === x1 && y === y1)) {
+    const e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      x += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      y += sy;
+    }
+    if (x === x1 && y === y1) return true;
+    if (map.blocksLOS(x, y)) return false;
+  }
+
+  return true;
+}
+
 const SUMMONER_COOLDOWN_TURNS = 6;
 const MAX_SUMMONED_MINIONS_TOTAL = 8;
 const MAX_SUMMONED_MINIONS_PER_SUMMONER = 2;
@@ -62,9 +88,10 @@ function getKitingAction(enemy, player, map, allEntities) {
   const dist = distance(enemy.position.x, enemy.position.y, player.position.x, player.position.y);
   const preferredMin = 3;
   const preferredMax = 5;
+  const canSeePlayer = hasLineOfSight(map, enemy.position.x, enemy.position.y, player.position.x, player.position.y);
 
   // In preferred range? Attack!
-  if (dist >= preferredMin && dist <= preferredMax) {
+  if (dist >= preferredMin && dist <= preferredMax && canSeePlayer) {
     return { type: 'attack', targetX: player.position.x, targetY: player.position.y, damageType: 'ranged' };
   }
 
@@ -149,7 +176,7 @@ function getSummonerAction(enemy, player, map, allEntities) {
 
   // Otherwise attack at range if in range
   const dist = distance(enemy.position.x, enemy.position.y, player.position.x, player.position.y);
-  if (dist <= 5) {
+  if (dist <= 5 && hasLineOfSight(map, enemy.position.x, enemy.position.y, player.position.x, player.position.y)) {
     return { type: 'attack', targetX: player.position.x, targetY: player.position.y, damageType: 'magic' };
   }
 

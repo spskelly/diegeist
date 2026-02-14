@@ -7,6 +7,7 @@ describe('SpriteDefinitions', () => {
     expect(SPRITE_DEFINITIONS.floor).toBeDefined();
     expect(SPRITE_DEFINITIONS.corridor).toBeDefined();
     expect(SPRITE_DEFINITIONS.door).toBeDefined();
+    expect(SPRITE_DEFINITIONS.door_open).toBeDefined();
     expect(SPRITE_DEFINITIONS.stairs_down).toBeDefined();
     expect(SPRITE_DEFINITIONS.water).toBeDefined();
     expect(SPRITE_DEFINITIONS.trap).toBeDefined();
@@ -40,5 +41,6 @@ describe('TILE_SPRITE_MAP', () => {
     expect(TILE_SPRITE_MAP[4]).toBe('stairs_down');
     expect(TILE_SPRITE_MAP[5]).toBe('water');
     expect(TILE_SPRITE_MAP[6]).toBe('trap');
+    expect(TILE_SPRITE_MAP[7]).toBe('door_open');
   });
 });

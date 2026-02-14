@@ -10,6 +10,7 @@ describe('Constants', () => {
     expect(TILE.STAIRS_DOWN).toBe(4);
     expect(TILE.WATER).toBe(5);
     expect(TILE.TRAP).toBe(6);
+    expect(TILE.DOOR_OPEN).toBe(7);
   });
 
   it('defines tile properties for each type', () => {
@@ -17,7 +18,10 @@ describe('Constants', () => {
     expect(TILE.properties[TILE.WALL].blocksLOS).toBe(true);
     expect(TILE.properties[TILE.FLOOR].walkable).toBe(true);
     expect(TILE.properties[TILE.FLOOR].blocksLOS).toBe(false);
-    expect(TILE.properties[TILE.DOOR].walkable).toBe(true);
+    expect(TILE.properties[TILE.DOOR].walkable).toBe(false);
+    expect(TILE.properties[TILE.DOOR].blocksLOS).toBe(true);
+    expect(TILE.properties[TILE.DOOR_OPEN].walkable).toBe(true);
+    expect(TILE.properties[TILE.DOOR_OPEN].blocksLOS).toBe(false);
     expect(TILE.properties[TILE.CORRIDOR].walkable).toBe(true);
     expect(TILE.properties[TILE.STAIRS_DOWN].walkable).toBe(true);
     expect(TILE.properties[TILE.TRAP].walkable).toBe(true);

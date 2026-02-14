@@ -21,14 +21,15 @@ export const PLAYER_CLASSES = {
 };
 
 export const TILE = {
-  WALL: 0, FLOOR: 1, CORRIDOR: 2, DOOR: 3, STAIRS_DOWN: 4, WATER: 5, TRAP: 6,
+  WALL: 0, FLOOR: 1, CORRIDOR: 2, DOOR: 3, STAIRS_DOWN: 4, WATER: 5, TRAP: 6, DOOR_OPEN: 7,
   properties: {
     0: { name: 'Wall', walkable: false, blocksLOS: true },
     1: { name: 'Floor', walkable: true, blocksLOS: false },
     2: { name: 'Corridor', walkable: true, blocksLOS: false },
-    3: { name: 'Door', walkable: true, blocksLOS: false },
+    3: { name: 'Door (Closed)', walkable: false, blocksLOS: true },
     4: { name: 'Stairs Down', walkable: true, blocksLOS: false },
     5: { name: 'Water', walkable: false, blocksLOS: false },
     6: { name: 'Trap', walkable: true, blocksLOS: false },
+    7: { name: 'Door (Open)', walkable: true, blocksLOS: false },
   },
 };

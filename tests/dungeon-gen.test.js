@@ -80,13 +80,14 @@ describe('generateDungeon', () => {
     expect(foundStairs).toBe(true);
   });
 
-  it('all floor tiles are connected (flood fill)', () => {
+  it('all navigable tiles are connected if closed doors are considered passable', () => {
     const map = generateDungeon(60, 60, 'hybrid', 1);
-    // Find any walkable tile
+    const isNavigable = (x, y) => map.isWalkable(x, y) || map.getTile(x, y) === TILE.DOOR;
+    // Find any navigable tile
     let startX = -1, startY = -1;
     outer: for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
-        if (map.isWalkable(x, y)) {
+        if (isNavigable(x, y)) {
           startX = x; startY = y;
           break outer;
         }
@@ -103,22 +104,22 @@ describe('generateDungeon', () => {
       for (const [dx, dy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
         const nx = cx + dx, ny = cy + dy;
         const key = `${nx},${ny}`;
-        if (!visited.has(key) && map.isWalkable(nx, ny)) {
+        if (!visited.has(key) && isNavigable(nx, ny)) {
           visited.add(key);
           queue.push([nx, ny]);
         }
       }
     }
 
-    // Count all walkable tiles
-    let totalWalkable = 0;
+    // Count all navigable tiles
+    let totalNavigable = 0;
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
-        if (map.isWalkable(x, y)) totalWalkable++;
+        if (isNavigable(x, y)) totalNavigable++;
       }
     }
 
-    expect(visited.size).toBe(totalWalkable);
+    expect(visited.size).toBe(totalNavigable);
   });
 
   it('generates corridor-heavy archetype', () => {
