@@ -5,7 +5,7 @@ export class HUD {
     this.ctx = ctx;
     this.canvasWidth = canvasWidth;
     this.canvasHeight = canvasHeight;
-    this.baseHudHeight = 132;
+    this.baseHudHeight = 172;
     this.uiScale = 1;
     this.hudHeight = this.baseHudHeight;
     this.resize(canvasWidth, canvasHeight);
@@ -110,10 +110,10 @@ export class HUD {
     ctx.fillStyle = '#333';
     ctx.fillRect(0, y, this.canvasWidth, 1);
 
-    const hpBarX = Math.round(10 * s);
-    const hpBarY = y + Math.round(8 * s);
-    const hpBarW = Math.round(150 * s);
-    const hpBarH = Math.round(14 * s);
+    const hpBarX = Math.round(12 * s);
+    const hpBarY = y + Math.round(10 * s);
+    const hpBarW = Math.round(200 * s);
+    const hpBarH = Math.round(18 * s);
     const hpRatio = player.hp / player.maxHp;
 
     ctx.fillStyle = '#400';
@@ -124,69 +124,89 @@ export class HUD {
     ctx.fillRect(hpBarX, hpBarY, hpBarW * hpRatio, hpBarH);
 
     ctx.fillStyle = '#fff';
-    ctx.font = `${Math.round(10 * s)}px monospace`;
-    ctx.fillText(`HP: ${player.hp}/${player.maxHp}`, hpBarX + Math.round(4 * s), hpBarY + Math.round(11 * s));
+    ctx.font = `${Math.round(12 * s)}px monospace`;
+    ctx.fillText(`HP: ${player.hp}/${player.maxHp}`, hpBarX + Math.round(5 * s), hpBarY + Math.round(14 * s));
 
-    ctx.fillText(`Floor ${player.floorNumber}`, hpBarX + hpBarW + Math.round(20 * s), hpBarY + Math.round(11 * s));
-    ctx.fillText(`Essence: ${player.gold}`, hpBarX + hpBarW + Math.round(80 * s), hpBarY + Math.round(11 * s));
-
-    const slotSize = Math.round(18 * s);
-    const slotGap = Math.round(6 * s);
+    const slotSize = Math.round(26 * s);
+    const slotGap = Math.round(7 * s);
     const slotCount = 3;
     const slotAreaW = slotCount * slotSize + (slotCount - 1) * slotGap;
-    const rightInset = Math.round(12 * s);
-    const beltY = hpBarY;
-    const skillY = hpBarY + slotSize + Math.round(4 * s);
-    const beltX = this.canvasWidth - slotAreaW - rightInset;
+    const rightInset = Math.round(10 * s);
+    const rightPanelPad = Math.round(8 * s);
+    const rightPanelW = slotAreaW + rightPanelPad * 2;
+    const rightPanelH = slotSize * 2 + Math.round(38 * s);
+    const rightPanelX = this.canvasWidth - rightPanelW - rightInset;
+    const rightPanelY = y + Math.round(6 * s);
+    const beltX = rightPanelX + rightPanelPad;
+    const beltY = rightPanelY + Math.round(18 * s);
+    const skillY = beltY + slotSize + Math.round(18 * s);
     const skillX = beltX;
+
+    ctx.fillStyle = '#19202a';
+    ctx.fillRect(rightPanelX, rightPanelY, rightPanelW, rightPanelH);
+    ctx.strokeStyle = '#3d4b59';
+    ctx.strokeRect(rightPanelX, rightPanelY, rightPanelW, rightPanelH);
+
+    const infoX = hpBarX + hpBarW + Math.round(18 * s);
+    ctx.fillStyle = '#d9e1ea';
+    ctx.font = `${Math.round(12 * s)}px monospace`;
+    ctx.fillText(`Floor ${player.floorNumber}`, infoX, hpBarY + Math.round(14 * s));
+    ctx.fillText(`Essence ${player.gold}`, infoX + Math.round(110 * s), hpBarY + Math.round(14 * s));
+
+    ctx.fillStyle = '#90a0b0';
+    ctx.font = `${Math.round(10 * s)}px monospace`;
+    ctx.fillText('BELT', beltX, beltY - Math.round(5 * s));
+    ctx.fillText('SKILLS', skillX, skillY - Math.round(5 * s));
 
     for (let i = 0; i < 3; i++) {
       const slotX = beltX + i * (slotSize + slotGap);
-      ctx.strokeStyle = '#555';
+      ctx.strokeStyle = '#5a6673';
       ctx.strokeRect(slotX, beltY, slotSize, slotSize);
       this.drawBeltIcon(ctx, player.belt[i], slotX + 1, beltY + 1, slotSize - 2);
-      ctx.fillStyle = '#b3bec9';
-      ctx.font = `${Math.round(8 * s)}px monospace`;
-      ctx.fillText(`${i + 1}`, slotX + Math.round(2 * s), beltY + slotSize - Math.round(2 * s));
+      ctx.fillStyle = '#d3dde7';
+      ctx.font = `${Math.round(10 * s)}px monospace`;
+      ctx.fillText(`${i + 1}`, slotX + Math.round(3 * s), beltY + slotSize - Math.round(3 * s));
     }
 
     const skills = player.activeSkills || [];
     for (let i = 0; i < 3; i++) {
       const slotX = skillX + i * (slotSize + slotGap);
       const skill = skills[i] || null;
-      ctx.strokeStyle = '#555';
+      ctx.strokeStyle = '#5a6673';
       ctx.strokeRect(slotX, skillY, slotSize, slotSize);
       this.drawSkillIcon(ctx, skill, slotX + 1, skillY + 1, slotSize - 2);
-      ctx.fillStyle = '#b3bec9';
-      ctx.font = `${Math.round(8 * s)}px monospace`;
-      ctx.fillText(i === 0 ? 'Q' : i === 1 ? 'E' : 'R', slotX + Math.round(2 * s), skillY + slotSize - Math.round(2 * s));
+      ctx.fillStyle = '#d3dde7';
+      ctx.font = `${Math.round(10 * s)}px monospace`;
+      ctx.fillText(i === 0 ? 'Q' : i === 1 ? 'E' : 'R', slotX + Math.round(3 * s), skillY + slotSize - Math.round(3 * s));
       if (skill && skill.currentCooldown > 0) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
         ctx.fillRect(slotX + 1, skillY + 1, slotSize - 2, slotSize - 2);
         ctx.fillStyle = '#ffffff';
-        ctx.font = `${Math.round(9 * s)}px monospace`;
-        ctx.fillText(`${skill.currentCooldown}`, slotX + Math.round(6 * s), skillY + Math.round(12 * s));
+        ctx.font = `${Math.round(11 * s)}px monospace`;
+        ctx.fillText(`${skill.currentCooldown}`, slotX + Math.round(8 * s), skillY + Math.round(16 * s));
       }
     }
 
     const statLine = STAT_NAMES.map(stat => `${stat}:${stats[stat] || 0}`).join('  ');
     ctx.fillStyle = '#b6c2cd';
-    ctx.font = `${Math.round(10 * s)}px monospace`;
-    ctx.fillText(statLine, Math.round(10 * s), y + Math.round(30 * s));
+    ctx.font = `${Math.round(11 * s)}px monospace`;
+    ctx.fillText(statLine, Math.round(12 * s), y + Math.round(50 * s));
 
-    const messages = messageLog.getRecent(3);
-    ctx.font = `${Math.round(10 * s)}px monospace`;
+    const messages = messageLog.getRecent(4);
+    ctx.font = `${Math.round(11 * s)}px monospace`;
+    const messageStartY = y + Math.round(72 * s);
+    const messageLineH = Math.round(16 * s);
     for (let i = 0; i < messages.length; i++) {
       const alpha = i === messages.length - 1 ? 1.0 : 0.5 + (i / messages.length) * 0.3;
       ctx.fillStyle = `rgba(200, 200, 200, ${alpha})`;
-      ctx.fillText(messages[i].text, Math.round(10 * s), y + Math.round(46 * s) + i * Math.round(14 * s));
+      ctx.fillText(messages[i].text, Math.round(12 * s), messageStartY + i * messageLineH);
     }
 
     ctx.fillStyle = '#7f8a94';
     ctx.font = `${Math.round(11 * s)}px monospace`;
     const line1 = 'Move: WASD/Arrows  Attack: Move into enemy  Wait: Space/.  Pickup: G';
     const line2 = 'Skills: Q/E/R  Belt: 1/2/3  Inventory: I/Tab  Stats: P  Descend stairs: >';
-    ctx.fillText(line1, Math.round(10 * s), y + this.hudHeight - Math.round(24 * s));
-    ctx.fillText(line2, Math.round(10 * s), y + this.hudHeight - Math.round(9 * s));
+    ctx.fillText(line1, Math.round(12 * s), y + this.hudHeight - Math.round(28 * s));
+    ctx.fillText(line2, Math.round(12 * s), y + this.hudHeight - Math.round(10 * s));
   }
 }
