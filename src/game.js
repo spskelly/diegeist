@@ -13,7 +13,7 @@ import { Entity } from './entity.js';
 import { generateDungeon } from './dungeon-gen.js';
 import { resolveAttack } from './combat.js';
 import { getAIAction } from './ai.js';
-import { generateItem, generateConsumable } from './items.js';
+import { generateItem, generateConsumable, createStarterWeapon } from './items.js';
 import { addToInventory, assignToBelt, equipItem, getEquippedStats, removeFromInventory, unequipItem, useBeltSlot } from './inventory.js';
 import { canUseSkill, tickCooldowns, updateActiveSkills, useSkill } from './skills.js';
 import { loadSaveData, persistSaveData } from './progression.js';
@@ -49,6 +49,7 @@ export class Game {
     this.startMenuIndex = 0;
     this.postDeathMenuIndex = 0;
     this.deathSplashFrames = 0;
+    this.combatVfx = { floatingTexts: [], projectiles: [] };
   }
 
   init() {
@@ -127,6 +128,166 @@ export class Game {
       attacker.stats = originalAttackerStats;
       defender.stats = originalDefenderStats;
     }
+  }
+
+  getRarityDamageBonus(rarity) {
+    const table = {
+      common: 0,
+      uncommon: 0.06,
+      rare: 0.14,
+      epic: 0.24,
+      legendary: 0.38,
+    };
+    return table[rarity] || 0;
+  }
+
+  getPlayerWeaponMultiplier(damageType) {
+    if (!this.player) return 1.0;
+    const statByType = {
+      melee: 'STR',
+      ranged: 'DEX',
+      magic: 'INT',
+    };
+    const relevantStat = statByType[damageType] || 'STR';
+    const weapons = [this.player.equipment.leftHand, this.player.equipment.rightHand]
+      .filter(item => item && item.type === 'weapon');
+    if (weapons.length === 0) return 1.0;
+
+    const bestWeapon = weapons.reduce((best, current) => {
+      if (!best) return current;
+      const bestScore = (best.statBonuses?.[relevantStat] || 0) + this.getRarityDamageBonus(best.rarity);
+      const currentScore = (current.statBonuses?.[relevantStat] || 0) + this.getRarityDamageBonus(current.rarity);
+      return currentScore > bestScore ? current : best;
+    }, null);
+
+    const statBonus = bestWeapon?.statBonuses?.[relevantStat] || 0;
+    const rarityBonus = this.getRarityDamageBonus(bestWeapon?.rarity);
+    return 1 + statBonus * 0.03 + rarityBonus;
+  }
+
+  getEnemyBaseTemplatesForFloor() {
+    const floor = this.floorNumber;
+    return [
+      {
+        name: 'Rat',
+        maxHp: 5,
+        speed: 100,
+        stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 },
+        spriteKey: 'rat',
+        behavior: 'rushdown',
+        weight: Math.max(12, 52 - floor * 3),
+      },
+      {
+        name: 'Bat',
+        maxHp: 3,
+        speed: 145,
+        stats: { STR: 2, DEX: 3, CON: 2, INT: 1, WIS: 1, LCK: 3 },
+        spriteKey: 'bat',
+        behavior: 'rushdown',
+        weight: 22 + floor * 1.2,
+      },
+      {
+        name: 'Shade',
+        maxHp: 6,
+        speed: 120,
+        stats: { STR: 4, DEX: 4, CON: 3, INT: 2, WIS: 2, LCK: 3 },
+        spriteKey: 'trap',
+        behavior: 'ambush',
+        weight: 16 + floor * 1.8,
+      },
+      {
+        name: 'Cultist',
+        maxHp: 7,
+        speed: 90,
+        stats: { STR: 2, DEX: 2, CON: 4, INT: 5, WIS: 4, LCK: 2 },
+        spriteKey: 'cultist',
+        behavior: 'summoner',
+        weight: 10 + floor * 1.9,
+      },
+    ];
+  }
+
+  chooseWeightedEnemyTemplate(templates) {
+    const totalWeight = templates.reduce((sum, t) => sum + Math.max(1, t.weight || 1), 0);
+    let roll = Math.random() * totalWeight;
+    for (const template of templates) {
+      roll -= Math.max(1, template.weight || 1);
+      if (roll <= 0) return template;
+    }
+    return templates[templates.length - 1];
+  }
+
+  scaleEnemyTemplate(template) {
+    const floor = this.floorNumber;
+    const statScale = 1 + Math.max(0, floor - 1) * 0.06;
+    const hpScale = 1 + Math.max(0, floor - 1) * 0.11;
+    const speedScale = 1 + Math.max(0, floor - 1) * 0.01;
+    const scaledStats = {};
+    for (const [stat, value] of Object.entries(template.stats)) {
+      scaledStats[stat] = Math.max(1, Math.floor(value * statScale));
+    }
+
+    const enemy = {
+      ...template,
+      stats: scaledStats,
+      maxHp: Math.max(template.maxHp + floor - 1, Math.floor(template.maxHp * hpScale)),
+      speed: Math.max(70, Math.floor(template.speed * speedScale)),
+      isElite: false,
+    };
+
+    const eliteChance = Math.min(0.32, 0.03 + floor * 0.014);
+    if (Math.random() < eliteChance) {
+      enemy.isElite = true;
+      enemy.name = `Elite ${enemy.name}`;
+      enemy.maxHp = Math.floor(enemy.maxHp * 1.55);
+      enemy.speed = Math.floor(enemy.speed * 1.08);
+      for (const stat of Object.keys(enemy.stats)) {
+        enemy.stats[stat] += 2 + Math.floor(floor / 6);
+      }
+    }
+
+    return enemy;
+  }
+
+  spawnFloor10Boss() {
+    const bossRoom = this.map.rooms.find(r => r.type === 'boss');
+    if (!bossRoom) return false;
+    const centerX = Math.floor(bossRoom.x + bossRoom.width / 2);
+    const centerY = Math.floor(bossRoom.y + bossRoom.height / 2);
+    const candidates = [
+      { x: centerX, y: centerY },
+      { x: centerX + 1, y: centerY },
+      { x: centerX - 1, y: centerY },
+      { x: centerX, y: centerY + 1 },
+      { x: centerX, y: centerY - 1 },
+      { x: centerX + 1, y: centerY + 1 },
+      { x: centerX - 1, y: centerY - 1 },
+    ];
+
+    const spot = candidates.find(c =>
+      this.map.isWalkable(c.x, c.y) &&
+      !this.map.entities.some(e => e.isAlive() && e.position.x === c.x && e.position.y === c.y)
+    );
+    if (!spot) return false;
+
+    const finalBoss = new Entity({
+      id: `floor10_boss_${Date.now()}`,
+      type: 'enemy',
+      x: spot.x,
+      y: spot.y,
+      stats: { STR: 18, DEX: 10, CON: 16, INT: 12, WIS: 10, LCK: 8 },
+      maxHp: 180,
+      speed: 125,
+      behavior: 'rushdown',
+      name: 'Void Tyrant',
+    });
+    finalBoss.spriteKey = 'boss_tyrant';
+    finalBoss.isFloorBoss = true;
+    this.map.entities.push(finalBoss);
+    this.turnSystem.addEntity(finalBoss);
+    this.messageLog.add('A Void Tyrant rises in the boss chamber.', this.turnCount);
+    if (this.audio) this.audio.bossEntrance();
+    return true;
   }
 
   spawnFloorItems(rooms) {
@@ -464,13 +625,16 @@ export class Game {
     let killCount = 0;
     let dodgeCount = 0;
     const damageType = skill.statScaling === 'DEX' ? 'ranged' : skill.statScaling === 'INT' ? 'magic' : 'melee';
+    const weaponMultiplier = this.getPlayerWeaponMultiplier(damageType);
 
     for (const enemy of targets) {
+      this.addProjectileForDamageType(this.player, enemy, damageType);
       const result = this.resolveCombat(this.player, enemy, {
         baseDamage: skill.damage,
         damageType,
-        weaponMultiplier: 1.0,
+        weaponMultiplier,
       });
+      this.addHitFeedback(enemy, result, 'player');
       if (result.dodged) {
         dodgeCount++;
         continue;
@@ -501,9 +665,20 @@ export class Game {
     this.turnSystem.removeEntity(enemy.id);
     this.runSummary.enemiesKilled++;
 
-    const killCurrency = 3 + Math.floor(Math.random() * 3);
+    const killCurrency = (enemy.isElite ? 6 : 3) + Math.floor(Math.random() * (enemy.isElite ? 6 : 3));
     this.player.gold += killCurrency;
     this.runSummary.currencyEarned += killCurrency;
+
+    if (enemy.isFloorBoss && this.floorNumber >= 10) {
+      const victoryBonus = 120;
+      this.player.gold += victoryBonus;
+      this.runSummary.currencyEarned += victoryBonus;
+      this.messageLog.add('The Void Tyrant falls. You have conquered Diegeist.', this.turnCount);
+      this.finalizeRun('Victory');
+      this.state = 'victory';
+      if (this.audio) this.audio.stopAmbient();
+      return;
+    }
 
     if (Math.random() < 0.45) {
       const luck = this.getEntityStatsWithEquipment(this.player).LCK;
@@ -559,6 +734,7 @@ export class Game {
     this.persistLastClassSelection();
     this.messageLog = new MessageLog();
     this.turnSystem = new TurnSystem();
+    this.clearCombatVfx();
     this.player = null;
     this.map = null;
     this.turnCount = 0;
@@ -626,6 +802,14 @@ export class Game {
       } else {
         this.state = 'startMenu';
       }
+    }
+  }
+
+  handleVictoryAction(action) {
+    if (!action) return;
+    if (action.type === 'inventoryConfirm' || action.type === 'wait' || action.type === 'close') {
+      this.state = 'startMenu';
+      if (this.audio) this.audio.uiClick();
     }
   }
 
@@ -729,6 +913,137 @@ export class Game {
     if (this.audio) this.audio.uiClick();
   }
 
+  getNowMs() {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
+  }
+
+  clearCombatVfx() {
+    this.combatVfx.floatingTexts.length = 0;
+    this.combatVfx.projectiles.length = 0;
+  }
+
+  addFloatingText(tileX, tileY, text, color = '#ffffff', durationMs = 680) {
+    this.combatVfx.floatingTexts.push({
+      tileX,
+      tileY,
+      text,
+      color,
+      startMs: this.getNowMs(),
+      durationMs,
+    });
+  }
+
+  addProjectile(fromX, fromY, toX, toY, spriteKey, durationMs = 180) {
+    this.combatVfx.projectiles.push({
+      fromX,
+      fromY,
+      toX,
+      toY,
+      spriteKey,
+      startMs: this.getNowMs(),
+      durationMs,
+    });
+  }
+
+  addHitFeedback(defender, result, source = 'player') {
+    if (result.dodged) {
+      this.addFloatingText(defender.position.x, defender.position.y, 'DODGE', '#8fd9ff', 760);
+      return;
+    }
+    const critSuffix = result.crit ? '!' : '';
+    const color = source === 'enemy'
+      ? '#ff7f7f'
+      : result.crit
+        ? '#ffd86b'
+        : '#ffc18a';
+    this.addFloatingText(defender.position.x, defender.position.y, `${result.damage}${critSuffix}`, color, 700);
+  }
+
+  addProjectileForDamageType(fromEntity, toEntity, damageType) {
+    if (!fromEntity || !toEntity) return;
+    if (damageType === 'ranged') {
+      this.addProjectile(
+        fromEntity.position.x,
+        fromEntity.position.y,
+        toEntity.position.x,
+        toEntity.position.y,
+        'arrow_projectile',
+        170
+      );
+    } else if (damageType === 'magic') {
+      this.addProjectile(
+        fromEntity.position.x,
+        fromEntity.position.y,
+        toEntity.position.x,
+        toEntity.position.y,
+        'arcbolt_projectile',
+        210
+      );
+    }
+  }
+
+  updateCombatVfx(nowMs) {
+    this.combatVfx.floatingTexts = this.combatVfx.floatingTexts.filter(vfx => nowMs - vfx.startMs < vfx.durationMs);
+    this.combatVfx.projectiles = this.combatVfx.projectiles.filter(vfx => nowMs - vfx.startMs < vfx.durationMs);
+  }
+
+  drawCombatVfx(nowMs) {
+    const ctx = this.ctx;
+    const cam = this.camera;
+
+    for (const vfx of this.combatVfx.projectiles) {
+      const t = Math.max(0, Math.min(1, (nowMs - vfx.startMs) / vfx.durationMs));
+      const px = vfx.fromX + (vfx.toX - vfx.fromX) * t;
+      const py = vfx.fromY + (vfx.toY - vfx.fromY) * t;
+      const sprite = this.sprites.get(vfx.spriteKey);
+      const size = Math.max(6, Math.floor(cam.tileSize * 0.5));
+      const { sx, sy } = cam.tileToScreen(px, py);
+      const drawX = sx + Math.floor(cam.tileSize / 2) - Math.floor(size / 2);
+      const drawY = sy + Math.floor(cam.tileSize / 2) - Math.floor(size / 2);
+      if (sprite) {
+        ctx.drawImage(sprite, drawX, drawY, size, size);
+      } else {
+        ctx.fillStyle = '#ffd47a';
+        ctx.fillRect(drawX, drawY, size, size);
+      }
+    }
+
+    const savedAlign = ctx.textAlign;
+    const savedBaseline = ctx.textBaseline;
+    const savedAlpha = ctx.globalAlpha;
+    const fontSize = Math.max(10, Math.floor(cam.tileSize * 0.45));
+    ctx.font = `${fontSize}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (const vfx of this.combatVfx.floatingTexts) {
+      const t = Math.max(0, Math.min(1, (nowMs - vfx.startMs) / vfx.durationMs));
+      const alpha = 1 - t;
+      const rise = t * cam.tileSize * 0.9;
+      const { sx, sy } = cam.tileToScreen(vfx.tileX, vfx.tileY);
+      const textX = sx + cam.tileSize / 2;
+      const textY = sy + cam.tileSize * 0.2 - rise;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#000000';
+      ctx.fillText(vfx.text, textX + 1, textY + 1);
+      ctx.fillStyle = vfx.color;
+      ctx.fillText(vfx.text, textX, textY);
+    }
+
+    ctx.globalAlpha = savedAlpha;
+    ctx.textAlign = savedAlign;
+    ctx.textBaseline = savedBaseline;
+  }
+
+  applyStarterLoadout() {
+    if (!this.player) return;
+    const starterWeapon = createStarterWeapon(this.player.playerClass);
+    if (!starterWeapon) return;
+
+    this.player.equipment[starterWeapon.slot] = starterWeapon;
+    this.messageLog.add(`You begin with ${starterWeapon.name}.`, this.turnCount);
+  }
+
   startFloor() {
     // Pick a random archetype
     const archetypes = ['corridor-heavy', 'cavernous', 'hybrid'];
@@ -749,6 +1064,7 @@ export class Game {
       this.player = createPlayer(this.selectedClass, startX, startY, this.saveData?.permanentStats || {});
       this.player.floorNumber = this.floorNumber;
       this.runSummary.classKey = this.player.playerClass;
+      this.applyStarterLoadout();
     } else {
       this.player.moveTo(startX, startY);
       this.player.floorNumber = this.floorNumber;
@@ -759,41 +1075,101 @@ export class Game {
     this.turnSystem.addEntity(this.player);
     updateActiveSkills(this.player);
 
-    // Spawn 3-5 wandering enemies in standard rooms
+    // Spawn enemy groups with floor-scaled difficulty. Bat groups spawn as clustered packs.
     const standardRooms = this.map.rooms.filter(r => r.type === 'standard');
-    const numEnemies = 3 + Math.floor(Math.random() * 3); // 3-5 enemies
+    const floorPressure = Math.floor((this.floorNumber - 1) / 2);
+    const numEnemyGroups = Math.min(12, 3 + floorPressure + Math.floor(Math.random() * 3));
+    const rooms = standardRooms.slice().sort(() => Math.random() - 0.5);
+    const baseEnemyTemplates = this.getEnemyBaseTemplatesForFloor();
+    let enemySerial = 0;
 
-    for (let i = 0; i < numEnemies && i < standardRooms.length; i++) {
-      const room = standardRooms[i];
-      const enemyX = room.x + Math.floor(Math.random() * room.width);
-      const enemyY = room.y + Math.floor(Math.random() * room.height);
+    const isInRoom = (room, x, y) =>
+      x >= room.x && x < room.x + room.width &&
+      y >= room.y && y < room.y + room.height;
 
-      // Randomize enemy type
-      const enemyTypes = [
-        { name: 'Rat', maxHp: 5, speed: 100, stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 }, spriteKey: 'rat', behavior: 'rushdown' },
-        { name: 'Bat', maxHp: 3, speed: 150, stats: { STR: 2, DEX: 5, CON: 2, INT: 1, WIS: 1, LCK: 3 }, spriteKey: 'bat', behavior: 'wander' },
-        { name: 'Shade', maxHp: 6, speed: 120, stats: { STR: 4, DEX: 4, CON: 3, INT: 2, WIS: 2, LCK: 3 }, spriteKey: 'trap', behavior: 'ambush' },
-        { name: 'Cultist', maxHp: 7, speed: 90, stats: { STR: 2, DEX: 2, CON: 4, INT: 5, WIS: 4, LCK: 2 }, spriteKey: 'cultist', behavior: 'summoner' },
-      ];
-      const enemyType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
+    const isSpawnOpen = (x, y) => {
+      if (!this.map.isWalkable(x, y)) return false;
+      if (this.player.position.x === x && this.player.position.y === y) return false;
+      return !this.map.entities.some(e => e.isAlive() && e.position.x === x && e.position.y === y);
+    };
 
+    const pickOpenTileInRoom = (room, attempts = 20) => {
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        const x = room.x + Math.floor(Math.random() * room.width);
+        const y = room.y + Math.floor(Math.random() * room.height);
+        if (isSpawnOpen(x, y)) return { x, y };
+      }
+      return null;
+    };
+
+    const spawnEnemyAt = (enemyType, x, y) => {
+      if (!isSpawnOpen(x, y)) return null;
+      const scaled = this.scaleEnemyTemplate(enemyType);
       const enemy = new Entity({
-        id: `enemy_${i}`,
+        id: `enemy_${enemySerial++}`,
         type: 'enemy',
-        x: enemyX,
-        y: enemyY,
-        stats: enemyType.stats,
-        maxHp: enemyType.maxHp,
-        speed: enemyType.speed,
-        behavior: enemyType.behavior,
-        name: enemyType.name,
+        x,
+        y,
+        stats: scaled.stats,
+        maxHp: scaled.maxHp,
+        speed: scaled.speed,
+        behavior: scaled.behavior,
+        name: scaled.name,
       });
-      enemy.spriteKey = enemyType.spriteKey;
+      enemy.spriteKey = scaled.spriteKey;
+      enemy.isElite = scaled.isElite;
       if (enemy.behavior === 'summoner') {
-        enemy.summonCooldown = 2 + Math.floor(Math.random() * 2);
+        enemy.summonCooldown = Math.max(1, 2 + Math.floor(Math.random() * 2) - Math.floor(this.floorNumber / 5));
       }
       this.map.entities.push(enemy);
       this.turnSystem.addEntity(enemy);
+      return enemy;
+    };
+
+    const packOffsets = [
+      { dx: 0, dy: -1 }, { dx: 0, dy: 1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 },
+      { dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 1 }, { dx: 1, dy: 1 },
+    ];
+
+    for (let i = 0; i < numEnemyGroups && i < rooms.length; i++) {
+      const room = rooms[i];
+      const enemyType = this.chooseWeightedEnemyTemplate(baseEnemyTemplates);
+      const anchor = pickOpenTileInRoom(room);
+      if (!anchor) continue;
+
+      const first = spawnEnemyAt(enemyType, anchor.x, anchor.y);
+      if (!first) continue;
+
+      if (enemyType.name !== 'Bat') continue;
+
+      const packSize = Math.min(5, 2 + Math.floor(Math.random() * 2) + Math.floor((this.floorNumber - 1) / 6));
+      const packTiles = [{ x: anchor.x, y: anchor.y }];
+      let spawned = 1;
+      let attempts = 0;
+
+      while (spawned < packSize && attempts < 20) {
+        attempts++;
+        const origin = packTiles[Math.floor(Math.random() * packTiles.length)];
+        const offsets = packOffsets.slice().sort(() => Math.random() - 0.5);
+        let placed = false;
+        for (const offset of offsets) {
+          const nx = origin.x + offset.dx;
+          const ny = origin.y + offset.dy;
+          if (!isInRoom(room, nx, ny)) continue;
+          const bat = spawnEnemyAt(enemyType, nx, ny);
+          if (!bat) continue;
+          packTiles.push({ x: nx, y: ny });
+          spawned++;
+          placed = true;
+          break;
+        }
+        if (!placed) continue;
+      }
+    }
+
+    if (this.floorNumber === 10) {
+      this.spawnFloor10Boss();
+      this.messageLog.add('Final floor. Defeat the Void Tyrant to win.', this.turnCount);
     }
     this.spawnFloorItems(standardRooms);
 
@@ -801,6 +1177,9 @@ export class Game {
       this.messageLog.add('Welcome to Diegeist. Move with arrow keys or WASD.', this.turnCount);
       this.messageLog.add('Attack by moving into an enemy tile.', this.turnCount);
       this.messageLog.add('Press G to pick up items. Press I to manage inventory.', this.turnCount);
+      if (this.player.playerClass === 'archer' || this.player.playerClass === 'mage') {
+        this.messageLog.add('Use Q for your starter ranged skill.', this.turnCount);
+      }
     }
     this.messageLog.add(`Floor ${this.floorNumber} begins.`, this.turnCount);
     if (this.audio) this.audio.startAmbient(this.floorNumber);
@@ -814,12 +1193,26 @@ export class Game {
       const nx = this.player.position.x + action.dx;
       const ny = this.player.position.y + action.dy;
 
+      // Closed doors open only when the player pushes through them.
+      if (this.map.getTile(nx, ny) === TILE.DOOR) {
+        this.map.setTile(nx, ny, TILE.DOOR_OPEN);
+        this.player.moveTo(nx, ny);
+        this.messageLog.add('You open the door.', this.turnCount);
+        if (this.audio) this.audio.doorOpen();
+        return true;
+      }
+
       // Check for enemy at target position (bump-to-attack)
       const enemy = this.map.entities.find(e =>
         e.type === 'enemy' && e.isAlive() && e.position.x === nx && e.position.y === ny
       );
       if (enemy) {
-        const result = this.resolveCombat(this.player, enemy, { baseDamage: 3, damageType: 'melee', weaponMultiplier: 1.0 });
+        const result = this.resolveCombat(this.player, enemy, {
+          baseDamage: 3,
+          damageType: 'melee',
+          weaponMultiplier: this.getPlayerWeaponMultiplier('melee'),
+        });
+        this.addHitFeedback(enemy, result, 'player');
 
         if (result.dodged) {
           this.messageLog.add(`The ${enemy.name} dodges your attack!`, this.turnCount);
@@ -870,11 +1263,13 @@ export class Game {
     if (action.type === 'move') {
       entity.moveTo(action.x, action.y);
     } else if (action.type === 'attack') {
+      this.addProjectileForDamageType(entity, this.player, action.damageType || 'melee');
       const result = this.resolveCombat(entity, this.player, {
         baseDamage: 2,
         damageType: action.damageType || 'melee',
         weaponMultiplier: 1.0
       });
+      this.addHitFeedback(this.player, result, 'enemy');
 
       if (result.dodged) {
         this.messageLog.add(`You dodge the ${entity.name}'s attack!`, this.turnCount);
@@ -916,6 +1311,11 @@ export class Game {
   }
 
   handleFloorTransition() {
+    if (this.floorNumber >= 10) {
+      this.messageLog.add('This is the deepest floor. Defeat the final boss to win.', this.turnCount);
+      return false;
+    }
+
     const playerTile = this.map.getTile(this.player.position.x, this.player.position.y);
     if (playerTile !== TILE.STAIRS_DOWN) {
       this.messageLog.add('There are no stairs here.', this.turnCount);
@@ -966,6 +1366,10 @@ export class Game {
     }
     if (this.state === 'postDeathMenu') {
       this.handlePostDeathMenuAction(action);
+      return;
+    }
+    if (this.state === 'victory') {
+      this.handleVictoryAction(action);
       return;
     }
     if (this.state !== 'playing') return;
@@ -1342,7 +1746,44 @@ export class Game {
     ctx.fillText('Up/Down: Select  Enter/Z: Confirm', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
   }
 
-  draw() {
+  drawVictoryScreen() {
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+    const panelW = Math.min(Math.round(620 * uiScale), w - 40);
+    const panelH = Math.min(Math.round(360 * uiScale), h - 40);
+    const x = Math.floor((w - panelW) / 2);
+    const y = Math.floor((h - panelH) / 2);
+
+    ctx.fillStyle = '#07110b';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = 'rgba(27, 69, 45, 0.35)';
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.fillStyle = '#13251b';
+    ctx.fillRect(x, y, panelW, panelH);
+    ctx.strokeStyle = '#6baf7f';
+    ctx.strokeRect(x, y, panelW, panelH);
+
+    ctx.fillStyle = '#dbffe3';
+    ctx.font = `${Math.round(34 * uiScale)}px monospace`;
+    ctx.fillText('VICTORY', x + Math.round(20 * uiScale), y + Math.round(48 * uiScale));
+
+    ctx.fillStyle = '#b7e3c2';
+    ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+    ctx.fillText('The Void Tyrant is slain. Diegeist is conquered.', x + Math.round(20 * uiScale), y + Math.round(82 * uiScale));
+    ctx.fillText(`Class: ${this.getClassLabel(this.runSummary?.classKey || this.selectedClass)}`, x + Math.round(20 * uiScale), y + Math.round(112 * uiScale));
+    ctx.fillText(`Floors Reached: ${this.runSummary?.floorsReached || this.floorNumber}`, x + Math.round(20 * uiScale), y + Math.round(134 * uiScale));
+    ctx.fillText(`Enemies Killed: ${this.runSummary?.enemiesKilled || 0}`, x + Math.round(20 * uiScale), y + Math.round(156 * uiScale));
+    ctx.fillText(`Essence Earned: ${this.runSummary?.currencyEarned || 0}`, x + Math.round(20 * uiScale), y + Math.round(178 * uiScale));
+
+    ctx.fillStyle = '#86c99b';
+    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    ctx.fillText('Press Enter to return to main menu', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
+  }
+
+  draw(nowMs = this.getNowMs()) {
     if (this.state === 'startMenu') {
       this.drawStartMenu();
       return;
@@ -1353,6 +1794,11 @@ export class Game {
       return;
     }
 
+    if (this.state === 'victory') {
+      this.drawVictoryScreen();
+      return;
+    }
+
     if (!this.map || !this.player) {
       this.ctx.fillStyle = '#000';
       this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -1360,6 +1806,7 @@ export class Game {
     }
 
     this.renderer.render({ map: this.map, player: this.player });
+    this.drawCombatVfx(nowMs);
     this.hud.draw(this.player, this.messageLog, this.getEntityStatsWithEquipment(this.player));
 
     if (this.state === 'deathSplash') {
@@ -1371,9 +1818,11 @@ export class Game {
     if (this.statsOpen) this.drawStatsOverlay();
   }
 
-  loop() {
+  loop(nowMs = null) {
+    const frameNow = typeof nowMs === 'number' ? nowMs : this.getNowMs();
     this.update();
-    this.draw();
-    requestAnimationFrame(() => this.loop());
+    this.updateCombatVfx(frameNow);
+    this.draw(frameNow);
+    requestAnimationFrame(nextMs => this.loop(nextMs));
   }
 }
