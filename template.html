@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.json">
 <title>Diegeist</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -22,5 +24,6 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
   game.init();
 })();
 </script>
+<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');</script>
 </body>
 </html>
