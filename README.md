@@ -1,82 +1,109 @@
 # Diegeist
 
-Tile-based roguelite dungeon crawler built in vanilla JavaScript with a single-file HTML build target.
+Tile-based roguelite dungeon crawler built in vanilla JavaScript. Outputs a single HTML file that runs as an installable PWA.
 
 ## Current Status
 
-Playable prototype with:
-- Procedural dungeon floors (BSP archetypes, start/boss/special rooms)
-- Start menu with class select, death splash, and post-death retry/menu flow
+Playable prototype with a complete core loop: class select, explore procedural dungeons, fight, loot, descend, die, persist progression, repeat.
+
+### Implemented
+
+- Procedural dungeon generation (BSP room archetypes, corridors, start/boss/special rooms)
 - Turn-based energy system
-- Enemy AI (wander, rushdown, ambush, summoner, kiting)
-- Summoner minion caps and safer door topology generation
-- Combat (melee/ranged/magic, crit, dodge, scaling)
-- FOV and exploration fog
-- Loot drops, inventory, belt consumables, gear-bound skills
-- Inventory item inspection panel and character stats overlay
-- Natural HP regeneration over turns
+- Melee, ranged, and magic combat with crit, dodge, and floor scaling
+- Five enemy AI behaviours (wander, rushdown, ambush, summoner with minion cap, kiting)
+- FOV / line-of-sight with exploration fog
+- Loot drops with rarity tiers, gear-bound skills, belt consumables with auto-refill
+- Combined inventory UI with inspect panel, compare panel, and character stats overlay
+- Hub menu between runs (shop, stash, achievements)
+- Pause menu with save & quit
+- Split input: arrow keys for movement, WASD for directional attacks
 - Adaptive camera zoom with scaled sprite rendering
-- Procedural audio (SFX + ambient)
-- Save data persistence for progression currency/run history
+- Procedural audio via Web Audio API (SFX + ambient)
+- Save data persistence (meta-currency, run history, stash) via localStorage
+- PWA service worker and manifest for offline play and desktop install
 
-Core loop works: spawn -> explore -> fight -> descend stairs -> die -> persist run summary.
+### Known Gaps vs Full Spec
 
-## Requirements
+- Later content phases (full boss roster, special room mechanics, balance pass) still in progress
+- PWA install prompt requires icon assets (placeholder SVG included; Chrome may need raster PNGs)
 
-- Node.js 18+ (recommended)
-- npm
+## Play
 
-## Run Locally
+Hosted on GitHub Pages — just open it in a browser. No install, no build, no server required.
 
-1. Install dependencies:
+When served over HTTPS the game is installable as a desktop app via your browser's install prompt.
+
+## Development
+
+Requires Node.js 18+ and npm. Only needed if you want to modify the source or run tests.
+
 ```bash
-npm install
+npm install          # install dev dependencies (vitest)
+npm test             # run unit tests
+npm run build        # build to dist/
 ```
 
-2. Run tests:
-```bash
-npm test
-```
+To test PWA features locally, serve the `dist/` folder:
 
-3. Build single-file output:
 ```bash
-npm run build
+npx serve dist
 ```
-
-4. Open:
-- `dist/diegeist.html` in a browser, or
-- serve project root with a static server and open `dist/diegeist.html`
 
 ## Controls
 
-- Start/death menus: `Arrow keys` to navigate, `Enter` or `Z` to confirm
-- Move: `WASD` or arrow keys
-- Wait: `Space` or `.`
-- Pick up item on current tile: `G`
-- Descend stairs: `>` (Shift + `.`) when allowed
-- Character stats overlay: `P` (close with `P` or `Esc`)
-- Inventory overlay: `I` or `Tab`
-- Inventory overlay actions:
-  - Navigate: arrows
-  - Switch tabs: left/right arrows
-  - Equip/unequip: `Enter` or `Z`
-  - Drop selected item: `X`
-  - Assign consumable to belt: `C`
-  - Unequip selected gear slot: `U`
-  - Close: `I`, `Tab`, or `Esc`
-- Inventory includes an inspect panel for the selected item/equipment
-- Skills: `Q`, `E`, `R`
-- Belt consumables: `1`, `2`, `3`
+### Menus
 
-## Development Notes
+| Key | Action |
+|-----|--------|
+| Arrow keys | Navigate |
+| Enter / Z | Confirm |
+| Esc | Back / close |
 
-- Source modules live in `src/`
-- Tests live in `tests/` (Vitest)
-- `build.js` assembles modules into `dist/diegeist.html` using `template.html`
-- Full target spec: `diegeist-spec.md`
-- Task-level implementation roadmap: `docs/plans/2026-02-12-diegeist-full-build.md`
+### Gameplay
 
-## Known Gaps vs Full Spec
+| Key | Action |
+|-----|--------|
+| Arrow keys | Move |
+| WASD | Directional attack |
+| Space / . | Wait a turn |
+| G | Pick up item |
+| > (Shift + .) | Descend stairs |
 
-- No full hub/shop/stash/achievements menu flow yet
-- Later content phases (boss roster, room mechanics, balance pass, PWA service worker) still in progress
+### Inventory & UI
+
+| Key | Action |
+|-----|--------|
+| I / Tab | Open inventory |
+| P | Character stats overlay |
+| Esc | Close any overlay / pause |
+| Arrows | Navigate inventory grid |
+| Left / Right | Switch inventory tabs |
+| Enter / Z | Equip or unequip |
+| X | Drop item |
+| C | Assign consumable to belt |
+| U | Unequip selected gear slot |
+| Q / E / R | Use skill slots |
+| 1 / 2 / 3 | Use belt consumables |
+
+## Project Structure
+
+```
+src/               22 modules — the game source
+tests/             18 test files (Vitest)
+template.html      HTML shell with PWA meta tags and SW registration
+build.js           concatenates src/ into a single HTML file + PWA assets
+dist/              build output (gitignored)
+  diegeist.html    the complete game
+  sw.js            cache-first service worker (versioned per build)
+  manifest.json    web app manifest
+  icon.svg         placeholder app icon
+diegeist-spec.md   full target specification
+docs/plans/        implementation roadmaps
+```
+
+## Build System
+
+`build.js` reads every module in `src/` in dependency order, strips ES module `import`/`export` syntax, and injects the combined code into `template.html`. It also emits `sw.js`, `manifest.json`, and `icon.svg` into `dist/`. The service worker cache key includes a `Date.now()` stamp so each build invalidates the previous cache.
+
+No bundler, no framework, no external assets at runtime.
