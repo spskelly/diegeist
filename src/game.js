@@ -25,7 +25,7 @@ import {
   unequipItem,
   useBeltSlot
 } from './inventory.js';
-import { canUseSkill, tickCooldowns, updateActiveSkills, useSkill } from './skills.js';
+import { assignSkillToSlot, canUseSkill, tickCooldowns, updateActiveSkills, useSkill } from './skills.js';
 import { ACHIEVEMENTS, HubShop, loadSaveData, persistSaveData } from './progression.js';
 import { AudioManager } from './audio.js';
 
@@ -55,7 +55,7 @@ export class Game {
     this.runFinalized = false;
     this.inventoryOpen = false;
     this.statsOpen = false;
-    this.inventoryTab = 'inventory';
+    this.inventorySection = 'equipment';
     this.inventoryCursorByTab = { inventory: 0, equipment: 0 };
     this.regenCounter = 0;
     this.classOrder = Object.keys(PLAYER_CLASSES);
@@ -67,6 +67,8 @@ export class Game {
     this.hubShopCursor = 0;
     this.hubStashCursor = 0;
     this.hubRunItemsCursor = 0;
+    this.hubStashScrollOffset = 0;
+    this.hubRunScrollOffset = 0;
     this.hubAchievementsCursor = 0;
     this.hubStashPane = 'stash';
     this.hubNotice = '';
@@ -75,15 +77,18 @@ export class Game {
     this.hubStashedFromRunCount = 0;
     this.pendingStashLoadoutItem = null;
     this.hubShop = new HubShop();
+    this.pauseMenuIndex = 0;
     this.combatVfx = { floatingTexts: [], projectiles: [] };
   }
 
   init() {
     this.saveData = loadSaveData();
+    this.pendingStashLoadoutItem = this.saveData.pendingLoadoutItem || null;
     if (this.saveData?.settings?.lastClass && this.classOrder.includes(this.saveData.settings.lastClass)) {
       this.selectedClass = this.saveData.settings.lastClass;
     }
-    this.startMenuIndex = Math.max(0, this.classOrder.indexOf(this.selectedClass));
+    const classIdx = Math.max(0, this.classOrder.indexOf(this.selectedClass));
+    this.startMenuIndex = this.hasSavedRun() ? classIdx + 1 : classIdx;
     this.runSummary = {
       classKey: this.selectedClass,
       floorsReached: 1,
@@ -206,6 +211,8 @@ export class Game {
     this.hubStashPane = 'stash';
     this.hubStashCursor = 0;
     this.hubRunItemsCursor = 0;
+    this.hubStashScrollOffset = 0;
+    this.hubRunScrollOffset = 0;
     this.hubAchievementsCursor = 0;
     if (notice) this.hubNotice = notice;
     this.refreshHubShop();
@@ -216,6 +223,7 @@ export class Game {
     const sourceItems = [];
     if (this.player) {
       for (const item of this.player.inventory) {
+        if (item.type === 'consumable') continue;
         sourceItems.push(this.cloneItem(item));
       }
       for (const item of Object.values(this.player.equipment)) {
@@ -341,6 +349,7 @@ export class Game {
         }
       }
       this.pendingStashLoadoutItem = null;
+      this.saveData.pendingLoadoutItem = null;
     }
 
     if (!Array.isArray(this.saveData.pendingRunPurchases) || this.saveData.pendingRunPurchases.length === 0) return;
@@ -474,6 +483,29 @@ export class Game {
     const statBonus = bestWeapon?.statBonuses?.[relevantStat] || 0;
     const rarityBonus = this.getRarityDamageBonus(bestWeapon?.rarity);
     return 1 + statBonus * 0.03 + rarityBonus;
+  }
+
+  getPlayerAttackType() {
+    const weapon = this.player?.equipment?.leftHand;
+    if (weapon && weapon.type === 'weapon' && weapon.attackType) {
+      return weapon.attackType;
+    }
+    return 'melee';
+  }
+
+  findRangedTarget(dx, dy, maxRange = 6) {
+    const px = this.player.position.x;
+    const py = this.player.position.y;
+    for (let step = 1; step <= maxRange; step++) {
+      const x = px + dx * step;
+      const y = py + dy * step;
+      if (this.map.blocksLOS(x, y)) return null;
+      const enemy = this.map.entities.find(e =>
+        e.type === 'enemy' && e.isAlive() && e.position.x === x && e.position.y === y
+      );
+      if (enemy) return enemy;
+    }
+    return null;
   }
 
   getEnemyBaseTemplatesForFloor() {
@@ -691,58 +723,61 @@ export class Game {
   }
 
   clampInventoryCursor() {
-    if (this.inventoryTab === 'inventory') {
-      const maxIndex = this.getInventoryCapacity() - 1;
-      const current = this.inventoryCursorByTab.inventory || 0;
-      this.inventoryCursorByTab.inventory = Math.max(0, Math.min(current, maxIndex));
-      return;
-    }
+    const maxInv = this.getInventoryCapacity() - 1;
+    const curInv = this.inventoryCursorByTab.inventory || 0;
+    this.inventoryCursorByTab.inventory = Math.max(0, Math.min(curInv, maxInv));
 
     const rows = this.getEquipmentRows();
-    const maxIndex = Math.max(0, rows.length - 1);
-    const current = this.inventoryCursorByTab[this.inventoryTab] || 0;
-    this.inventoryCursorByTab[this.inventoryTab] = Math.max(0, Math.min(current, maxIndex));
+    const maxEq = Math.max(0, rows.length - 1);
+    const curEq = this.inventoryCursorByTab.equipment || 0;
+    this.inventoryCursorByTab.equipment = Math.max(0, Math.min(curEq, maxEq));
   }
 
   toggleInventoryOverlay() {
     this.inventoryOpen = !this.inventoryOpen;
     if (this.inventoryOpen) {
       this.statsOpen = false;
-      this.inventoryTab = 'inventory';
+      this.inventorySection = 'equipment';
       this.clampInventoryCursor();
-      this.messageLog.add('Inventory open. Selected item details are shown on the right.', this.turnCount);
     }
-    if (this.audio) this.audio.uiClick();
-  }
-
-  switchInventoryTab(direction = 0) {
-    if (direction === 0) {
-      this.inventoryTab = this.inventoryTab === 'inventory' ? 'equipment' : 'inventory';
-    } else {
-      this.inventoryTab = direction > 0 ? 'equipment' : 'inventory';
-    }
-    this.clampInventoryCursor();
     if (this.audio) this.audio.uiClick();
   }
 
   moveEquipmentCursor(delta) {
     const rows = this.getEquipmentRows();
     if (rows.length === 0) return;
-    const current = this.inventoryCursorByTab[this.inventoryTab] || 0;
-    const maxIndex = rows.length - 1;
-    this.inventoryCursorByTab[this.inventoryTab] = Math.max(0, Math.min(current + delta, maxIndex));
+    const current = this.inventoryCursorByTab.equipment || 0;
+    const next = current + delta;
+    if (next < 0) return; // at top, do nothing
+    if (next > rows.length - 1) {
+      // Cross into items section
+      this.inventorySection = 'items';
+      this.inventoryCursorByTab.inventory = 0;
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+    this.inventoryCursorByTab.equipment = next;
     if (this.audio) this.audio.uiClick();
   }
 
   moveInventoryGridCursor(dx, dy) {
     const cols = this.getInventoryGridColumns();
     const capacity = this.getInventoryCapacity();
-    const rows = Math.ceil(capacity / cols);
+    const gridRows = Math.ceil(capacity / cols);
     const current = this.inventoryCursorByTab.inventory || 0;
     let row = Math.floor(current / cols);
     let col = current % cols;
 
-    row = Math.max(0, Math.min(rows - 1, row + (dy || 0)));
+    if (dy < 0 && row === 0) {
+      // Cross into equipment section
+      this.inventorySection = 'equipment';
+      const eqRows = this.getEquipmentRows();
+      this.inventoryCursorByTab.equipment = eqRows.length - 1;
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+
+    row = Math.max(0, Math.min(gridRows - 1, row + (dy || 0)));
     col = Math.max(0, Math.min(cols - 1, col + (dx || 0)));
 
     let next = row * cols + col;
@@ -762,8 +797,8 @@ export class Game {
   }
 
   tryAssignSelectedInventoryItemToBelt(slot = null) {
-    if (this.inventoryTab !== 'inventory') {
-      this.messageLog.add('Switch to Items tab to assign belt slots.', this.turnCount);
+    if (this.inventorySection !== 'items') {
+      this.messageLog.add('Select an item in the Items section to assign belt slots.', this.turnCount);
       return false;
     }
 
@@ -786,37 +821,19 @@ export class Game {
   }
 
   handleInventoryOverlayAction(action) {
-    if (action.type === 'inventory' || action.type === 'close') {
+    if (action.type === 'inventory' || action.type === 'close' || action.type === 'inventoryTab') {
       this.inventoryOpen = false;
       if (this.audio) this.audio.uiClick();
       return;
     }
 
-    if (action.type === 'inventoryTab') {
-      this.switchInventoryTab(0);
-      return;
-    }
-
     if (isDirectionalAction(action)) {
-      if (this.inventoryTab === 'inventory') {
-        if (action.dx !== 0) {
-          const current = this.inventoryCursorByTab.inventory || 0;
-          const cols = this.getInventoryGridColumns();
-          const col = current % cols;
-          const atHorizontalEdge = (action.dx < 0 && col === 0) || (action.dx > 0 && col === cols - 1);
-          if (atHorizontalEdge) {
-            this.switchInventoryTab(0);
-            return;
-          }
-        }
+      if (this.inventorySection === 'items') {
         this.moveInventoryGridCursor(action.dx, action.dy);
-        return;
-      }
-
-      if (action.dx !== 0) {
-        this.switchInventoryTab(0);
-      } else if (action.dy !== 0) {
-        this.moveEquipmentCursor(action.dy);
+      } else {
+        if (action.dy !== 0) {
+          this.moveEquipmentCursor(action.dy);
+        }
       }
       return;
     }
@@ -826,7 +843,27 @@ export class Game {
       return;
     }
 
-    if (this.inventoryTab === 'inventory') {
+    if (action.type === 'skill') {
+      if (this.inventorySection !== 'equipment') {
+        this.messageLog.add('Select an equipment slot to assign skills.', this.turnCount);
+        return;
+      }
+      const equipmentRows = this.getEquipmentRows();
+      const idx = this.inventoryCursorByTab.equipment || 0;
+      const selected = equipmentRows[idx];
+      if (!selected || !selected.item || !selected.item.skill) {
+        this.messageLog.add('Selected item has no skill to assign.', this.turnCount);
+        return;
+      }
+      const slotLabel = action.slot === 0 ? 'Q' : action.slot === 1 ? 'E' : 'R';
+      if (assignSkillToSlot(this.player, selected.slot, action.slot)) {
+        this.messageLog.add(`${selected.item.skill.name} assigned to ${slotLabel}.`, this.turnCount);
+        if (this.audio) this.audio.uiClick();
+      }
+      return;
+    }
+
+    if (this.inventorySection === 'items') {
       const idx = this.inventoryCursorByTab.inventory || 0;
       const item = this.player.inventory[idx];
       if (!item) return;
@@ -1120,14 +1157,6 @@ export class Game {
     return PLAYER_CLASSES[classKey]?.name || classKey;
   }
 
-  cycleClassSelection(delta) {
-    if (delta === 0 || this.classOrder.length === 0) return;
-    const next = (this.startMenuIndex + delta + this.classOrder.length) % this.classOrder.length;
-    this.startMenuIndex = next;
-    this.selectedClass = this.classOrder[next];
-    if (this.audio) this.audio.uiClick();
-  }
-
   persistLastClassSelection() {
     if (!this.saveData) return;
     if (!this.saveData.settings) this.saveData.settings = { volume: 0.7 };
@@ -1148,7 +1177,7 @@ export class Game {
     this.runFinalized = false;
     this.inventoryOpen = false;
     this.statsOpen = false;
-    this.inventoryTab = 'inventory';
+    this.inventorySection = 'equipment';
     this.inventoryCursorByTab = { inventory: 0, equipment: 0 };
     this.deathSplashFrames = 0;
     this.postDeathMenuIndex = 0;
@@ -1169,9 +1198,19 @@ export class Game {
 
   handleStartMenuAction(action) {
     if (!action) return;
+    const hasSave = this.hasSavedRun();
+    const totalOptions = this.classOrder.length + (hasSave ? 1 : 0);
+
     if (isDirectionalAction(action)) {
       const delta = action.dy !== 0 ? action.dy : action.dx;
-      if (delta !== 0) this.cycleClassSelection(delta);
+      if (delta !== 0) {
+        this.startMenuIndex = (this.startMenuIndex + delta + totalOptions) % totalOptions;
+        if (!hasSave || this.startMenuIndex > 0) {
+          const classIdx = hasSave ? this.startMenuIndex - 1 : this.startMenuIndex;
+          this.selectedClass = this.classOrder[classIdx] || this.selectedClass;
+        }
+        if (this.audio) this.audio.uiClick();
+      }
       return;
     }
     if (action.type === 'hub') {
@@ -1179,7 +1218,11 @@ export class Game {
       return;
     }
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
-      this.startNewRun();
+      if (hasSave && this.startMenuIndex === 0) {
+        this.loadRunState();
+      } else {
+        this.startNewRun();
+      }
     }
   }
 
@@ -1326,6 +1369,12 @@ export class Game {
     return this.hubRunCarryover || [];
   }
 
+  clampStashScroll(cursor, scrollOffset, maxVisible) {
+    if (cursor < scrollOffset) return cursor;
+    if (cursor >= scrollOffset + maxVisible) return cursor - maxVisible + 1;
+    return scrollOffset;
+  }
+
   handleHubStashAction(action) {
     if (!action) return;
     if (action.type === 'close') {
@@ -1362,7 +1411,8 @@ export class Game {
           this.saveData.addToStash(this.pendingStashLoadoutItem);
         }
         this.pendingStashLoadoutItem = this.cloneItem(removed);
-        this.hubNotice = `Selected run loadout: ${removed.name}.`;
+        this.saveData.pendingLoadoutItem = this.pendingStashLoadoutItem;
+        this.hubNotice = `Queued ${removed.name} for next run.`;
         this.hubStashCursor = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
         persistSaveData(this.saveData);
         if (this.audio) this.audio.itemPickup();
@@ -1391,6 +1441,20 @@ export class Game {
       persistSaveData(this.saveData);
       if (this.audio) this.audio.itemPickup();
     }
+
+    if (action.type === 'inventoryDrop' && this.pendingStashLoadoutItem) {
+      const returned = this.saveData.addToStash(this.pendingStashLoadoutItem);
+      if (returned) {
+        this.hubNotice = `Returned ${this.pendingStashLoadoutItem.name} to stash.`;
+        this.pendingStashLoadoutItem = null;
+        this.saveData.pendingLoadoutItem = null;
+        persistSaveData(this.saveData);
+        if (this.audio) this.audio.uiClick();
+      } else {
+        this.hubNotice = 'Stash is full.';
+        if (this.audio) this.audio.uiClick();
+      }
+    }
   }
 
   getNaturalRegenInterval() {
@@ -1408,6 +1472,244 @@ export class Game {
     this.player.heal(1);
     this.addFloatingText(this.player.position.x, this.player.position.y, '+1 HP', '#73e38e', 780);
     this.messageLog.add('You recover 1 HP naturally.', this.turnCount);
+  }
+
+  serializeItemSkill(skill) {
+    if (!skill) return null;
+    return { ...skill, area: skill.area ? { ...skill.area } : null };
+  }
+
+  serializeEntity(entity) {
+    return {
+      id: entity.id,
+      type: entity.type,
+      name: entity.name,
+      position: { ...entity.position },
+      stats: { ...entity.stats },
+      hp: entity.hp,
+      maxHp: entity.maxHp,
+      speed: entity.speed,
+      energy: entity.energy,
+      behavior: entity.behavior,
+      equipment: Object.fromEntries(
+        Object.entries(entity.equipment).map(([slot, item]) => [slot, item ? { ...item, skill: this.serializeItemSkill(item.skill) } : null])
+      ),
+      inventory: entity.inventory.map(i => ({ ...i, skill: this.serializeItemSkill(i.skill) })),
+      belt: entity.belt.map(i => i ? { ...i } : null),
+      skillSlotBindings: [...(entity.skillSlotBindings || [null, null, null])],
+      activeBlessings: [...(entity.activeBlessings || [])],
+      statusEffects: (entity.statusEffects || []).map(e => ({ ...e })),
+      // Player-specific
+      playerClass: entity.playerClass || null,
+      affinityStats: entity.affinityStats ? [...entity.affinityStats] : null,
+      gold: entity.gold || 0,
+      floorNumber: entity.floorNumber || 1,
+      // Enemy-specific
+      spriteKey: entity.spriteKey || null,
+      isElite: entity.isElite || false,
+      summonCooldown: entity.summonCooldown ?? null,
+      isFloorBoss: entity.isFloorBoss || false,
+      isSummonedMinion: entity.isSummonedMinion || false,
+      summonedBy: entity.summonedBy || null,
+    };
+  }
+
+  deserializeEntity(data) {
+    const entity = new Entity({
+      id: data.id,
+      type: data.type,
+      x: data.position.x,
+      y: data.position.y,
+      stats: { ...data.stats },
+      maxHp: data.maxHp,
+      speed: data.speed,
+      behavior: data.behavior,
+      name: data.name,
+    });
+    entity.hp = data.hp;
+    entity.energy = data.energy;
+    entity.equipment = {};
+    for (const [slot, item] of Object.entries(data.equipment)) {
+      entity.equipment[slot] = item ? { ...item, skill: this.serializeItemSkill(item.skill) } : null;
+    }
+    entity.inventory = (data.inventory || []).map(i => ({ ...i, skill: this.serializeItemSkill(i.skill) }));
+    entity.belt = (data.belt || [null, null, null]).map(i => i ? { ...i } : null);
+    entity.skillSlotBindings = data.skillSlotBindings || [null, null, null];
+    entity.activeBlessings = data.activeBlessings || [];
+    entity.statusEffects = (data.statusEffects || []).map(e => ({ ...e }));
+    if (data.playerClass) {
+      entity.playerClass = data.playerClass;
+      entity.affinityStats = data.affinityStats || [];
+      entity.gold = data.gold || 0;
+      entity.floorNumber = data.floorNumber || 1;
+    }
+    if (data.spriteKey) entity.spriteKey = data.spriteKey;
+    if (data.isElite) entity.isElite = data.isElite;
+    if (data.summonCooldown != null) entity.summonCooldown = data.summonCooldown;
+    if (data.isFloorBoss) entity.isFloorBoss = data.isFloorBoss;
+    if (data.isSummonedMinion) entity.isSummonedMinion = data.isSummonedMinion;
+    if (data.summonedBy) entity.summonedBy = data.summonedBy;
+    return entity;
+  }
+
+  saveRunState() {
+    const snapshot = {
+      version: 1,
+      player: this.serializeEntity(this.player),
+      map: {
+        width: this.map.width,
+        height: this.map.height,
+        tiles: this.map.tiles,
+        explored: this.map.explored,
+        rooms: this.map.rooms,
+        entities: this.map.entities.filter(e => e.type !== 'player' && e.isAlive()).map(e => this.serializeEntity(e)),
+        items: this.map.items.map(i => ({ ...i })),
+      },
+      floorNumber: this.floorNumber,
+      turnCount: this.turnCount,
+      regenCounter: this.regenCounter,
+      runSummary: { ...this.runSummary },
+      selectedClass: this.selectedClass,
+      messageLog: this.messageLog.messages.slice(),
+    };
+    localStorage.setItem('diegeist.run.v1', JSON.stringify(snapshot));
+  }
+
+  loadRunState() {
+    const raw = localStorage.getItem('diegeist.run.v1');
+    if (!raw) return false;
+    localStorage.removeItem('diegeist.run.v1');
+
+    let snapshot;
+    try {
+      snapshot = JSON.parse(raw);
+    } catch (_e) {
+      return false;
+    }
+
+    // Rebuild map
+    this.map = new GameMap(snapshot.map.width, snapshot.map.height);
+    this.map.tiles = snapshot.map.tiles;
+    this.map.explored = snapshot.map.explored;
+    this.map.rooms = snapshot.map.rooms || [];
+    this.map.items = snapshot.map.items || [];
+
+    // Rebuild player
+    this.player = this.deserializeEntity(snapshot.player);
+    updateActiveSkills(this.player);
+
+    // Rebuild enemies
+    this.map.entities = [this.player];
+    this.turnSystem = new TurnSystem();
+    this.turnSystem.addEntity(this.player);
+    for (const eData of snapshot.map.entities) {
+      const enemy = this.deserializeEntity(eData);
+      this.map.entities.push(enemy);
+      this.turnSystem.addEntity(enemy);
+    }
+
+    // Restore game state
+    this.floorNumber = snapshot.floorNumber;
+    this.turnCount = snapshot.turnCount;
+    this.regenCounter = snapshot.regenCounter || 0;
+    this.runSummary = snapshot.runSummary || { classKey: this.selectedClass, floorsReached: 1, enemiesKilled: 0, currencyEarned: 0, causeOfDeath: null };
+    this.selectedClass = snapshot.selectedClass;
+    this.runFinalized = false;
+    this.inventoryOpen = false;
+    this.statsOpen = false;
+    this.clearCombatVfx();
+
+    // Restore message log
+    this.messageLog = new MessageLog();
+    for (const msg of (snapshot.messageLog || [])) {
+      this.messageLog.add(msg.text, msg.turn);
+    }
+    this.messageLog.add('Run resumed.', this.turnCount);
+
+    // Rebuild visuals
+    this.resizeCanvas();
+    this.camera = new Camera(this.canvas.width, this.canvas.height - this.hud.hudHeight, this.getCameraZoom());
+    this.renderer = new Renderer(this.canvas, this.sprites, this.camera);
+    computeFOV(this.map, this.player.position.x, this.player.position.y, FOV_RADIUS);
+    this.camera.centerOn(this.player.position.x, this.player.position.y, this.map.width, this.map.height);
+
+    this.state = 'playing';
+    return true;
+  }
+
+  hasSavedRun() {
+    return localStorage.getItem('diegeist.run.v1') !== null;
+  }
+
+  handlePauseMenuAction(action) {
+    if (!action) return;
+    const options = ['Resume', 'Save & Quit', 'Abandon Run'];
+    if (action.type === 'close') {
+      this.state = 'playing';
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+    if (isDirectionalAction(action)) {
+      const delta = action.dy !== 0 ? action.dy : action.dx;
+      if (delta !== 0) {
+        this.pauseMenuIndex = (this.pauseMenuIndex + delta + options.length) % options.length;
+        if (this.audio) this.audio.uiClick();
+      }
+      return;
+    }
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      if (this.pauseMenuIndex === 0) {
+        this.state = 'playing';
+      } else if (this.pauseMenuIndex === 1) {
+        this.saveRunState();
+        this.state = 'startMenu';
+      } else if (this.pauseMenuIndex === 2) {
+        this.captureRunItemsForHub(false);
+        this.finalizeRun('abandoned');
+        this.enterHubMenu('Run abandoned.');
+      }
+      if (this.audio) this.audio.uiClick();
+    }
+  }
+
+  drawPauseMenu() {
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+
+    // Darken overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.fillRect(0, 0, w, h);
+
+    const panelW = Math.round(300 * uiScale);
+    const panelH = Math.round(180 * uiScale);
+    const px = Math.floor((w - panelW) / 2);
+    const py = Math.floor((h - panelH) / 2);
+
+    ctx.fillStyle = '#171d28';
+    ctx.fillRect(px, py, panelW, panelH);
+    ctx.strokeStyle = '#4f6075';
+    ctx.strokeRect(px, py, panelW, panelH);
+
+    ctx.fillStyle = '#e8eef5';
+    ctx.font = `${Math.round(22 * uiScale)}px monospace`;
+    ctx.fillText('Paused', px + Math.round(20 * uiScale), py + Math.round(36 * uiScale));
+
+    const options = ['Resume', 'Save & Quit', 'Abandon Run'];
+    const lineH = Math.round(28 * uiScale);
+    const startY = py + Math.round(70 * uiScale);
+    ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+
+    for (let i = 0; i < options.length; i++) {
+      const selected = i === this.pauseMenuIndex;
+      if (selected) {
+        ctx.fillStyle = '#2b3a4d';
+        ctx.fillRect(px + Math.round(10 * uiScale), startY + i * lineH - Math.round(16 * uiScale), panelW - Math.round(20 * uiScale), Math.round(22 * uiScale));
+      }
+      ctx.fillStyle = selected ? '#ffffff' : '#a0aab5';
+      ctx.fillText(options[i], px + Math.round(20 * uiScale), startY + i * lineH);
+    }
   }
 
   wrapTextLines(text, maxChars) {
@@ -1432,7 +1734,7 @@ export class Game {
 
   getSelectedInspectTarget() {
     if (!this.player) return { item: null, slotLabel: null };
-    if (this.inventoryTab === 'inventory') {
+    if (this.inventorySection === 'items') {
       const idx = this.inventoryCursorByTab.inventory || 0;
       return { item: this.player.inventory[idx] || null, slotLabel: null };
     }
@@ -1471,6 +1773,19 @@ export class Game {
       lines.push(`CD: ${item.skill.cooldown}  Dmg: ${item.skill.damage}`);
       if (item.skill.description) {
         lines.push(...this.wrapTextLines(item.skill.description, 30));
+      }
+      if (this.player) {
+        const bindings = this.player.skillSlotBindings || [null, null, null];
+        const slotLabels = ['Q', 'E', 'R'];
+        let boundLabel = null;
+        for (const [eqSlot, equipped] of Object.entries(this.player.equipment)) {
+          if (equipped === item) {
+            const bIdx = bindings.indexOf(eqSlot);
+            if (bIdx !== -1) boundLabel = slotLabels[bIdx];
+            break;
+          }
+        }
+        lines.push(boundLabel ? `Bound to: ${boundLabel}` : 'Q/E/R to assign slot');
       }
     }
 
@@ -1823,11 +2138,10 @@ export class Game {
     this.spawnFloorItems(standardRooms);
 
     if (this.floorNumber === 1 && this.turnCount === 0) {
-      this.messageLog.add('Welcome to Diegeist. Move with arrow keys or WASD.', this.turnCount);
-      this.messageLog.add('Attack by moving into an enemy tile.', this.turnCount);
+      this.messageLog.add('Welcome to Diegeist. Move with arrows. Attack with WASD.', this.turnCount);
       this.messageLog.add('Press G to pick up items. Press I to manage inventory.', this.turnCount);
       if (this.player.playerClass === 'archer' || this.player.playerClass === 'mage') {
-        this.messageLog.add('Use Q for your starter ranged skill.', this.turnCount);
+        this.messageLog.add('WASD fires ranged attacks. Q/E/R for skills.', this.turnCount);
       }
     }
     this.messageLog.add(`Floor ${this.floorNumber} begins.`, this.turnCount);
@@ -1871,23 +2185,45 @@ export class Game {
       }
     }
     if (action.type === 'attack') {
-      const nx = this.player.position.x + action.dx;
-      const ny = this.player.position.y + action.dy;
-      const enemy = this.map.entities.find(e =>
-        e.type === 'enemy' && e.isAlive() && e.position.x === nx && e.position.y === ny
-      );
-      if (!enemy) {
-        this.messageLog.add('You swing at empty air.', this.turnCount);
-        return false;
+      const attackType = this.getPlayerAttackType();
+      let enemy;
+      let damageType;
+
+      if (attackType === 'melee') {
+        damageType = 'melee';
+        const nx = this.player.position.x + action.dx;
+        const ny = this.player.position.y + action.dy;
+        enemy = this.map.entities.find(e =>
+          e.type === 'enemy' && e.isAlive() && e.position.x === nx && e.position.y === ny
+        );
+        if (!enemy) {
+          this.messageLog.add('You swing at empty air.', this.turnCount);
+          return false;
+        }
+      } else {
+        damageType = attackType;
+        enemy = this.findRangedTarget(action.dx, action.dy);
+        if (!enemy) {
+          const missMsg = damageType === 'ranged'
+            ? 'Your shot hits nothing.'
+            : 'Your bolt fizzles into the darkness.';
+          this.messageLog.add(missMsg, this.turnCount);
+          return false;
+        }
+        this.addProjectileForDamageType(this.player, enemy, damageType);
       }
+
       const result = this.resolveCombat(this.player, enemy, {
         baseDamage: 3,
-        damageType: 'melee',
-        weaponMultiplier: this.getPlayerWeaponMultiplier('melee'),
+        damageType,
+        weaponMultiplier: this.getPlayerWeaponMultiplier(damageType),
       });
       this.addHitFeedback(enemy, result, 'player');
       if (this.player.playerClass === 'archer' && result.crit) {
         this.addAchievementProgress('sharpshooter', 1);
+      }
+      if (!result.dodged && damageType === 'magic') {
+        this.addAchievementProgress('arcane_mastery', result.damage);
       }
       if (result.dodged) {
         this.messageLog.add(`The ${enemy.name} dodges your attack!`, this.turnCount);
@@ -1898,7 +2234,11 @@ export class Game {
         const critMsg = result.crit ? ' (CRITICAL!)' : '';
         this.messageLog.add(`You hit the ${enemy.name} for ${result.damage} damage!${critMsg}`, this.turnCount);
       }
-      if (this.audio) this.audio.meleeHit();
+      if (this.audio) {
+        if (damageType === 'magic') this.audio.magicCast();
+        else if (damageType === 'ranged') this.audio.rangedShot();
+        else this.audio.meleeHit();
+      }
       return true;
     }
     if (action.type === 'wait') {
@@ -2054,6 +2394,10 @@ export class Game {
       this.handleHubAchievementsAction(action);
       return;
     }
+    if (this.state === 'pauseMenu') {
+      this.handlePauseMenuAction(action);
+      return;
+    }
     if (this.state !== 'playing') return;
     if (!action) return;
 
@@ -2076,7 +2420,12 @@ export class Game {
       this.toggleStatsOverlay();
       return;
     }
-    if (action.type === 'close') return;
+    if (action.type === 'close') {
+      this.state = 'pauseMenu';
+      this.pauseMenuIndex = 0;
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
 
     const usedSkill = action.type === 'skill' ? this.player.activeSkills[action.slot] || null : null;
     const acted = this.processPlayerAction(action);
@@ -2116,7 +2465,7 @@ export class Game {
     const ctx = this.ctx;
     const uiScale = Math.max(1, Math.min(1.6, Math.min(this.canvas.width, this.canvas.height) / 900));
     const panelW = Math.min(Math.round(860 * uiScale), this.canvas.width - 40);
-    const panelH = Math.min(Math.round(500 * uiScale), this.canvas.height - 40);
+    const panelH = Math.min(Math.round(520 * uiScale), this.canvas.height - 40);
     const x = Math.floor((this.canvas.width - panelW) / 2);
     const y = Math.floor((this.canvas.height - panelH) / 2);
     const listW = Math.round(panelW * 0.54);
@@ -2130,139 +2479,142 @@ export class Game {
     ctx.strokeStyle = '#5a6572';
     ctx.strokeRect(x, y, panelW, panelH);
 
+    // Vertical divider between left column and inspect panel
+    ctx.strokeStyle = '#333a42';
+    ctx.beginPath();
+    ctx.moveTo(x + listW, y + Math.round(40 * uiScale));
+    ctx.lineTo(x + listW, y + panelH - Math.round(56 * uiScale));
+    ctx.stroke();
+
     ctx.fillStyle = '#fff';
     ctx.font = `${Math.round(16 * uiScale)}px monospace`;
     ctx.fillText('Inventory', x + Math.round(16 * uiScale), y + Math.round(26 * uiScale));
 
-    const tabY = y + Math.round(48 * uiScale);
-    const invActive = this.inventoryTab === 'inventory';
-    const eqActive = this.inventoryTab === 'equipment';
-    ctx.fillStyle = invActive ? '#d9dde2' : '#7d8894';
-    ctx.fillText('Items', x + Math.round(16 * uiScale), tabY);
-    ctx.fillStyle = eqActive ? '#d9dde2' : '#7d8894';
-    ctx.fillText('Equipment', x + Math.round(120 * uiScale), tabY);
-    ctx.strokeStyle = '#333a42';
-    ctx.beginPath();
-    ctx.moveTo(x + Math.round(14 * uiScale), tabY + Math.round(8 * uiScale));
-    ctx.lineTo(x + panelW - Math.round(14 * uiScale), tabY + Math.round(8 * uiScale));
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x + listW, tabY + Math.round(10 * uiScale));
-    ctx.lineTo(x + listW, y + panelH - Math.round(56 * uiScale));
-    ctx.stroke();
+    // --- Equipment section ---
+    const eqLabel = 'Equipment:';
+    const eqStartY = y + Math.round(50 * uiScale);
+    ctx.fillStyle = '#a8b4c1';
+    ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+    ctx.fillText(eqLabel, x + Math.round(20 * uiScale), eqStartY);
 
-    if (this.inventoryTab === 'inventory') {
-      const capacity = this.getInventoryCapacity();
-      const cols = this.getInventoryGridColumns();
-      const rows = Math.ceil(capacity / cols);
-      const cursor = this.inventoryCursorByTab.inventory || 0;
-      const gridX = x + Math.round(20 * uiScale);
-      const gridY = y + Math.round(74 * uiScale);
-      const gridW = listW - Math.round(32 * uiScale);
-      const gridH = panelH - Math.round(150 * uiScale);
-      const gap = Math.max(4, Math.round(8 * uiScale));
-      const cellW = Math.floor((gridW - gap * (cols - 1)) / cols);
-      const cellH = Math.floor((gridH - gap * (rows - 1)) / rows);
-      const cellSize = Math.max(22, Math.min(cellW, cellH));
-      const iconSize = Math.max(12, Math.floor(cellSize * 0.42));
-      const titleY = gridY - Math.round(8 * uiScale);
+    const eqRows = this.getEquipmentRows();
+    const eqCursor = this.inventoryCursorByTab.equipment || 0;
+    const eqLineH = Math.round(19 * uiScale);
+    const eqItemStartY = eqStartY + Math.round(16 * uiScale);
 
-      ctx.fillStyle = '#a8b4c1';
-      ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-      ctx.fillText('Inventory Grid (Tab: switch panel)', gridX, titleY);
-
-      for (let slotIndex = 0; slotIndex < capacity; slotIndex++) {
-        const col = slotIndex % cols;
-        const row = Math.floor(slotIndex / cols);
-        const cellX = gridX + col * (cellSize + gap);
-        const cellY = gridY + row * (cellSize + gap);
-        const item = this.player.inventory[slotIndex] || null;
-        const selected = slotIndex === cursor;
-
-        ctx.fillStyle = '#1d242d';
-        ctx.fillRect(cellX, cellY, cellSize, cellSize);
-        ctx.strokeStyle = selected ? '#f4f7fa' : '#495664';
-        ctx.lineWidth = selected ? Math.max(2, Math.floor(uiScale * 2)) : 1;
-        ctx.strokeRect(cellX, cellY, cellSize, cellSize);
-
-        if (item) {
-          const rarityColor = this.getRarityColor(item.rarity, '#768493');
-          const savedAlpha = ctx.globalAlpha;
-          ctx.globalAlpha = 0.26;
-          ctx.fillStyle = rarityColor;
-          ctx.fillRect(cellX + 1, cellY + 1, cellSize - 2, cellSize - 2);
-          ctx.globalAlpha = savedAlpha;
-
-          const iconX = cellX + Math.floor((cellSize - iconSize) / 2);
-          const iconY = cellY + Math.round(6 * uiScale);
-          this.drawInventoryItemIcon(ctx, item, iconX, iconY, iconSize);
-
-          ctx.fillStyle = selected ? '#ffffff' : this.getRarityColor(item.rarity, '#c3cbd4');
-          ctx.font = `${Math.max(8, Math.round(9 * uiScale))}px monospace`;
-          const label = this.truncateLabel(item.name, 12);
-          ctx.fillText(label, cellX + Math.round(4 * uiScale), cellY + cellSize - Math.round(6 * uiScale));
-        } else {
-          ctx.fillStyle = '#6f7b89';
-          ctx.font = `${Math.max(8, Math.round(9 * uiScale))}px monospace`;
-          ctx.fillText('(empty)', cellX + Math.round(4 * uiScale), cellY + cellSize - Math.round(6 * uiScale));
-        }
-
-        ctx.fillStyle = '#8e99a7';
-        ctx.font = `${Math.max(7, Math.round(8 * uiScale))}px monospace`;
-        ctx.fillText(`${slotIndex + 1}`, cellX + Math.round(3 * uiScale), cellY + Math.round(10 * uiScale));
+    ctx.font = `${Math.round(13 * uiScale)}px monospace`;
+    for (let i = 0; i < eqRows.length; i++) {
+      const rowY = eqItemStartY + i * eqLineH;
+      const selected = this.inventorySection === 'equipment' && i === eqCursor;
+      if (selected) {
+        ctx.fillStyle = '#2a313a';
+        ctx.fillRect(x + Math.round(14 * uiScale), rowY - Math.round(13 * uiScale), listW - Math.round(20 * uiScale), Math.round(17 * uiScale));
       }
-    } else {
-      const rows = this.getEquipmentRows();
-      const cursor = this.inventoryCursorByTab.equipment || 0;
-      const startY = y + Math.round(74 * uiScale);
-      const lineH = Math.round(21 * uiScale);
-      const visibleRows = Math.max(1, Math.floor((panelH - Math.round(140 * uiScale)) / lineH));
-      const startIndex = Math.max(0, Math.min(cursor - Math.floor(visibleRows / 2), Math.max(0, rows.length - visibleRows)));
-      const endIndex = Math.min(rows.length, startIndex + visibleRows);
 
-      ctx.font = `${Math.round(14 * uiScale)}px monospace`;
-      if (rows.length === 0) {
+      const row = eqRows[i];
+      const baseX = x + Math.round(20 * uiScale);
+      const label = `${this.formatSlotName(row.slot)}: `;
+      ctx.fillStyle = selected ? '#ffffff' : '#c3cbd4';
+      ctx.fillText(label, baseX, rowY);
+      const itemX = baseX + ctx.measureText(label).width;
+      if (row.item) {
+        ctx.fillStyle = this.getRarityColor(row.item.rarity, selected ? '#ffffff' : '#c3cbd4');
+        ctx.fillText(this.truncateLabel(row.item.name, 18), itemX, rowY);
+        if (row.item.skill) {
+          const bindings = this.player.skillSlotBindings || [null, null, null];
+          const slotLabels = ['Q', 'E', 'R'];
+          for (let si = 0; si < 3; si++) {
+            if (bindings[si] === row.slot) {
+              const nameEndX = itemX + ctx.measureText(this.truncateLabel(row.item.name, 18)).width + Math.round(6 * uiScale);
+              ctx.fillStyle = '#6bc4ff';
+              ctx.fillText(`[${slotLabels[si]}]`, nameEndX, rowY);
+              break;
+            }
+          }
+        }
+      } else {
         ctx.fillStyle = '#7d8894';
-        ctx.fillText('(no equipment slots)', x + Math.round(20 * uiScale), startY);
-      }
-
-      for (let i = startIndex; i < endIndex; i++) {
-        const rowY = startY + (i - startIndex) * lineH;
-        const selected = i === cursor;
-        if (selected) {
-          ctx.fillStyle = '#2a313a';
-          ctx.fillRect(
-            x + Math.round(14 * uiScale),
-            rowY - Math.round(14 * uiScale),
-            listW - Math.round(20 * uiScale),
-            Math.round(18 * uiScale)
-          );
-        }
-
-        const row = rows[i];
-        const baseX = x + Math.round(20 * uiScale);
-        const label = `${this.formatSlotName(row.slot)}: `;
-        ctx.fillStyle = selected ? '#ffffff' : '#c3cbd4';
-        ctx.fillText(label, baseX, rowY);
-        const itemX = baseX + ctx.measureText(label).width;
-        if (row.item) {
-          ctx.fillStyle = this.getRarityColor(row.item.rarity, selected ? '#ffffff' : '#c3cbd4');
-          ctx.fillText(row.item.name, itemX, rowY);
-        } else {
-          ctx.fillStyle = '#7d8894';
-          ctx.fillText('(empty)', itemX, rowY);
-        }
+        ctx.fillText('(empty)', itemX, rowY);
       }
     }
 
+    // --- Divider between equipment and items ---
+    const dividerY = eqItemStartY + eqRows.length * eqLineH + Math.round(4 * uiScale);
+    ctx.strokeStyle = '#333a42';
+    ctx.beginPath();
+    ctx.moveTo(x + Math.round(14 * uiScale), dividerY);
+    ctx.lineTo(x + listW - Math.round(14 * uiScale), dividerY);
+    ctx.stroke();
+
+    // --- Items section ---
+    const itemsLabelY = dividerY + Math.round(16 * uiScale);
+    ctx.fillStyle = '#a8b4c1';
+    ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+    ctx.fillText('Items:', x + Math.round(20 * uiScale), itemsLabelY);
+
+    const capacity = this.getInventoryCapacity();
+    const cols = this.getInventoryGridColumns();
+    const gridRows = Math.ceil(capacity / cols);
+    const invCursor = this.inventoryCursorByTab.inventory || 0;
+    const gridX = x + Math.round(20 * uiScale);
+    const gridY = itemsLabelY + Math.round(12 * uiScale);
+    const gridW = listW - Math.round(32 * uiScale);
+    const availH = y + panelH - Math.round(56 * uiScale) - gridY;
+    const gap = Math.max(4, Math.round(6 * uiScale));
+    const cellW = Math.floor((gridW - gap * (cols - 1)) / cols);
+    const cellH = Math.floor((availH - gap * (gridRows - 1)) / gridRows);
+    const cellSize = Math.max(22, Math.min(cellW, cellH, Math.round(72 * uiScale)));
+    const iconSize = Math.max(12, Math.floor(cellSize * 0.42));
+
+    for (let slotIndex = 0; slotIndex < capacity; slotIndex++) {
+      const col = slotIndex % cols;
+      const row = Math.floor(slotIndex / cols);
+      const cellX = gridX + col * (cellSize + gap);
+      const cellY = gridY + row * (cellSize + gap);
+      const item = this.player.inventory[slotIndex] || null;
+      const selected = this.inventorySection === 'items' && slotIndex === invCursor;
+
+      ctx.fillStyle = '#1d242d';
+      ctx.fillRect(cellX, cellY, cellSize, cellSize);
+      ctx.strokeStyle = selected ? '#f4f7fa' : '#495664';
+      ctx.lineWidth = selected ? Math.max(2, Math.floor(uiScale * 2)) : 1;
+      ctx.strokeRect(cellX, cellY, cellSize, cellSize);
+
+      if (item) {
+        const rarityColor = this.getRarityColor(item.rarity, '#768493');
+        const savedAlpha = ctx.globalAlpha;
+        ctx.globalAlpha = 0.26;
+        ctx.fillStyle = rarityColor;
+        ctx.fillRect(cellX + 1, cellY + 1, cellSize - 2, cellSize - 2);
+        ctx.globalAlpha = savedAlpha;
+
+        const iconX = cellX + Math.floor((cellSize - iconSize) / 2);
+        const iconY = cellY + Math.round(6 * uiScale);
+        this.drawInventoryItemIcon(ctx, item, iconX, iconY, iconSize);
+
+        ctx.fillStyle = selected ? '#ffffff' : this.getRarityColor(item.rarity, '#c3cbd4');
+        ctx.font = `${Math.max(8, Math.round(9 * uiScale))}px monospace`;
+        const label = this.truncateLabel(item.name, 12);
+        ctx.fillText(label, cellX + Math.round(4 * uiScale), cellY + cellSize - Math.round(6 * uiScale));
+      } else {
+        ctx.fillStyle = '#6f7b89';
+        ctx.font = `${Math.max(8, Math.round(9 * uiScale))}px monospace`;
+        ctx.fillText('(empty)', cellX + Math.round(4 * uiScale), cellY + cellSize - Math.round(6 * uiScale));
+      }
+    }
+
+    // Reset lineWidth
+    ctx.lineWidth = 1;
+
+    // --- Inspect panel (right side) ---
     const inspectTarget = this.getSelectedInspectTarget();
     const details = this.getItemInspectLines(inspectTarget.item, inspectTarget.slotLabel);
     ctx.fillStyle = '#d6dbe2';
     ctx.font = `${Math.round(13 * uiScale)}px monospace`;
-    ctx.fillText('Inspect', detailX, y + Math.round(68 * uiScale));
+    ctx.fillText('Inspect', detailX, y + Math.round(50 * uiScale));
     ctx.font = `${Math.round(12 * uiScale)}px monospace`;
     const detailLineH = Math.round(16 * uiScale);
-    const maxDetailRows = Math.max(1, Math.floor((panelH - Math.round(160 * uiScale)) / detailLineH));
+    const maxDetailRows = Math.max(1, Math.floor((panelH - Math.round(130 * uiScale)) / detailLineH));
     for (let i = 0; i < Math.min(details.length, maxDetailRows); i++) {
       const line = details[i];
       const isTitle = i === 0;
@@ -2271,20 +2623,21 @@ export class Game {
       } else {
         ctx.fillStyle = isTitle ? '#ffffff' : '#b8c0ca';
       }
-      ctx.fillText(line, detailX, y + Math.round(90 * uiScale) + i * detailLineH);
+      ctx.fillText(line, detailX, y + Math.round(72 * uiScale) + i * detailLineH);
     }
 
+    // --- Control hints ---
     ctx.fillStyle = '#94a0ad';
-    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    ctx.font = `${Math.round(11 * uiScale)}px monospace`;
     ctx.fillText(
-      'Arrows/WASD: move cursor  Tab/Left/Right: switch panel  Z/Enter: equip/unequip',
+      'Arrows: navigate  Z/Enter: equip/unequip  X: drop  U: unequip',
       x + Math.round(16 * uiScale),
-      y + panelH - Math.round(40 * uiScale)
+      y + panelH - Math.round(36 * uiScale)
     );
     ctx.fillText(
-      '1/2/3: assign to belt slot  C: auto belt  X: drop  U: unequip  I/ESC: close',
+      '1/2/3: belt  Q/E/R: skill slot  C: auto belt  Tab/I/ESC: close',
       x + Math.round(16 * uiScale),
-      y + panelH - Math.round(20 * uiScale)
+      y + panelH - Math.round(18 * uiScale)
     );
   }
 
@@ -2337,13 +2690,17 @@ export class Game {
     const skillStartY = statStartY + STAT_NAMES.length * rowH + Math.round(14 * uiScale);
     ctx.fillStyle = '#d8e3ee';
     ctx.fillText('Active Skills:', x + Math.round(16 * uiScale), skillStartY);
-    const skills = this.player.activeSkills.length > 0 ? this.player.activeSkills : [];
+    const skills = this.player.activeSkills || [];
+    const slotLabels = ['Q', 'E', 'R'];
+    let drawnCount = 0;
     for (let i = 0; i < Math.min(3, skills.length); i++) {
       const skill = skills[i];
+      if (!skill) continue;
       ctx.fillStyle = '#9ab3c9';
-      ctx.fillText(`${i + 1}. ${skill.name} (CD ${skill.currentCooldown}/${skill.cooldown})`, x + Math.round(28 * uiScale), skillStartY + Math.round((i + 1) * 18 * uiScale));
+      ctx.fillText(`${slotLabels[i]}. ${skill.name} (CD ${skill.currentCooldown}/${skill.cooldown})`, x + Math.round(28 * uiScale), skillStartY + Math.round((drawnCount + 1) * 18 * uiScale));
+      drawnCount++;
     }
-    if (skills.length === 0) {
+    if (drawnCount === 0) {
       ctx.fillStyle = '#7d8894';
       ctx.fillText('No skills equipped via gear.', x + Math.round(28 * uiScale), skillStartY + Math.round(18 * uiScale));
     }
@@ -2388,18 +2745,35 @@ export class Game {
     ctx.font = `${Math.round(14 * uiScale)}px monospace`;
     ctx.fillText('Select class with arrows, then press Enter to begin.', x + Math.round(26 * uiScale), y + Math.round(98 * uiScale));
 
+    const hasSave = this.hasSavedRun();
     const baseY = y + Math.round(146 * uiScale);
     const rowH = Math.round(32 * uiScale);
-    for (let i = 0; i < this.classOrder.length; i++) {
-      const key = this.classOrder[i];
-      const selected = i === this.startMenuIndex;
+    let rowIndex = 0;
+
+    // Continue Run option (if saved run exists)
+    if (hasSave) {
+      const selected = this.startMenuIndex === 0;
       if (selected) {
         ctx.fillStyle = '#2a3648';
-        ctx.fillRect(x + Math.round(24 * uiScale), baseY - Math.round(19 * uiScale) + i * rowH, Math.round(250 * uiScale), Math.round(24 * uiScale));
+        ctx.fillRect(x + Math.round(24 * uiScale), baseY - Math.round(19 * uiScale), Math.round(250 * uiScale), Math.round(24 * uiScale));
+      }
+      ctx.fillStyle = selected ? '#a3d9ff' : '#6bb8e8';
+      ctx.font = `${Math.round(18 * uiScale)}px monospace`;
+      ctx.fillText('Continue Run', x + Math.round(34 * uiScale), baseY);
+      rowIndex = 1;
+    }
+
+    for (let i = 0; i < this.classOrder.length; i++) {
+      const key = this.classOrder[i];
+      const menuIdx = i + rowIndex;
+      const selected = menuIdx === this.startMenuIndex;
+      if (selected) {
+        ctx.fillStyle = '#2a3648';
+        ctx.fillRect(x + Math.round(24 * uiScale), baseY - Math.round(19 * uiScale) + menuIdx * rowH, Math.round(250 * uiScale), Math.round(24 * uiScale));
       }
       ctx.fillStyle = selected ? '#ffffff' : '#9aa9b8';
       ctx.font = `${Math.round(18 * uiScale)}px monospace`;
-      ctx.fillText(this.getClassLabel(key), x + Math.round(34 * uiScale), baseY + i * rowH);
+      ctx.fillText(this.getClassLabel(key), x + Math.round(34 * uiScale), baseY + menuIdx * rowH);
     }
 
     const statX = x + Math.round(320 * uiScale);
@@ -2644,20 +3018,41 @@ export class Game {
     ctx.fillText('Up/Down: Select  Enter/Z: Buy  ESC: Back', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
   }
 
+  getStashItemSummaryLines(item) {
+    if (!item) return [];
+    const lines = [];
+    const rarityStr = item.rarity ? ` (${String(item.rarity).toUpperCase()})` : '';
+    lines.push(`${item.name}${rarityStr}  -  ${item.type || 'item'}`);
+    const bonuses = Object.entries(item.statBonuses || {}).filter(([, v]) => v !== 0);
+    if (bonuses.length > 0) {
+      lines.push(bonuses.map(([s, v]) => `${v > 0 ? '+' : ''}${v} ${s}`).join('  '));
+    }
+    if (item.skill) {
+      lines.push(`Skill: ${item.skill.name}  CD:${item.skill.cooldown}  Dmg:${item.skill.damage}`);
+    }
+    if (item.effect) {
+      lines.push(`Effect: ${item.effect.replaceAll('_', ' ')}`);
+    }
+    return lines;
+  }
+
   drawHubStash() {
     const ctx = this.ctx;
     const w = this.canvas.width;
     const h = this.canvas.height;
     const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
     const panelW = Math.min(Math.round(860 * uiScale), w - 40);
-    const panelH = Math.min(Math.round(460 * uiScale), h - 40);
+    const panelH = Math.min(Math.round(520 * uiScale), h - 40);
     const x = Math.floor((w - panelW) / 2);
     const y = Math.floor((h - panelH) / 2);
     const paneW = Math.floor((panelW - Math.round(56 * uiScale)) / 2);
     const leftX = x + Math.round(20 * uiScale);
     const rightX = leftX + paneW + Math.round(16 * uiScale);
-    const startY = y + Math.round(90 * uiScale);
+    const paneTop = y + Math.round(78 * uiScale);
+    const paneHeight = panelH - Math.round(190 * uiScale);
+    const startY = paneTop + Math.round(38 * uiScale);
     const lineH = Math.round(24 * uiScale);
+    const maxVisible = Math.max(1, Math.floor((paneHeight - Math.round(30 * uiScale)) / lineH));
 
     ctx.fillStyle = '#0b0f16';
     ctx.fillRect(0, 0, w, h);
@@ -2674,47 +3069,100 @@ export class Game {
     ctx.fillText('Left pane: persistent stash  |  Right pane: last run items', x + Math.round(20 * uiScale), y + Math.round(66 * uiScale));
 
     ctx.strokeStyle = this.hubStashPane === 'stash' ? '#d9ecff' : '#394754';
-    ctx.strokeRect(leftX, y + Math.round(78 * uiScale), paneW, panelH - Math.round(132 * uiScale));
+    ctx.strokeRect(leftX, paneTop, paneW, paneHeight);
     ctx.strokeStyle = this.hubStashPane === 'run' ? '#d9ecff' : '#394754';
-    ctx.strokeRect(rightX, y + Math.round(78 * uiScale), paneW, panelH - Math.round(132 * uiScale));
+    ctx.strokeRect(rightX, paneTop, paneW, paneHeight);
 
     ctx.fillStyle = '#d7e3f0';
     ctx.font = `${Math.round(14 * uiScale)}px monospace`;
-    ctx.fillText(`Stash (${this.saveData.stash.length})`, leftX + Math.round(8 * uiScale), y + Math.round(98 * uiScale));
-    ctx.fillText(`Run Items (${this.hubRunCarryover.length})`, rightX + Math.round(8 * uiScale), y + Math.round(98 * uiScale));
+    ctx.fillText(`Stash (${this.saveData.stash.length})`, leftX + Math.round(8 * uiScale), paneTop + Math.round(20 * uiScale));
+    ctx.fillText(`Run Items (${this.hubRunCarryover.length})`, rightX + Math.round(8 * uiScale), paneTop + Math.round(20 * uiScale));
 
+    // Clamp scroll offsets
     const stashItems = this.saveData.stash || [];
-    for (let i = 0; i < Math.min(12, stashItems.length); i++) {
+    this.hubStashScrollOffset = this.clampStashScroll(this.hubStashCursor, this.hubStashScrollOffset, maxVisible);
+    this.hubRunScrollOffset = this.clampStashScroll(this.hubRunItemsCursor, this.hubRunScrollOffset, maxVisible);
+
+    // Draw left pane (persistent stash) with scrolling
+    const stashStart = this.hubStashScrollOffset;
+    const stashEnd = Math.min(stashItems.length, stashStart + maxVisible);
+    for (let i = stashStart; i < stashEnd; i++) {
+      const row = i - stashStart;
       const selected = this.hubStashPane === 'stash' && i === this.hubStashCursor;
       if (selected) {
         ctx.fillStyle = '#2b3a4d';
-        ctx.fillRect(leftX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + i * lineH, paneW - Math.round(12 * uiScale), Math.round(20 * uiScale));
+        ctx.fillRect(leftX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + row * lineH, paneW - Math.round(12 * uiScale), Math.round(20 * uiScale));
       }
       ctx.fillStyle = selected ? '#ffffff' : this.getRarityColor(stashItems[i].rarity, '#b6c6d6');
       ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-      ctx.fillText(this.truncateLabel(stashItems[i].name, 24), leftX + Math.round(10 * uiScale), startY + i * lineH);
+      ctx.fillText(this.truncateLabel(stashItems[i].name, 24), leftX + Math.round(10 * uiScale), startY + row * lineH);
+    }
+    // Scroll indicators for stash
+    if (stashStart > 0) {
+      ctx.fillStyle = '#7d8e9f';
+      ctx.font = `${Math.round(10 * uiScale)}px monospace`;
+      ctx.fillText('\u25B2 more', leftX + Math.round(8 * uiScale), paneTop + Math.round(28 * uiScale));
+    }
+    if (stashEnd < stashItems.length) {
+      ctx.fillStyle = '#7d8e9f';
+      ctx.font = `${Math.round(10 * uiScale)}px monospace`;
+      ctx.fillText('\u25BC more', leftX + Math.round(8 * uiScale), paneTop + paneHeight - Math.round(6 * uiScale));
     }
 
-    for (let i = 0; i < Math.min(12, this.hubRunCarryover.length); i++) {
+    // Draw right pane (run items) with scrolling
+    const runStart = this.hubRunScrollOffset;
+    const runEnd = Math.min(this.hubRunCarryover.length, runStart + maxVisible);
+    for (let i = runStart; i < runEnd; i++) {
+      const row = i - runStart;
       const selected = this.hubStashPane === 'run' && i === this.hubRunItemsCursor;
       if (selected) {
         ctx.fillStyle = '#2b3a4d';
-        ctx.fillRect(rightX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + i * lineH, paneW - Math.round(12 * uiScale), Math.round(20 * uiScale));
+        ctx.fillRect(rightX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + row * lineH, paneW - Math.round(12 * uiScale), Math.round(20 * uiScale));
       }
       const item = this.hubRunCarryover[i];
       ctx.fillStyle = selected ? '#ffffff' : this.getRarityColor(item.rarity, '#b6c6d6');
       ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-      ctx.fillText(this.truncateLabel(item.name, 24), rightX + Math.round(10 * uiScale), startY + i * lineH);
+      ctx.fillText(this.truncateLabel(item.name, 24), rightX + Math.round(10 * uiScale), startY + row * lineH);
+    }
+    if (runStart > 0) {
+      ctx.fillStyle = '#7d8e9f';
+      ctx.font = `${Math.round(10 * uiScale)}px monospace`;
+      ctx.fillText('\u25B2 more', rightX + Math.round(8 * uiScale), paneTop + Math.round(28 * uiScale));
+    }
+    if (runEnd < this.hubRunCarryover.length) {
+      ctx.fillStyle = '#7d8e9f';
+      ctx.font = `${Math.round(10 * uiScale)}px monospace`;
+      ctx.fillText('\u25BC more', rightX + Math.round(8 * uiScale), paneTop + paneHeight - Math.round(6 * uiScale));
     }
 
-    ctx.fillStyle = '#d9e7f5';
+    // Bottom section: item inspect + status
+    const bottomY = paneTop + paneHeight + Math.round(10 * uiScale);
+    const selectedItem = this.hubStashPane === 'stash'
+      ? (stashItems[this.hubStashCursor] || null)
+      : (this.hubRunCarryover[this.hubRunItemsCursor] || null);
+    const summaryLines = this.getStashItemSummaryLines(selectedItem);
+    ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+    for (let i = 0; i < Math.min(3, summaryLines.length); i++) {
+      ctx.fillStyle = i === 0 && selectedItem ? this.getRarityColor(selectedItem.rarity, '#d6dbe2') : '#b8c0ca';
+      ctx.fillText(summaryLines[i], x + Math.round(20 * uiScale), bottomY + i * Math.round(15 * uiScale));
+    }
+
+    const statusY = bottomY + Math.round(50 * uiScale);
     ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-    const pending = this.pendingStashLoadoutItem ? this.pendingStashLoadoutItem.name : 'none';
-    ctx.fillText(`Pending loadout item: ${pending}`, x + Math.round(20 * uiScale), y + panelH - Math.round(48 * uiScale));
-    if (this.hubNotice) ctx.fillText(this.hubNotice, x + Math.round(20 * uiScale), y + panelH - Math.round(30 * uiScale));
+    if (this.pendingStashLoadoutItem) {
+      ctx.fillStyle = '#a3c9f0';
+      ctx.fillText(`Next run loadout: ${this.pendingStashLoadoutItem.name}`, x + Math.round(20 * uiScale), statusY);
+    }
+    if (this.hubNotice) {
+      ctx.fillStyle = '#d9e7f5';
+      ctx.fillText(this.hubNotice, x + Math.round(20 * uiScale), statusY + Math.round(16 * uiScale));
+    }
 
     ctx.fillStyle = '#7d8e9f';
-    ctx.fillText('Left/Right: switch pane  Up/Down: select  Enter/Z: move item  ESC: Back', x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
+    const controls = this.pendingStashLoadoutItem
+      ? 'Left/Right: switch pane  Up/Down: select  Enter/Z: move item  X: unqueue loadout  ESC: Back'
+      : 'Left/Right: switch pane  Up/Down: select  Enter/Z: move item  ESC: Back';
+    ctx.fillText(controls, x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
   }
 
   drawHubAchievements() {
@@ -2815,7 +3263,6 @@ export class Game {
       this.drawHubAchievements();
       return;
     }
-
     if (!this.map || !this.player) {
       this.ctx.fillStyle = '#000';
       this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -2831,6 +3278,10 @@ export class Game {
       return;
     }
 
+    if (this.state === 'pauseMenu') {
+      this.drawPauseMenu();
+      return;
+    }
     if (this.inventoryOpen) this.drawInventoryOverlay();
     if (this.statsOpen) this.drawStatsOverlay();
   }

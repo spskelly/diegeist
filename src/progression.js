@@ -38,6 +38,7 @@ export class SaveData {
     this.permanentPerks = [];
     this.runHistory = [];
     this.settings = { volume: 0.7 };
+    this.pendingLoadoutItem = null;
   }
 
   addCurrency(amount) {
@@ -94,6 +95,7 @@ export class SaveData {
       permanentPerks: this.permanentPerks,
       runHistory: this.runHistory,
       settings: this.settings,
+      pendingLoadoutItem: this.pendingLoadoutItem,
     });
   }
 

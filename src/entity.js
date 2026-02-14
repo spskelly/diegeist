@@ -16,6 +16,7 @@ export class Entity {
     this.inventory = [];
     this.belt = [null, null, null];
     this.activeSkills = [];
+    this.skillSlotBindings = [null, null, null];
     this.activeBlessings = [];
     this.statusEffects = [];
   }

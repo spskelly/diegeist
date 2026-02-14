@@ -3,15 +3,15 @@ import { RARITY, EQUIPMENT_SLOTS, STAT_NAMES } from './constants.js';
 let nextItemId = 1;
 
 export const ITEM_TEMPLATES = [
-  { baseName: 'Sword', slot: 'leftHand', baseType: 'weapon', primaryStat: 'STR' },
-  { baseName: 'Greataxe', slot: 'leftHand', baseType: 'weapon', primaryStat: 'STR' },
-  { baseName: 'Dagger', slot: 'leftHand', baseType: 'weapon', primaryStat: 'DEX' },
-  { baseName: 'Longbow', slot: 'leftHand', baseType: 'weapon', primaryStat: 'DEX' },
-  { baseName: 'Crossbow', slot: 'leftHand', baseType: 'weapon', primaryStat: 'DEX' },
-  { baseName: 'Staff', slot: 'leftHand', baseType: 'weapon', primaryStat: 'INT' },
-  { baseName: 'Wand', slot: 'leftHand', baseType: 'weapon', primaryStat: 'INT' },
-  { baseName: 'Shield', slot: 'rightHand', baseType: 'weapon', primaryStat: 'CON' },
-  { baseName: 'Orb', slot: 'rightHand', baseType: 'weapon', primaryStat: 'WIS' },
+  { baseName: 'Sword', slot: 'leftHand', baseType: 'weapon', primaryStat: 'STR', attackType: 'melee' },
+  { baseName: 'Greataxe', slot: 'leftHand', baseType: 'weapon', primaryStat: 'STR', attackType: 'melee' },
+  { baseName: 'Dagger', slot: 'leftHand', baseType: 'weapon', primaryStat: 'DEX', attackType: 'melee' },
+  { baseName: 'Longbow', slot: 'leftHand', baseType: 'weapon', primaryStat: 'DEX', attackType: 'ranged' },
+  { baseName: 'Crossbow', slot: 'leftHand', baseType: 'weapon', primaryStat: 'DEX', attackType: 'ranged' },
+  { baseName: 'Staff', slot: 'leftHand', baseType: 'weapon', primaryStat: 'INT', attackType: 'magic' },
+  { baseName: 'Wand', slot: 'leftHand', baseType: 'weapon', primaryStat: 'INT', attackType: 'magic' },
+  { baseName: 'Shield', slot: 'rightHand', baseType: 'weapon', primaryStat: 'CON', attackType: 'melee' },
+  { baseName: 'Orb', slot: 'rightHand', baseType: 'weapon', primaryStat: 'WIS', attackType: 'magic' },
   { baseName: 'Helmet', slot: 'head', baseType: 'armor', primaryStat: 'CON' },
   { baseName: 'Hood', slot: 'head', baseType: 'armor', primaryStat: 'DEX' },
   { baseName: 'Crown', slot: 'head', baseType: 'armor', primaryStat: 'INT' },
@@ -42,6 +42,7 @@ const STARTER_CLASS_WEAPONS = {
     name: 'Rusty Sword',
     slot: 'leftHand',
     type: 'weapon',
+    attackType: 'melee',
     statBonuses: { STR: 1 },
     skill: null,
     description: 'A worn blade, but still reliable in close quarters.',
@@ -50,6 +51,7 @@ const STARTER_CLASS_WEAPONS = {
     name: 'Training Bow',
     slot: 'leftHand',
     type: 'weapon',
+    attackType: 'ranged',
     statBonuses: { DEX: 1 },
     skill: {
       name: 'Quick Shot',
@@ -67,6 +69,7 @@ const STARTER_CLASS_WEAPONS = {
     name: 'Apprentice Wand',
     slot: 'leftHand',
     type: 'weapon',
+    attackType: 'magic',
     statBonuses: { INT: 1 },
     skill: {
       name: 'Arc Bolt',
@@ -179,6 +182,7 @@ export function generateItem({ floorLevel, luck = 0, context = 'drop', forceRari
     statBonuses,
     skill,
     floorLevel,
+    attackType: template.attackType || null,
     description: `A ${rarity} ${template.baseName.toLowerCase()} found on floor ${floorLevel}.`,
     sprite: template.baseName.toLowerCase().replace(/\s+/g, '_'),
   };
@@ -230,6 +234,7 @@ export function createStarterWeapon(classKey) {
         area: { ...template.skill.area },
       }
       : null,
+    attackType: template.attackType || 'melee',
     floorLevel: 1,
     description: template.description,
     sprite: template.name.toLowerCase().replace(/\s+/g, '_'),
