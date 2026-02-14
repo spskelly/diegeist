@@ -31,7 +31,7 @@ const SOURCE_ORDER = [
 
 function stripImportsExports(code) {
   return code
-    .replace(/^import\s+.*?;\s*$/gm, '')
+    .replace(/^\s*import[\s\S]*?;\s*$/gm, '')
     .replace(/^export\s+(default\s+)?/gm, '')
     .trim();
 }
