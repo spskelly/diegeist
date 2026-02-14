@@ -1,4 +1,3 @@
-import { TILE_SIZE, TILE } from './constants.js';
 import { TILE_SPRITE_MAP } from './sprites.js';
 
 export class Renderer {
@@ -27,12 +26,12 @@ export class Renderer {
         const { sx, sy } = cam.tileToScreen(tx, ty);
 
         if (sprite) {
-          this.ctx.drawImage(sprite, sx, sy);
+          this.ctx.drawImage(sprite, sx, sy, cam.tileSize, cam.tileSize);
         }
 
         if (!map.isVisible(tx, ty)) {
           this.ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-          this.ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+          this.ctx.fillRect(sx, sy, cam.tileSize, cam.tileSize);
         }
       }
     }
@@ -45,7 +44,7 @@ export class Renderer {
     const sprite = this.sprites.get(entity.spriteKey || 'trap');
     const { sx, sy } = this.camera.tileToScreen(entity.position.x, entity.position.y);
     if (sprite) {
-      this.ctx.drawImage(sprite, sx, sy);
+      this.ctx.drawImage(sprite, sx, sy, this.camera.tileSize, this.camera.tileSize);
     }
   }
 
@@ -54,7 +53,7 @@ export class Renderer {
     const sprite = this.sprites.get(spriteKey);
     const { sx, sy } = this.camera.tileToScreen(player.position.x, player.position.y);
     if (sprite) {
-      this.ctx.drawImage(sprite, sx, sy);
+      this.ctx.drawImage(sprite, sx, sy, this.camera.tileSize, this.camera.tileSize);
     }
   }
 
@@ -64,8 +63,10 @@ export class Renderer {
     for (const groundItem of gameState.map.items) {
       if (gameState.map.isVisible(groundItem.position.x, groundItem.position.y)) {
         const { sx, sy } = this.camera.tileToScreen(groundItem.position.x, groundItem.position.y);
+        const markerSize = Math.max(4, Math.floor(this.camera.tileSize * 0.35));
+        const markerOffset = Math.floor((this.camera.tileSize - markerSize) / 2);
         this.ctx.fillStyle = '#ff0';
-        this.ctx.fillRect(sx + 5, sy + 5, 6, 6);
+        this.ctx.fillRect(sx + markerOffset, sy + markerOffset, markerSize, markerSize);
       }
     }
     for (const entity of gameState.map.entities) {
