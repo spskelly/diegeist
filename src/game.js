@@ -1657,7 +1657,7 @@ export class Game {
       return;
     }
     if (isDirectionalAction(action)) {
-      if (action.dx !== 0 && this.hubRunCarryover.length > 0) {
+      if (action.dx !== 0) {
         this.hubStashPane = this.hubStashPane === 'stash' ? 'run' : 'stash';
         if (this.audio) this.audio.uiClick();
         return;
