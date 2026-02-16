@@ -1093,6 +1093,27 @@ export class Game {
       return false;
     }
 
+    // Self-targeted skills (buffs/heals) don't need enemy targets
+    if (skill.skillType === 'self') {
+      if (!useSkill(skill)) return false;
+      syncClassSkillCooldown(this.player);
+
+      if (skill.effect.type === 'heal') {
+        const amount = Math.max(1, Math.floor(this.player.maxHp * skill.effect.value));
+        const before = this.player.hp;
+        this.player.heal(amount);
+        this.messageLog.add(`${skill.name}: healed ${this.player.hp - before} HP.`, this.turnCount);
+      } else if (skill.effect.type === 'mana_shield') {
+        this.player.addStatusEffect({ type: 'mana_shield', duration: 999, value: skill.effect.value });
+        this.messageLog.add(`${skill.name}: absorbing next ${skill.effect.value} damage.`, this.turnCount);
+      } else {
+        this.player.addStatusEffect({ ...skill.effect });
+        this.messageLog.add(`${skill.name} activated for ${skill.effect.duration} turns.`, this.turnCount);
+      }
+      if (this.audio) this.audio.uiClick();
+      return true;
+    }
+
     const targets = this.getSkillTargets(skill);
     if (targets.length === 0) {
       this.messageLog.add(`No targets in range for ${skill.name}.`, this.turnCount);
@@ -1159,20 +1180,24 @@ export class Game {
     this.player.gold += killCurrency;
     this.runSummary.currencyEarned += killCurrency;
 
-    if (enemy.isFloorBoss && this.floorNumber >= 10) {
-      const victoryBonus = 120;
-      this.player.gold += victoryBonus;
-      this.runSummary.currencyEarned += victoryBonus;
-      this.addAchievementProgress('vanquisher', 1);
-      this.messageLog.add('The Void Tyrant falls. You have conquered Diegeist.', this.turnCount);
-      this.finalizeRun('Victory');
-      this.captureRunItemsForHub(true);
-      this.state = 'victory';
-      if (this.audio) this.audio.stopAmbient();
-      return;
-    }
+    if (enemy.isFloorBoss) {
+      // Bosses always drop loot with elevated rarity
+      const luck = this.getEntityStatsWithEquipment(this.player).LCK;
+      const bossDrop = generateItem({ floorLevel: this.floorNumber, luck, context: 'boss' });
+      this.map.items.push({
+        ...bossDrop,
+        position: { x: enemy.position.x, y: enemy.position.y },
+      });
+      this.messageLog.add(`The ${enemy.name} drops ${bossDrop.name}!`, this.turnCount);
 
-    if (Math.random() < 0.45) {
+      if (this.floorNumber >= 10) {
+        const victoryBonus = 120;
+        this.player.gold += victoryBonus;
+        this.runSummary.currencyEarned += victoryBonus;
+        this.addAchievementProgress('vanquisher', 1);
+        this.messageLog.add('The Void Tyrant falls. Descend the stairs to claim victory.', this.turnCount);
+      }
+    } else if (Math.random() < 0.45) {
       const luck = this.getEntityStatsWithEquipment(this.player).LCK;
       const drop = Math.random() < 0.35
         ? generateConsumable(this.floorNumber)
@@ -2382,6 +2407,13 @@ export class Game {
         const critMsg = result.crit ? ' (CRITICAL!)' : '';
         this.messageLog.add(`The ${entity.name} hits you for ${result.damage} damage!${critMsg}`, this.turnCount);
       }
+      if (result.thornsDamage > 0) {
+        this.messageLog.add(`Thorns reflect ${result.thornsDamage} damage back to ${entity.name}!`, this.turnCount);
+        if (!entity.isAlive()) {
+          this.messageLog.add(`${entity.name} was killed by thorns!`, this.turnCount);
+          this.handleEnemyDeath(entity);
+        }
+      }
       if (this.audio) this.audio.playerHurt();
     } else if (action.type === 'summon') {
       const st = entity.summonTemplate || { name: 'Minion', spriteKey: 'rat', stats: { STR: 2, DEX: 2, CON: 2, INT: 1, WIS: 1, LCK: 1 }, maxHp: 3 };
@@ -2411,11 +2443,6 @@ export class Game {
   }
 
   handleFloorTransition() {
-    if (this.floorNumber >= 10) {
-      this.messageLog.add('This is the deepest floor. Defeat the final boss to win.', this.turnCount);
-      return false;
-    }
-
     const playerTile = this.map.getTile(this.player.position.x, this.player.position.y);
     if (playerTile !== TILE.STAIRS_DOWN) {
       this.messageLog.add('There are no stairs here.', this.turnCount);
@@ -2434,6 +2461,20 @@ export class Game {
         this.messageLog.add('The stairs are blocked. Clear the boss room first.', this.turnCount);
         return false;
       }
+    }
+
+    // Floor 10: descending after the final boss triggers victory
+    if (this.floorNumber >= 10) {
+      const floorReward = 10 + this.floorNumber * 2;
+      this.player.gold += floorReward;
+      this.runSummary.currencyEarned += floorReward;
+      this.messageLog.add('You ascend from the depths, victorious.', this.turnCount);
+      this.finalizeRun('Victory');
+      this.captureRunItemsForHub(true);
+      this.state = 'victory';
+      if (this.audio) this.audio.stairsDescend();
+      if (this.audio) this.audio.stopAmbient();
+      return true;
     }
 
     // Descend to next floor
@@ -2531,6 +2572,18 @@ export class Game {
     this.player.spendTurn();
     this.turnCount++;
     this.applyNaturalRegen();
+
+    // Tick status effects
+    for (const effect of this.player.statusEffects) {
+      if (effect.type === 'regeneration') {
+        const before = this.player.hp;
+        this.player.heal(effect.value);
+        if (this.player.hp > before) {
+          this.messageLog.add(`Regeneration heals ${this.player.hp - before} HP.`, this.turnCount);
+        }
+      }
+    }
+    this.player.tickStatusEffects();
 
     // Run ticks until the player gets another turn
     let safety = 0;

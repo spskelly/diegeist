@@ -1,5 +1,15 @@
 import { STAT_NAMES } from './constants.js';
 
+const STATUS_EFFECT_LABELS = {
+  thorns: 'Thorns',
+  fortify: 'Fortify',
+  iron_skin: 'Iron Skin',
+  war_cry: 'War Cry',
+  regeneration: 'Regen',
+  lucky_strike: 'Lucky',
+  mana_shield: 'Shield',
+};
+
 export class HUD {
   constructor(ctx, canvasWidth, canvasHeight) {
     this.ctx = ctx;
@@ -191,6 +201,17 @@ export class HUD {
     ctx.fillStyle = '#b6c2cd';
     ctx.font = `${Math.round(11 * s)}px monospace`;
     ctx.fillText(statLine, Math.round(12 * s), y + Math.round(50 * s));
+
+    // Active status effects
+    if (player.statusEffects && player.statusEffects.length > 0) {
+      ctx.font = `${Math.round(10 * s)}px monospace`;
+      const buffStrs = player.statusEffects.map(e => {
+        const label = STATUS_EFFECT_LABELS[e.type] || e.type;
+        return e.turnsRemaining < 900 ? `${label}(${e.turnsRemaining})` : label;
+      });
+      ctx.fillStyle = '#7ad1a0';
+      ctx.fillText(buffStrs.join('  '), Math.round(12 * s), y + Math.round(62 * s));
+    }
 
     const messages = messageLog.getRecent(4);
     ctx.font = `${Math.round(11 * s)}px monospace`;
