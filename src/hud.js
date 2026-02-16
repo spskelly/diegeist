@@ -109,7 +109,7 @@ export class HUD {
     }
   }
 
-  draw(player, messageLog, derivedStats = null) {
+  draw(player, messageLog, derivedStats = null, runMaterials = null) {
     const ctx = this.ctx;
     const s = this.uiScale;
     const y = this.canvasHeight - this.hudHeight;
@@ -162,6 +162,23 @@ export class HUD {
     ctx.font = `${Math.round(12 * s)}px monospace`;
     ctx.fillText(`Floor ${player.floorNumber}`, infoX, hpBarY + Math.round(14 * s));
     ctx.fillText(`Essence ${player.gold}`, infoX + Math.round(110 * s), hpBarY + Math.round(14 * s));
+
+    // Run materials
+    if (runMaterials) {
+      const matNames = { timber: 'TMB', stone: 'STN', iron: 'IRN', crystal: 'CRY', aether: 'ATH' };
+      const matColors = { timber: '#8b6b3b', stone: '#9a9a8a', iron: '#7a8a9a', crystal: '#9a7ac8', aether: '#c8a0ff' };
+      let matX = infoX;
+      const matY = hpBarY + Math.round(30 * s);
+      ctx.font = `${Math.round(10 * s)}px monospace`;
+      for (const [key, abbr] of Object.entries(matNames)) {
+        const val = runMaterials[key] || 0;
+        if (val === 0) continue;
+        ctx.fillStyle = matColors[key];
+        const label = `${abbr}:${val}`;
+        ctx.fillText(label, matX, matY);
+        matX += ctx.measureText(label).width + Math.round(10 * s);
+      }
+    }
 
     ctx.fillStyle = '#90a0b0';
     ctx.font = `${Math.round(10 * s)}px monospace`;

@@ -3454,7 +3454,7 @@ export class Game {
 
     this.renderer.render({ map: this.map, player: this.player });
     this.drawCombatVfx(nowMs);
-    this.hud.draw(this.player, this.messageLog, this.getEntityStatsWithEquipment(this.player));
+    this.hud.draw(this.player, this.messageLog, this.getEntityStatsWithEquipment(this.player), this.runMaterials);
 
     if (this.state === 'deathSplash') {
       this.drawDeathSplash();
