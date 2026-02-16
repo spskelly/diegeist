@@ -28,6 +28,7 @@ import {
 import { assignSkillToSlot, canUseSkill, syncClassSkillCooldown, tickCooldowns, updateActiveSkills, useSkill } from './skills.js';
 import { ACHIEVEMENTS, HubShop, loadSaveData, persistSaveData } from './progression.js';
 import { AudioManager } from './audio.js';
+import { createEmptyMaterials, addMaterials, scaleMaterials, rollMaterialDrop, getFloorClearMaterials, getBossKillMaterials } from './resources.js';
 
 function isDirectionalAction(action) {
   return action.type === 'move' || action.type === 'attack';
@@ -1209,6 +1210,22 @@ export class Game {
       this.messageLog.add(`The ${enemy.name} drops ${drop.name}.`, this.turnCount);
     }
 
+    // Material drops
+    const biome = getBiome(this.floorNumber);
+    if (enemy.isFloorBoss) {
+      const bossMats = getBossKillMaterials(biome, this.currentRank || 1);
+      for (const drop of bossMats) {
+        this.runMaterials[drop.type] += drop.quantity;
+        this.messageLog.add(`Gained ${drop.quantity} ${drop.type}.`, this.turnCount);
+      }
+    } else {
+      const matDrop = rollMaterialDrop(biome, this.currentRank || 1);
+      if (matDrop) {
+        this.runMaterials[matDrop.type] += matDrop.quantity;
+        this.messageLog.add(`Gained ${matDrop.quantity} ${matDrop.type}.`, this.turnCount);
+      }
+    }
+
     if (this.audio) this.audio.enemyDeath();
   }
 
@@ -1219,12 +1236,19 @@ export class Game {
     this.runSummary.floorsReached = Math.max(this.runSummary.floorsReached, this.floorNumber);
     this.syncMilestoneAchievements();
     this.saveData.addCurrency(this.runSummary.currencyEarned);
+    // Commit run materials: 100% on victory, 50% on death
+    if (this.runMaterials) {
+      const isVictory = causeOfDeath === 'Victory';
+      const mats = isVictory ? this.runMaterials : scaleMaterials(this.runMaterials, 0.5);
+      this.saveData.addMaterials(mats);
+    }
     this.saveData.addRunHistory({
       classKey: this.runSummary.classKey,
       floorsReached: this.runSummary.floorsReached,
       enemiesKilled: this.runSummary.enemiesKilled,
       currencyEarned: this.runSummary.currencyEarned,
       causeOfDeath: this.runSummary.causeOfDeath,
+      materialsGained: this.runMaterials ? { ...this.runMaterials } : null,
     });
     persistSaveData(this.saveData);
   }
@@ -1267,6 +1291,8 @@ export class Game {
       currencyEarned: 0,
       causeOfDeath: null,
     };
+    this.runMaterials = createEmptyMaterials();
+    this.currentRank = 1;
     this.startFloor();
     this.state = 'playing';
     if (this.audio) this.audio.uiClick();
@@ -2468,6 +2494,9 @@ export class Game {
       const floorReward = 10 + this.floorNumber * 2;
       this.player.gold += floorReward;
       this.runSummary.currencyEarned += floorReward;
+      const victoryBiome = getBiome(this.floorNumber);
+      const victoryFloorMats = getFloorClearMaterials(victoryBiome, this.currentRank || 1);
+      this.runMaterials[victoryFloorMats.type] += victoryFloorMats.quantity;
       this.messageLog.add('You ascend from the depths, victorious.', this.turnCount);
       this.finalizeRun('Victory');
       this.captureRunItemsForHub(true);
@@ -2481,6 +2510,11 @@ export class Game {
     const floorReward = 10 + this.floorNumber * 2;
     this.player.gold += floorReward;
     this.runSummary.currencyEarned += floorReward;
+    // Floor clear material bonus
+    const floorBiome = getBiome(this.floorNumber);
+    const floorMats = getFloorClearMaterials(floorBiome, this.currentRank || 1);
+    this.runMaterials[floorMats.type] += floorMats.quantity;
+    this.messageLog.add(`Floor clear: +${floorMats.quantity} ${floorMats.type}.`, this.turnCount);
     this.floorNumber++;
     this.runSummary.floorsReached = Math.max(this.runSummary.floorsReached, this.floorNumber);
     this.syncMilestoneAchievements();
