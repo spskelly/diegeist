@@ -109,7 +109,7 @@ export class HUD {
     }
   }
 
-  draw(player, messageLog, derivedStats = null, runMaterials = null) {
+  draw(player, messageLog, derivedStats = null, runMaterials = null, xpData = null) {
     const ctx = this.ctx;
     const s = this.uiScale;
     const y = this.canvasHeight - this.hudHeight;
@@ -179,6 +179,29 @@ export class HUD {
         ctx.fillStyle = matColors[key];
         ctx.fillText(label, matX, matY);
         matX += ctx.measureText(label).width + Math.round(12 * s);
+      }
+    }
+
+    // XP bar
+    if (xpData) {
+      const xpBarStartX = infoX;
+      const xpBarStartY = hpBarY + Math.round(48 * s);
+      ctx.fillStyle = '#d9e1ea';
+      ctx.font = `${Math.round(11 * s)}px monospace`;
+      ctx.fillText(`Lv${xpData.level}`, xpBarStartX, xpBarStartY);
+
+      const xpBStartX = xpBarStartX + Math.round(40 * s);
+      const xpBW = Math.round(100 * s);
+      const xpBH = Math.round(5 * s);
+
+      ctx.fillStyle = '#1a2030';
+      ctx.fillRect(xpBStartX, xpBarStartY - Math.round(8 * s), xpBW, xpBH);
+      if (xpData.progress !== null) {
+        ctx.fillStyle = '#ffd700';
+        ctx.fillRect(xpBStartX, xpBarStartY - Math.round(8 * s), xpBW * xpData.progress, xpBH);
+      } else {
+        ctx.fillStyle = '#ffd700';
+        ctx.fillRect(xpBStartX, xpBarStartY - Math.round(8 * s), xpBW, xpBH);
       }
     }
 

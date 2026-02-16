@@ -3791,7 +3791,22 @@ export class Game {
 
     this.renderer.render({ map: this.map, player: this.player });
     this.drawCombatVfx(nowMs);
-    this.hud.draw(this.player, this.messageLog, this.getEntityStatsWithEquipment(this.player), this.runMaterials);
+    // Build XP data for HUD
+    let xpData = null;
+    if (this.player && this.saveData) {
+      const ck = this.player.playerClass;
+      const lvl = this.saveData.classLevels[ck] || 1;
+      const xpVal = this.saveData.classXP[ck] || 0;
+      const nextXP = getXPForNextLevel(lvl);
+      let prog = null;
+      if (nextXP) {
+        const prevXP = XP_TABLE[lvl - 1] || 0;
+        prog = Math.min(1, (xpVal - prevXP) / (nextXP - prevXP));
+      }
+      xpData = { level: lvl, progress: prog };
+    }
+
+    this.hud.draw(this.player, this.messageLog, this.getEntityStatsWithEquipment(this.player), this.runMaterials, xpData);
 
     if (this.state === 'deathSplash') {
       this.drawDeathSplash();
