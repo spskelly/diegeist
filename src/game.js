@@ -80,6 +80,7 @@ export class Game {
     this.pendingStashLoadoutItem = null;
     this.hubShop = new HubShop();
     this.pauseMenuIndex = 0;
+    this.skillTreeReturnState = 'pauseMenu';
     this.combatVfx = { floatingTexts: [], projectiles: [] };
   }
 
@@ -557,6 +558,11 @@ export class Game {
           name: 'Zombie', maxHp: 12, speed: 65, behavior: 'rushdown',
           stats: { STR: 6, DEX: 1, CON: 7, INT: 1, WIS: 1, LCK: 1 },
           spriteKey: 'zombie', weight: 35,
+        },
+        {
+          name: 'Skeleton Archer', maxHp: 5, speed: 95, behavior: 'kiting',
+          stats: { STR: 2, DEX: 6, CON: 3, INT: 2, WIS: 2, LCK: 3 },
+          spriteKey: 'skeleton_archer', weight: 25,
         },
       ],
       dungeon: [
@@ -1509,7 +1515,7 @@ export class Game {
   }
 
   getHubMenuOptions() {
-    return ['Start Run', 'Shop', 'Stash', 'Achievements', 'Back to Class Select'];
+    return ['Start Run', 'Shop', 'Skill Tree', 'Stash', 'Achievements', 'Back to Class Select'];
   }
 
   handleHubMenuAction(action) {
@@ -1534,8 +1540,13 @@ export class Game {
       } else if (this.hubMenuIndex === 1) {
         this.state = 'hubShop';
       } else if (this.hubMenuIndex === 2) {
-        this.state = 'hubStash';
+        this.skillTreeCursor = 0;
+        this.skillTreeScroll = 0;
+        this.skillTreeReturnState = 'hubMenu';
+        this.state = 'skillTree';
       } else if (this.hubMenuIndex === 3) {
+        this.state = 'hubStash';
+      } else if (this.hubMenuIndex === 4) {
         this.state = 'hubAchievements';
       } else {
         this.state = 'startMenu';
@@ -1609,6 +1620,11 @@ export class Game {
     return scrollOffset;
   }
 
+  getItemSellValue(item) {
+    const prices = { common: 5, uncommon: 15, rare: 40, epic: 100, legendary: 250 };
+    return prices[item?.rarity] || 5;
+  }
+
   handleHubStashAction(action) {
     if (!action) return;
     if (action.type === 'close') {
@@ -1676,16 +1692,28 @@ export class Game {
       if (this.audio) this.audio.itemPickup();
     }
 
-    if (action.type === 'inventoryDrop' && this.pendingStashLoadoutItem) {
-      const returned = this.saveData.addToStash(this.pendingStashLoadoutItem);
-      if (returned) {
-        this.hubNotice = `Returned ${this.pendingStashLoadoutItem.name} to stash.`;
-        this.pendingStashLoadoutItem = null;
-        this.saveData.pendingLoadoutItem = null;
+    if (action.type === 'inventoryDrop') {
+      if (this.pendingStashLoadoutItem) {
+        const returned = this.saveData.addToStash(this.pendingStashLoadoutItem);
+        if (returned) {
+          this.hubNotice = `Returned ${this.pendingStashLoadoutItem.name} to stash.`;
+          this.pendingStashLoadoutItem = null;
+          this.saveData.pendingLoadoutItem = null;
+          persistSaveData(this.saveData);
+          if (this.audio) this.audio.uiClick();
+        } else {
+          this.hubNotice = 'Stash is full.';
+          if (this.audio) this.audio.uiClick();
+        }
+      } else if (this.hubStashPane === 'stash' && this.saveData.stash && this.saveData.stash.length > 0) {
+        const idx = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
+        const item = this.saveData.stash[idx];
+        const value = this.getItemSellValue(item);
+        this.saveData.removeFromStash(item.id);
+        this.saveData.currency = (this.saveData.currency || 0) + value;
+        this.hubNotice = `Sold ${item.name} for ${value} essence.`;
+        this.hubStashCursor = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
         persistSaveData(this.saveData);
-        if (this.audio) this.audio.uiClick();
-      } else {
-        this.hubNotice = 'Stash is full.';
         if (this.audio) this.audio.uiClick();
       }
     }
@@ -1905,6 +1933,7 @@ export class Game {
       } else if (this.pauseMenuIndex === 1) {
         this.skillTreeCursor = 0;
         this.skillTreeScroll = 0;
+        this.skillTreeReturnState = 'pauseMenu';
         this.state = 'skillTree';
       } else if (this.pauseMenuIndex === 2) {
         this.saveRunState();
@@ -1921,14 +1950,14 @@ export class Game {
   handleSkillTreeAction(action) {
     if (!action) return;
     if (action.type === 'close') {
-      this.state = 'pauseMenu';
+      this.state = this.skillTreeReturnState || 'pauseMenu';
       if (this.audio) this.audio.uiClick();
       return;
     }
     if (isDirectionalAction(action)) {
       const delta = action.dy || 0;
       if (delta !== 0) {
-        const classKey = this.player.playerClass;
+        const classKey = this.player?.playerClass || this.selectedClass;
         const tree = getActiveTreeSkills(classKey, {}) ? this.getSkillTreeNodes() : [];
         if (tree.length > 0) {
           this.skillTreeCursor = (this.skillTreeCursor + delta + tree.length) % tree.length;
@@ -1943,8 +1972,8 @@ export class Game {
   }
 
   getSkillTreeNodes() {
-    if (!this.player) return [];
-    const classKey = this.player.playerClass;
+    const classKey = this.player?.playerClass || this.selectedClass;
+    if (!classKey) return [];
     const tree = SKILL_TREES[classKey] || [];
     const branches = [...new Set(tree.map(n => n.branch))];
     const sorted = [];
@@ -1956,8 +1985,9 @@ export class Game {
   }
 
   tryInvestSkillTreePoint() {
-    if (!this.player || !this.saveData) return;
-    const classKey = this.player.playerClass;
+    if (!this.saveData) return;
+    const classKey = this.player?.playerClass || this.selectedClass;
+    if (!classKey) return;
     const nodes = this.getSkillTreeNodes();
     if (this.skillTreeCursor >= nodes.length) return;
 
@@ -2493,9 +2523,21 @@ export class Game {
   checkTrapTile(x, y) {
     if (this.map.getTile(x, y) !== TILE.TRAP) return;
     const damage = 2 + this.floorNumber;
+
+    // DEX dodge roll (same formula as combat)
+    let dodgeChance = this.player.stats.DEX * 1.0;
+    if (this.treePassiveEffects?.dodge_bonus) dodgeChance += this.treePassiveEffects.dodge_bonus;
+    const dodged = Math.random() * 100 < dodgeChance;
+
+    this.map.setTile(x, y, TILE.FLOOR);
+    if (dodged) {
+      this.messageLog.add('You dodge a trap!', this.turnCount);
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+
     this.player.takeDamage(damage);
     this.messageLog.add(`You trigger a trap! ${damage} damage.`, this.turnCount);
-    this.map.setTile(x, y, TILE.FLOOR);
     if (this.audio) this.audio.playerHurt();
     if (!this.player.isAlive()) {
       this.messageLog.add('You have been slain by a trap!', this.turnCount);
@@ -2554,6 +2596,23 @@ export class Game {
           e.type === 'enemy' && e.isAlive() && e.position.x === nx && e.position.y === ny
         );
         if (!enemy) {
+          if (this.map.getTile(nx, ny) === TILE.TRAP) {
+            const fullDamage = 2 + this.floorNumber;
+            const damage = Math.max(1, Math.floor(fullDamage * 0.5));
+            this.player.takeDamage(damage);
+            this.map.setTile(nx, ny, TILE.FLOOR);
+            this.messageLog.add(`You disarm the trap, taking ${damage} damage.`, this.turnCount);
+            if (this.audio) this.audio.playerHurt();
+            if (!this.player.isAlive()) {
+              this.messageLog.add('You have been slain by a trap!', this.turnCount);
+              this.finalizeRun('a trap');
+              this.captureRunItemsForHub(false);
+              this.deathSplashFrames = 0;
+              this.state = 'deathSplash';
+              if (this.audio) this.audio.stopAmbient();
+            }
+            return true;
+          }
           this.messageLog.add('You swing at empty air.', this.turnCount);
           return false;
         }
@@ -3479,7 +3538,23 @@ export class Game {
       : 'Pending loadout: none';
     ctx.fillText(pendingText, x + Math.round(220 * uiScale), y + Math.round(78 * uiScale));
 
-    const optionY = y + Math.round(130 * uiScale);
+    // Material totals
+    const matNames = { timber: 'TMB', stone: 'STN', iron: 'IRN', crystal: 'CRY', aether: 'ATH' };
+    const matColors = { timber: '#c4a05a', stone: '#b8b8a8', iron: '#8eaaba', crystal: '#b48ee8', aether: '#d8b4ff' };
+    const mats = this.saveData?.materials || {};
+    ctx.font = `bold ${Math.round(12 * uiScale)}px monospace`;
+    let matX = x + Math.round(20 * uiScale);
+    const matY = y + Math.round(98 * uiScale);
+    for (const [key, abbr] of Object.entries(matNames)) {
+      const label = `${abbr}:${mats[key] || 0}`;
+      ctx.fillStyle = '#000000';
+      ctx.fillText(label, matX + 1, matY + 1);
+      ctx.fillStyle = matColors[key];
+      ctx.fillText(label, matX, matY);
+      matX += ctx.measureText(label).width + Math.round(12 * uiScale);
+    }
+
+    const optionY = y + Math.round(140 * uiScale);
     for (let i = 0; i < options.length; i++) {
       const selected = i === this.hubMenuIndex;
       if (selected) {
@@ -3529,7 +3604,23 @@ export class Game {
     ctx.font = `${Math.round(14 * uiScale)}px monospace`;
     ctx.fillText(`Essence: ${this.saveData?.currency || 0}`, x + Math.round(20 * uiScale), y + Math.round(68 * uiScale));
 
-    const startY = y + Math.round(100 * uiScale);
+    // Material totals
+    const matNames = { timber: 'TMB', stone: 'STN', iron: 'IRN', crystal: 'CRY', aether: 'ATH' };
+    const matColors = { timber: '#c4a05a', stone: '#b8b8a8', iron: '#8eaaba', crystal: '#b48ee8', aether: '#d8b4ff' };
+    const mats = this.saveData?.materials || {};
+    ctx.font = `bold ${Math.round(12 * uiScale)}px monospace`;
+    let shopMatX = x + Math.round(20 * uiScale);
+    const shopMatY = y + Math.round(88 * uiScale);
+    for (const [key, abbr] of Object.entries(matNames)) {
+      const label = `${abbr}:${mats[key] || 0}`;
+      ctx.fillStyle = '#000000';
+      ctx.fillText(label, shopMatX + 1, shopMatY + 1);
+      ctx.fillStyle = matColors[key];
+      ctx.fillText(label, shopMatX, shopMatY);
+      shopMatX += ctx.measureText(label).width + Math.round(12 * uiScale);
+    }
+
+    const startY = y + Math.round(110 * uiScale);
     const lineH = Math.round(32 * uiScale);
     for (let i = 0; i < this.hubShop.items.length; i++) {
       const item = this.hubShop.items[i];
@@ -3682,8 +3773,11 @@ export class Game {
       ? (stashItems[this.hubStashCursor] || null)
       : (this.hubRunCarryover[this.hubRunItemsCursor] || null);
     const summaryLines = this.getStashItemSummaryLines(selectedItem);
+    if (selectedItem && this.hubStashPane === 'stash') {
+      summaryLines.push(`Sell value: ${this.getItemSellValue(selectedItem)} essence`);
+    }
     ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-    for (let i = 0; i < Math.min(3, summaryLines.length); i++) {
+    for (let i = 0; i < Math.min(4, summaryLines.length); i++) {
       ctx.fillStyle = i === 0 && selectedItem ? this.getRarityColor(selectedItem.rarity, '#d6dbe2') : '#b8c0ca';
       ctx.fillText(summaryLines[i], x + Math.round(20 * uiScale), bottomY + i * Math.round(15 * uiScale));
     }
@@ -3700,9 +3794,12 @@ export class Game {
     }
 
     ctx.fillStyle = '#7d8e9f';
-    const controls = this.pendingStashLoadoutItem
-      ? 'Left/Right: switch pane  Up/Down: select  Enter/Z: move item  X: unqueue loadout  ESC: Back'
-      : 'Left/Right: switch pane  Up/Down: select  Enter/Z: move item  ESC: Back';
+    let controls;
+    if (this.pendingStashLoadoutItem) {
+      controls = 'Arrows: navigate  Enter/Z: move  X: unqueue loadout  ESC: Back';
+    } else {
+      controls = 'Arrows: navigate  Enter/Z: move  X: sell item  ESC: Back';
+    }
     ctx.fillText(controls, x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
   }
 
@@ -3857,9 +3954,9 @@ export class Game {
     const h = this.canvas.height;
     const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
 
-    if (!this.player || !this.saveData) return;
+    if (!this.saveData) return;
 
-    const classKey = this.player.playerClass;
+    const classKey = this.player?.playerClass || this.selectedClass;
     const nodes = this.getSkillTreeNodes();
     const investments = this.saveData.skillInvestments[classKey] || {};
     const level = this.saveData.classLevels[classKey] || 1;
