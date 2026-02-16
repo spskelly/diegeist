@@ -29,6 +29,7 @@ import { assignSkillToSlot, canUseSkill, syncClassSkillCooldown, tickCooldowns, 
 import { ACHIEVEMENTS, HubShop, loadSaveData, persistSaveData } from './progression.js';
 import { AudioManager } from './audio.js';
 import { createEmptyMaterials, addMaterials, scaleMaterials, rollMaterialDrop, getFloorClearMaterials, getBossKillMaterials, MATERIAL_COLORS } from './resources.js';
+import { getLevelForXP, getSkillPointsForLevel, getXPForNextLevel, XP_TABLE, resolvePassiveEffects, getActiveTreeSkills, SKILL_TREES, canInvestSkill, investSkill } from './skill-tree.js';
 
 function isDirectionalAction(action) {
   return action.type === 'move' || action.type === 'attack';
@@ -155,6 +156,14 @@ export class Game {
 
     attacker.stats = this.getEntityStatsWithEquipment(attacker);
     defender.stats = this.getEntityStatsWithEquipment(defender);
+
+    // Inject skill tree effects for player
+    if (attacker.type === 'player' && this.treePassiveEffects) {
+      options.attackerTreeEffects = this.treePassiveEffects;
+    }
+    if (defender.type === 'player' && this.treePassiveEffects) {
+      options.defenderTreeEffects = this.treePassiveEffects;
+    }
 
     try {
       return resolveAttack(attacker, defender, options);
@@ -1170,6 +1179,38 @@ export class Game {
     return true;
   }
 
+  awardXP(amount) {
+    if (!this.player || !this.saveData) return;
+    const classKey = this.player.playerClass;
+
+    // Apply XP bonus from skill tree (e.g., Mage Insight)
+    const xpBonus = this.treePassiveEffects?.xp_bonus || 0;
+    const finalAmount = Math.floor(amount * (1 + xpBonus));
+
+    this.saveData.classXP[classKey] = (this.saveData.classXP[classKey] || 0) + finalAmount;
+
+    // Check for level up
+    const oldLevel = this.saveData.classLevels[classKey] || 1;
+    const newLevel = getLevelForXP(this.saveData.classXP[classKey]);
+
+    if (newLevel > oldLevel) {
+      this.saveData.classLevels[classKey] = newLevel;
+      const oldPoints = getSkillPointsForLevel(oldLevel);
+      const newPoints = getSkillPointsForLevel(newLevel);
+      const pointsGained = newPoints - oldPoints;
+      this.saveData.skillPoints[classKey] = (this.saveData.skillPoints[classKey] || 0) + pointsGained;
+      this.messageLog.add(`Level up! ${classKey.charAt(0).toUpperCase() + classKey.slice(1)} is now level ${newLevel}. +${pointsGained} skill point${pointsGained > 1 ? 's' : ''}.`, this.turnCount, '#ffd700');
+      this.addFloatingText(this.player.position.x, this.player.position.y, `LEVEL ${newLevel}!`, '#ffd700', 1200);
+      if (this.audio) this.audio.uiClick();
+    }
+  }
+
+  getEnemyXP(enemy) {
+    const rank = this.currentRank || 1;
+    const baseXP = enemy.isFloorBoss ? 200 : (enemy.isElite ? 40 : 20);
+    return Math.floor(baseXP * (1 + (rank - 1) * 0.20));
+  }
+
   handleEnemyDeath(enemy) {
     this.turnSystem.removeEntity(enemy.id);
     this.runSummary.enemiesKilled++;
@@ -1226,6 +1267,17 @@ export class Game {
         this.messageLog.add(`+${matDrop.quantity} ${matDrop.type}`, this.turnCount, MATERIAL_COLORS[matDrop.type]);
         this.addFloatingText(enemy.position.x, enemy.position.y, `+${matDrop.quantity} ${matDrop.type}`, MATERIAL_COLORS[matDrop.type], 900);
       }
+    }
+
+    // XP award
+    const xpAmount = this.getEnemyXP(enemy);
+    this.awardXP(xpAmount);
+
+    // Vital Strike: heal on kill
+    if (this.treePassiveEffects?.kill_heal > 0) {
+      const healAmount = Math.max(1, Math.floor(this.player.maxHp * this.treePassiveEffects.kill_heal));
+      this.player.heal(healAmount);
+      this.messageLog.add(`Vital Strike: healed ${healAmount} HP.`, this.turnCount, '#56d26d');
     }
 
     if (this.audio) this.audio.enemyDeath();
@@ -1297,6 +1349,8 @@ export class Game {
     };
     this.runMaterials = createEmptyMaterials();
     this.currentRank = 1;
+    this.treePassiveEffects = null;
+    this.treeRegenCounter = 0;
     this.startFloor();
     this.state = 'playing';
     if (this.audio) this.audio.uiClick();
@@ -1827,7 +1881,7 @@ export class Game {
 
   handlePauseMenuAction(action) {
     if (!action) return;
-    const options = ['Resume', 'Save & Quit', 'Abandon Run'];
+    const options = ['Resume', 'Skill Tree', 'Save & Quit', 'Abandon Run'];
     if (action.type === 'close') {
       this.state = 'playing';
       if (this.audio) this.audio.uiClick();
@@ -1845,15 +1899,79 @@ export class Game {
       if (this.pauseMenuIndex === 0) {
         this.state = 'playing';
       } else if (this.pauseMenuIndex === 1) {
+        this.skillTreeCursor = 0;
+        this.skillTreeScroll = 0;
+        this.state = 'skillTree';
+      } else if (this.pauseMenuIndex === 2) {
         this.saveRunState();
         this.state = 'startMenu';
-      } else if (this.pauseMenuIndex === 2) {
+      } else if (this.pauseMenuIndex === 3) {
         this.captureRunItemsForHub(false);
         this.finalizeRun('abandoned');
         this.enterHubMenu('Run abandoned.');
       }
       if (this.audio) this.audio.uiClick();
     }
+  }
+
+  handleSkillTreeAction(action) {
+    if (!action) return;
+    if (action.type === 'close') {
+      this.state = 'pauseMenu';
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+    if (isDirectionalAction(action)) {
+      const delta = action.dy || 0;
+      if (delta !== 0) {
+        const classKey = this.player.playerClass;
+        const tree = getActiveTreeSkills(classKey, {}) ? this.getSkillTreeNodes() : [];
+        if (tree.length > 0) {
+          this.skillTreeCursor = (this.skillTreeCursor + delta + tree.length) % tree.length;
+        }
+        if (this.audio) this.audio.uiClick();
+      }
+      return;
+    }
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      this.tryInvestSkillTreePoint();
+    }
+  }
+
+  getSkillTreeNodes() {
+    if (!this.player) return [];
+    const classKey = this.player.playerClass;
+    const tree = SKILL_TREES[classKey] || [];
+    const branches = [...new Set(tree.map(n => n.branch))];
+    const sorted = [];
+    for (const branch of branches) {
+      const branchNodes = tree.filter(n => n.branch === branch).sort((a, b) => a.tier - b.tier);
+      sorted.push(...branchNodes);
+    }
+    return sorted;
+  }
+
+  tryInvestSkillTreePoint() {
+    if (!this.player || !this.saveData) return;
+    const classKey = this.player.playerClass;
+    const nodes = this.getSkillTreeNodes();
+    if (this.skillTreeCursor >= nodes.length) return;
+
+    const node = nodes[this.skillTreeCursor];
+    const investments = this.saveData.skillInvestments[classKey] || {};
+    const available = this.saveData.skillPoints[classKey] || 0;
+
+    if (available <= 0) return;
+    if (!canInvestSkill(classKey, node.id, investments)) return;
+
+    investSkill(classKey, node.id, investments);
+    this.saveData.skillInvestments[classKey] = investments;
+    this.saveData.skillPoints[classKey] = available - 1;
+
+    // Refresh passive effects
+    this.treePassiveEffects = resolvePassiveEffects(classKey, investments);
+    persistSaveData(this.saveData);
+    if (this.audio) this.audio.uiClick();
   }
 
   drawPauseMenu() {
@@ -1867,7 +1985,7 @@ export class Game {
     ctx.fillRect(0, 0, w, h);
 
     const panelW = Math.round(300 * uiScale);
-    const panelH = Math.round(180 * uiScale);
+    const panelH = Math.round(210 * uiScale);
     const px = Math.floor((w - panelW) / 2);
     const py = Math.floor((h - panelH) / 2);
 
@@ -1880,7 +1998,7 @@ export class Game {
     ctx.font = `${Math.round(22 * uiScale)}px monospace`;
     ctx.fillText('Paused', px + Math.round(20 * uiScale), py + Math.round(36 * uiScale));
 
-    const options = ['Resume', 'Save & Quit', 'Abandon Run'];
+    const options = ['Resume', 'Skill Tree', 'Save & Quit', 'Abandon Run'];
     const lineH = Math.round(28 * uiScale);
     const startY = py + Math.round(70 * uiScale);
     ctx.font = `${Math.round(14 * uiScale)}px monospace`;
@@ -2226,6 +2344,18 @@ export class Game {
       this.runSummary.classKey = this.player.playerClass;
       this.applyStarterLoadout();
       this.applyPendingHubLoadout();
+
+      // Resolve skill tree passive effects
+      const classKey = this.selectedClass;
+      const investments = this.saveData?.skillInvestments?.[classKey] || {};
+      this.treePassiveEffects = resolvePassiveEffects(classKey, investments);
+
+      // Apply max HP multiplier from skill tree
+      if (this.treePassiveEffects.max_hp_mult > 1.0) {
+        const hpBonus = Math.floor(this.player.maxHp * (this.treePassiveEffects.max_hp_mult - 1));
+        this.player.maxHp += hpBonus;
+        this.player.hp += hpBonus;
+      }
     } else {
       this.player.moveTo(startX, startY);
       this.player.floorNumber = this.floorNumber;
@@ -2454,6 +2584,41 @@ export class Game {
         const critMsg = result.crit ? ' (CRITICAL!)' : '';
         this.messageLog.add(`You hit the ${enemy.name} for ${result.damage} damage!${critMsg}`, this.turnCount);
       }
+
+      // Skill tree combat hooks (only on hit)
+      if (result.hit && !result.dodged && !result.blocked) {
+        // Cleave: chance to splash to adjacent enemy on melee hit
+        if (damageType === 'melee' && this.treePassiveEffects?.cleave_chance > 0) {
+          if (Math.random() < this.treePassiveEffects.cleave_chance) {
+            const adjacentEnemy = this.map.entities.find(e =>
+              e.type === 'enemy' && e.isAlive() && e.id !== enemy.id &&
+              Math.abs(e.position.x - enemy.position.x) <= 1 &&
+              Math.abs(e.position.y - enemy.position.y) <= 1
+            );
+            if (adjacentEnemy) {
+              const cleaveResult = this.resolveCombat(this.player, adjacentEnemy, {
+                baseDamage: Math.floor(3 * 0.5),
+                damageType: 'melee',
+                weaponMultiplier: this.getPlayerWeaponMultiplier('melee'),
+              });
+              this.addHitFeedback(adjacentEnemy, cleaveResult, 'player');
+              if (cleaveResult.killed) {
+                this.messageLog.add(`Cleave kills ${adjacentEnemy.name}!`, this.turnCount);
+                this.handleEnemyDeath(adjacentEnemy);
+              } else if (cleaveResult.hit) {
+                this.messageLog.add(`Cleave hits ${adjacentEnemy.name} for ${cleaveResult.damage}!`, this.turnCount);
+              }
+            }
+          }
+        }
+
+        // Staggering Blow: melee crits stun target
+        if (damageType === 'melee' && result.crit && !result.killed && this.treePassiveEffects?.stun_on_crit > 0) {
+          enemy.addStatusEffect({ type: 'stunned', duration: this.treePassiveEffects.stun_on_crit, value: 1 });
+          this.messageLog.add(`${enemy.name} is stunned!`, this.turnCount);
+        }
+      }
+
       if (this.audio) {
         if (damageType === 'magic') this.audio.magicCast();
         else if (damageType === 'ranged') this.audio.rangedShot();
@@ -2481,6 +2646,12 @@ export class Game {
   }
 
   processEnemyTurn(entity) {
+    // Stun: skip turn
+    if (entity.hasStatusEffect?.('stunned')) {
+      entity.spendTurn();
+      return;
+    }
+
     const action = getAIAction(entity, this.player, this.map, this.map.entities);
 
     if (action.type === 'move') {
@@ -2514,6 +2685,26 @@ export class Game {
           this.handleEnemyDeath(entity);
         }
       }
+
+      // Retaliation: counter-attack on melee hit
+      if (result.hit && !result.killed && (action.damageType || 'melee') === 'melee' &&
+          this.treePassiveEffects?.retaliation_chance > 0 && entity.isAlive()) {
+        if (Math.random() < this.treePassiveEffects.retaliation_chance) {
+          const retResult = this.resolveCombat(this.player, entity, {
+            baseDamage: 1,
+            damageType: 'melee',
+            weaponMultiplier: this.getPlayerWeaponMultiplier('melee') * 0.5,
+          });
+          if (retResult.hit) {
+            this.messageLog.add(`You retaliate for ${retResult.damage} damage!`, this.turnCount);
+            this.addHitFeedback(entity, retResult, 'player');
+            if (retResult.killed) {
+              this.handleEnemyDeath(entity);
+            }
+          }
+        }
+      }
+
       if (this.audio) this.audio.playerHurt();
     } else if (action.type === 'summon') {
       const st = entity.summonTemplate || { name: 'Minion', spriteKey: 'rat', stats: { STR: 2, DEX: 2, CON: 2, INT: 1, WIS: 1, LCK: 1 }, maxHp: 3 };
@@ -2589,6 +2780,11 @@ export class Game {
     const floorMats = getFloorClearMaterials(floorBiome, this.currentRank || 1);
     this.runMaterials[floorMats.type] += floorMats.quantity;
     this.messageLog.add(`Floor clear: +${floorMats.quantity} ${floorMats.type}`, this.turnCount, MATERIAL_COLORS[floorMats.type]);
+
+    // Floor clear XP bonus
+    const floorClearXP = this.getEnemyXP({ isFloorBoss: false, isElite: false }) * 5;
+    this.awardXP(floorClearXP);
+
     this.floorNumber++;
     this.runSummary.floorsReached = Math.max(this.runSummary.floorsReached, this.floorNumber);
     this.syncMilestoneAchievements();
@@ -2647,6 +2843,10 @@ export class Game {
       this.handlePauseMenuAction(action);
       return;
     }
+    if (this.state === 'skillTree') {
+      this.handleSkillTreeAction(action);
+      return;
+    }
     if (this.state !== 'playing') return;
     if (!action) return;
 
@@ -2684,6 +2884,17 @@ export class Game {
     this.player.spendTurn();
     this.turnCount++;
     this.applyNaturalRegen();
+
+    // Skill tree passive regen
+    if (this.treePassiveEffects?.passive_regen > 0) {
+      this.treeRegenCounter = (this.treeRegenCounter || 0) + 1;
+      if (this.treeRegenCounter >= this.treePassiveEffects.passive_regen) {
+        this.treeRegenCounter = 0;
+        if (this.player.hp < this.player.maxHp) {
+          this.player.heal(1);
+        }
+      }
+    }
 
     // Tick status effects
     for (const effect of this.player.statusEffects) {
@@ -3591,8 +3802,153 @@ export class Game {
       this.drawPauseMenu();
       return;
     }
+    if (this.state === 'skillTree') {
+      this.drawSkillTree();
+      return;
+    }
     if (this.inventoryOpen) this.drawInventoryOverlay();
     if (this.statsOpen) this.drawStatsOverlay();
+  }
+
+  drawSkillTree() {
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+
+    if (!this.player || !this.saveData) return;
+
+    const classKey = this.player.playerClass;
+    const nodes = this.getSkillTreeNodes();
+    const investments = this.saveData.skillInvestments[classKey] || {};
+    const level = this.saveData.classLevels[classKey] || 1;
+    const xp = this.saveData.classXP[classKey] || 0;
+    const available = this.saveData.skillPoints[classKey] || 0;
+    const nextLevelXP = getXPForNextLevel(level);
+
+    const panelW = Math.min(Math.round(600 * uiScale), w - 40);
+    const panelH = Math.min(Math.round(500 * uiScale), h - 40);
+    const x = Math.floor((w - panelW) / 2);
+    const y = Math.floor((h - panelH) / 2);
+
+    // Background
+    ctx.fillStyle = '#0b0f16';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#151c28';
+    ctx.fillRect(x, y, panelW, panelH);
+    ctx.strokeStyle = '#3d5070';
+    ctx.strokeRect(x, y, panelW, panelH);
+
+    // Header
+    const className = classKey.charAt(0).toUpperCase() + classKey.slice(1);
+    ctx.fillStyle = '#e8eef5';
+    ctx.font = `bold ${Math.round(18 * uiScale)}px monospace`;
+    ctx.fillText(`${className} Skill Tree`, x + Math.round(20 * uiScale), y + Math.round(30 * uiScale));
+
+    // Level and XP
+    ctx.fillStyle = '#afc0d2';
+    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    const xpText = nextLevelXP ? `XP: ${xp}/${nextLevelXP}` : `XP: ${xp} (MAX)`;
+    ctx.fillText(`Level ${level}  ${xpText}  Points: ${available}`, x + Math.round(20 * uiScale), y + Math.round(50 * uiScale));
+
+    // XP bar
+    const barX = x + Math.round(20 * uiScale);
+    const barY = y + Math.round(56 * uiScale);
+    const barW = panelW - Math.round(40 * uiScale);
+    const barH = Math.round(6 * uiScale);
+    ctx.fillStyle = '#1a2030';
+    ctx.fillRect(barX, barY, barW, barH);
+    if (nextLevelXP) {
+      const prevXP = XP_TABLE[level - 1] || 0;
+      const progress = Math.min(1, (xp - prevXP) / (nextLevelXP - prevXP));
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(barX, barY, barW * progress, barH);
+    } else {
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(barX, barY, barW, barH);
+    }
+
+    // Skill nodes
+    const nodeStartY = y + Math.round(74 * uiScale);
+    const lineH = Math.round(24 * uiScale);
+    const branches = [...new Set(nodes.map(n => n.branch))];
+    let drawIdx = 0;
+
+    for (const branch of branches) {
+      const branchNodes = nodes.filter(n => n.branch === branch);
+      const branchLabel = branch.charAt(0).toUpperCase() + branch.slice(1);
+
+      const branchY = nodeStartY + drawIdx * lineH;
+      if (branchY > y + panelH - Math.round(100 * uiScale)) break;
+      ctx.fillStyle = '#6a8ab0';
+      ctx.font = `bold ${Math.round(11 * uiScale)}px monospace`;
+      ctx.fillText(`── ${branchLabel} ──`, x + Math.round(20 * uiScale), branchY);
+      drawIdx++;
+
+      for (const node of branchNodes) {
+        const nodeY = nodeStartY + drawIdx * lineH;
+        if (nodeY > y + panelH - Math.round(100 * uiScale)) break;
+
+        const rank = investments[node.id] || 0;
+        const canInv = canInvestSkill(classKey, node.id, investments) && available > 0;
+        const isMaxed = rank >= node.maxRank;
+        const nodeIdx = nodes.indexOf(node);
+
+        if (nodeIdx === this.skillTreeCursor) {
+          ctx.fillStyle = '#1f2d42';
+          ctx.fillRect(x + Math.round(10 * uiScale), nodeY - Math.round(14 * uiScale), panelW - Math.round(20 * uiScale), Math.round(20 * uiScale));
+        }
+
+        ctx.fillStyle = '#4a5568';
+        ctx.font = `${Math.round(10 * uiScale)}px monospace`;
+        ctx.fillText(`T${node.tier}`, x + Math.round(20 * uiScale), nodeY);
+
+        ctx.fillStyle = isMaxed ? '#9ce2a3' : (rank > 0 ? '#e8eef5' : (canInv ? '#c8d4e0' : '#5a6a7a'));
+        ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+        ctx.fillText(node.name, x + Math.round(50 * uiScale), nodeY);
+
+        ctx.fillStyle = isMaxed ? '#9ce2a3' : '#afc0d2';
+        ctx.fillText(`${rank}/${node.maxRank}`, x + Math.round(280 * uiScale), nodeY);
+
+        ctx.fillStyle = node.skillType === 'active' ? '#ff9f43' : '#7ad1d1';
+        ctx.font = `${Math.round(9 * uiScale)}px monospace`;
+        ctx.fillText(node.skillType === 'active' ? 'ACT' : 'PAS', x + Math.round(330 * uiScale), nodeY);
+
+        drawIdx++;
+      }
+    }
+
+    // Selected node detail
+    if (this.skillTreeCursor < nodes.length) {
+      const selected = nodes[this.skillTreeCursor];
+      const rank = investments[selected.id] || 0;
+      const detailY = y + panelH - Math.round(80 * uiScale);
+
+      ctx.fillStyle = '#1a2535';
+      ctx.fillRect(x + Math.round(10 * uiScale), detailY, panelW - Math.round(20 * uiScale), Math.round(60 * uiScale));
+
+      ctx.fillStyle = '#e8eef5';
+      ctx.font = `${Math.round(13 * uiScale)}px monospace`;
+      ctx.fillText(selected.name, x + Math.round(20 * uiScale), detailY + Math.round(18 * uiScale));
+
+      ctx.fillStyle = '#afc0d2';
+      ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+      ctx.fillText(selected.description, x + Math.round(20 * uiScale), detailY + Math.round(36 * uiScale));
+
+      if (selected.prerequisites.length > 0) {
+        const prereqNames = selected.prerequisites.map(p => {
+          const pNode = nodes.find(n => n.id === p.skillId);
+          return `${pNode?.name || p.skillId} ${p.minRank}+`;
+        }).join(', ');
+        ctx.fillStyle = '#7a8a9a';
+        ctx.fillText(`Requires: ${prereqNames}`, x + Math.round(20 * uiScale), detailY + Math.round(50 * uiScale));
+      }
+    }
+
+    // Controls
+    ctx.fillStyle = '#7d8e9f';
+    ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+    ctx.fillText('Up/Down: Select  Enter/Space: Invest  ESC: Close', x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
   }
 
   loop(nowMs = null) {
