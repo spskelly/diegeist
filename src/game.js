@@ -1334,9 +1334,79 @@ export class Game {
     this.deathSplashFrames++;
     if (!action || this.deathSplashFrames < 25) return;
     if (action.type === 'inventoryConfirm' || action.type === 'wait' || action.type === 'close') {
+      this.state = 'deathSaveChoice';
+      this.deathSaveIndex = 0;
+      if (this.audio) this.audio.uiClick();
+    }
+  }
+
+  handleDeathSaveChoiceAction(action) {
+    if (!action) return;
+    if (isDirectionalAction(action)) {
+      const delta = action.dy !== 0 ? action.dy : action.dx;
+      if (delta !== 0) {
+        this.deathSaveIndex = (this.deathSaveIndex + 2 + delta) % 2;
+        if (this.audio) this.audio.uiClick();
+      }
+      return;
+    }
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      if (this.deathSaveIndex === 0) {
+        // Save 1 item — existing behavior preserved
+        this.hubCanStashMultipleFromRun = false;
+      } else {
+        // Save full material haul — restore the 50% penalty
+        if (this.rawRunMaterials && this.committedMaterials) {
+          const restored = {};
+          for (const key of Object.keys(this.rawRunMaterials)) {
+            const diff = this.rawRunMaterials[key] - (this.committedMaterials[key] || 0);
+            if (diff > 0) restored[key] = diff;
+          }
+          this.saveData.addMaterials(restored);
+          persistSaveData(this.saveData);
+        }
+        this.hubRunCarryover = []; // no item save
+      }
       this.state = 'postDeathMenu';
       this.postDeathMenuIndex = 0;
-      if (this.audio) this.audio.uiClick();
+    }
+  }
+
+  drawDeathSaveChoice() {
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+    const panelW = Math.min(Math.round(440 * uiScale), w - 40);
+    const panelH = Math.min(Math.round(200 * uiScale), h - 40);
+    const x = Math.floor((w - panelW) / 2);
+    const y = Math.floor((h - panelH) / 2);
+
+    ctx.fillStyle = '#0b0f16';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#171d28';
+    ctx.fillRect(x, y, panelW, panelH);
+    ctx.strokeStyle = '#4f6075';
+    ctx.strokeRect(x, y, panelW, panelH);
+
+    ctx.fillStyle = '#e8eef5';
+    ctx.font = `${Math.round(22 * uiScale)}px monospace`;
+    ctx.fillText('Death Save', x + Math.round(20 * uiScale), y + Math.round(38 * uiScale));
+
+    ctx.fillStyle = '#afc0d2';
+    ctx.font = `${Math.round(13 * uiScale)}px monospace`;
+    ctx.fillText('Choose one to save:', x + Math.round(20 * uiScale), y + Math.round(64 * uiScale));
+
+    const options = ['Save 1 Item to Stash', 'Save Full Material Haul'];
+    for (let i = 0; i < options.length; i++) {
+      const selected = i === this.deathSaveIndex;
+      if (selected) {
+        ctx.fillStyle = '#2b3a4d';
+        ctx.fillRect(x + Math.round(18 * uiScale), y + Math.round(82 * uiScale) + i * Math.round(36 * uiScale), panelW - Math.round(36 * uiScale), Math.round(28 * uiScale));
+      }
+      ctx.fillStyle = selected ? '#ffffff' : '#9db0c4';
+      ctx.font = `${Math.round(16 * uiScale)}px monospace`;
+      ctx.fillText(options[i], x + Math.round(28 * uiScale), y + Math.round(102 * uiScale) + i * Math.round(36 * uiScale));
     }
   }
 
@@ -2543,6 +2613,10 @@ export class Game {
       this.handleDeathSplashAction(action);
       return;
     }
+    if (this.state === 'deathSaveChoice') {
+      this.handleDeathSaveChoiceAction(action);
+      return;
+    }
     if (this.state === 'postDeathMenu') {
       this.handlePostDeathMenuAction(action);
       return;
@@ -3463,6 +3537,11 @@ export class Game {
   draw(nowMs = this.getNowMs()) {
     if (this.state === 'startMenu') {
       this.drawStartMenu();
+      return;
+    }
+
+    if (this.state === 'deathSaveChoice') {
+      this.drawDeathSaveChoice();
       return;
     }
 
