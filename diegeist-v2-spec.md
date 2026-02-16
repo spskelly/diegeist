@@ -752,14 +752,25 @@ Add the material resource layer to the existing dungeon loop. Enemies drop mater
 
 **Key Implementation:** Extend `handleEnemyDeath()` with material drop roll. Add `runMaterials` tracking to Game class. Extend SaveData with materials and runMaterials. Modify `finalizeRun()` to commit materials (100% on victory, 50% on death). Add material counter to HUD. Extend death-save choice to include "save material haul" option alongside existing "save 1 item" option.
 
+**Status: COMPLETE** (2026-02-16)
+
 **Acceptance Criteria:**
-- [ ] Enemies drop 1-2 materials on kill (40% chance) appropriate to current biome
-- [ ] Floor clear awards 3-5 materials
-- [ ] Boss kills award 2-4 Aether plus biome materials
-- [ ] HUD displays current run material counts
-- [ ] Materials persist to SaveData on victory (100%) and death (50%)
-- [ ] Death save screen offers choice: save 1 item OR save full material haul
-- [ ] SaveData serialization includes materials; backward-compatible with v1 saves
+- [x] Enemies drop 1-2 materials on kill (40% chance) appropriate to current biome
+- [x] Floor clear awards 3-5 materials
+- [x] Boss kills award 2-4 Aether plus biome materials
+- [x] HUD displays current run material counts
+- [x] Materials persist to SaveData on victory (100%) and death (50%)
+- [x] Death save screen offers choice: save 1 item OR save full material haul
+- [x] SaveData serialization includes materials; backward-compatible with v1 saves
+
+**Implementation Notes:**
+- `src/resources.js` — Material types, biome mapping, drop/clear/boss functions, `MATERIAL_COLORS`
+- `src/progression.js` — `SaveData.materials`, `addMaterials()`, `canAfford()`, `spendMaterials()`, serialize/deserialize with backward-compat
+- `src/game.js` — `runMaterials`/`currentRank` state, material drops in `handleEnemyDeath()`, floor clear bonuses in `handleFloorTransition()`, 100%/50% commit in `finalizeRun()`, `deathSaveChoice` state, material summaries on death/victory screens, colored floating text VFX on material drops
+- `src/hud.js` — Bold material counters with drop shadow, colored message log entries
+- `src/message-log.js` — Optional `color` parameter on `add()`
+- `tests/resources.test.js` — 14 tests covering all resource functions
+- `tests/progression.test.js` — 7 new tests for material fields (28 total)
 
 ### Phase 2: Class Skill Trees & XP
 
