@@ -72,6 +72,9 @@ export class Game {
     this.hubStashScrollOffset = 0;
     this.hubRunScrollOffset = 0;
     this.hubAchievementsCursor = 0;
+    this.hubAchievementsScrollOffset = 0;
+    this.hubShopScrollOffset = 0;
+    this.skillTreeScrollOffset = 0;
     this.hubStashPane = 'stash';
     this.hubNotice = '';
     this.hubRunCarryover = [];
@@ -225,6 +228,9 @@ export class Game {
     this.hubStashScrollOffset = 0;
     this.hubRunScrollOffset = 0;
     this.hubAchievementsCursor = 0;
+    this.hubAchievementsScrollOffset = 0;
+    this.hubShopScrollOffset = 0;
+    this.skillTreeScrollOffset = 0;
     if (notice) this.hubNotice = notice;
     this.refreshHubShop();
     if (this.audio) this.audio.uiClick();
@@ -1541,7 +1547,7 @@ export class Game {
         this.state = 'hubShop';
       } else if (this.hubMenuIndex === 2) {
         this.skillTreeCursor = 0;
-        this.skillTreeScroll = 0;
+        this.skillTreeScrollOffset = 0;
         this.skillTreeReturnState = 'hubMenu';
         this.state = 'skillTree';
       } else if (this.hubMenuIndex === 3) {
@@ -1614,10 +1620,28 @@ export class Game {
     return this.hubRunCarryover || [];
   }
 
-  clampStashScroll(cursor, scrollOffset, maxVisible) {
+  clampScrollOffset(cursor, scrollOffset, maxVisible) {
     if (cursor < scrollOffset) return cursor;
     if (cursor >= scrollOffset + maxVisible) return cursor - maxVisible + 1;
     return scrollOffset;
+  }
+
+  getScrollView(cursor, scrollOffset, totalItems, maxVisible) {
+    const clamped = this.clampScrollOffset(cursor, scrollOffset, maxVisible);
+    return {
+      scrollOffset: clamped,
+      startIdx: clamped,
+      endIdx: Math.min(totalItems, clamped + maxVisible),
+      showUpArrow: clamped > 0,
+      showDownArrow: clamped + maxVisible < totalItems,
+    };
+  }
+
+  drawScrollIndicators(ctx, x, topY, bottomY, showUp, showDown, uiScale) {
+    ctx.fillStyle = '#7d8e9f';
+    ctx.font = `${Math.round(10 * uiScale)}px monospace`;
+    if (showUp) ctx.fillText('\u25B2 more', x, topY);
+    if (showDown) ctx.fillText('\u25BC more', x, bottomY);
   }
 
   getItemSellValue(item) {
@@ -1932,7 +1956,7 @@ export class Game {
         this.state = 'playing';
       } else if (this.pauseMenuIndex === 1) {
         this.skillTreeCursor = 0;
-        this.skillTreeScroll = 0;
+        this.skillTreeScrollOffset = 0;
         this.skillTreeReturnState = 'pauseMenu';
         this.state = 'skillTree';
       } else if (this.pauseMenuIndex === 2) {
@@ -1957,11 +1981,19 @@ export class Game {
     if (isDirectionalAction(action)) {
       const delta = action.dy || 0;
       if (delta !== 0) {
-        const classKey = this.player?.playerClass || this.selectedClass;
-        const tree = getActiveTreeSkills(classKey, {}) ? this.getSkillTreeNodes() : [];
+        const tree = this.getSkillTreeNodes();
         if (tree.length > 0) {
           this.skillTreeCursor = (this.skillTreeCursor + delta + tree.length) % tree.length;
         }
+        if (this.audio) this.audio.uiClick();
+      }
+      // Left/right cycles class when opened from hub (no active run)
+      const dx = action.dx || 0;
+      if (dx !== 0 && this.skillTreeReturnState === 'hubMenu') {
+        const idx = this.classOrder.indexOf(this.selectedClass);
+        this.selectedClass = this.classOrder[(idx + dx + this.classOrder.length) % this.classOrder.length];
+        this.skillTreeCursor = 0;
+        this.skillTreeScrollOffset = 0;
         if (this.audio) this.audio.uiClick();
       }
       return;
@@ -3622,20 +3654,29 @@ export class Game {
 
     const startY = y + Math.round(110 * uiScale);
     const lineH = Math.round(32 * uiScale);
-    for (let i = 0; i < this.hubShop.items.length; i++) {
+    const shopBottomY = y + panelH - Math.round(56 * uiScale);
+    const shopMaxVisible = Math.max(1, Math.floor((shopBottomY - startY) / lineH));
+    const shopSv = this.getScrollView(this.hubShopCursor, this.hubShopScrollOffset, this.hubShop.items.length, shopMaxVisible);
+    this.hubShopScrollOffset = shopSv.scrollOffset;
+
+    for (let i = shopSv.startIdx; i < shopSv.endIdx; i++) {
+      const row = i - shopSv.startIdx;
       const item = this.hubShop.items[i];
       const selected = i === this.hubShopCursor;
       if (selected) {
         ctx.fillStyle = '#2b3a4d';
-        ctx.fillRect(x + Math.round(18 * uiScale), startY - Math.round(18 * uiScale) + i * lineH, panelW - Math.round(36 * uiScale), Math.round(24 * uiScale));
+        ctx.fillRect(x + Math.round(18 * uiScale), startY - Math.round(18 * uiScale) + row * lineH, panelW - Math.round(36 * uiScale), Math.round(24 * uiScale));
       }
       ctx.fillStyle = selected ? '#ffffff' : '#b8c7d7';
       ctx.font = `${Math.round(15 * uiScale)}px monospace`;
-      ctx.fillText(item.name, x + Math.round(28 * uiScale), startY + i * lineH);
+      ctx.fillText(item.name, x + Math.round(28 * uiScale), startY + row * lineH);
       ctx.fillStyle = '#8fa5bb';
       ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-      ctx.fillText(`${item.category}  |  cost ${item.cost}`, x + Math.round(320 * uiScale), startY + i * lineH);
+      ctx.fillText(`${item.category}  |  cost ${item.cost}`, x + Math.round(320 * uiScale), startY + row * lineH);
     }
+    this.drawScrollIndicators(ctx, x + Math.round(28 * uiScale),
+      startY - Math.round(28 * uiScale), shopBottomY,
+      shopSv.showUpArrow, shopSv.showDownArrow, uiScale);
     if (this.hubShop.items.length === 0) {
       ctx.fillStyle = '#94a7bb';
       ctx.fillText('No items available. Return to hub and refresh later.', x + Math.round(24 * uiScale), startY);
@@ -3710,16 +3751,16 @@ export class Game {
     ctx.fillText(`Stash (${this.saveData.stash.length})`, leftX + Math.round(8 * uiScale), paneTop + Math.round(20 * uiScale));
     ctx.fillText(`Run Items (${this.hubRunCarryover.length})`, rightX + Math.round(8 * uiScale), paneTop + Math.round(20 * uiScale));
 
-    // Clamp scroll offsets
+    // Scroll views for both panes
     const stashItems = this.saveData.stash || [];
-    this.hubStashScrollOffset = this.clampStashScroll(this.hubStashCursor, this.hubStashScrollOffset, maxVisible);
-    this.hubRunScrollOffset = this.clampStashScroll(this.hubRunItemsCursor, this.hubRunScrollOffset, maxVisible);
+    const stashSv = this.getScrollView(this.hubStashCursor, this.hubStashScrollOffset, stashItems.length, maxVisible);
+    this.hubStashScrollOffset = stashSv.scrollOffset;
+    const runSv = this.getScrollView(this.hubRunItemsCursor, this.hubRunScrollOffset, this.hubRunCarryover.length, maxVisible);
+    this.hubRunScrollOffset = runSv.scrollOffset;
 
     // Draw left pane (persistent stash) with scrolling
-    const stashStart = this.hubStashScrollOffset;
-    const stashEnd = Math.min(stashItems.length, stashStart + maxVisible);
-    for (let i = stashStart; i < stashEnd; i++) {
-      const row = i - stashStart;
+    for (let i = stashSv.startIdx; i < stashSv.endIdx; i++) {
+      const row = i - stashSv.startIdx;
       const selected = this.hubStashPane === 'stash' && i === this.hubStashCursor;
       if (selected) {
         ctx.fillStyle = '#2b3a4d';
@@ -3729,23 +3770,13 @@ export class Game {
       ctx.font = `${Math.round(12 * uiScale)}px monospace`;
       ctx.fillText(this.truncateLabel(stashItems[i].name, 24), leftX + Math.round(10 * uiScale), startY + row * lineH);
     }
-    // Scroll indicators for stash
-    if (stashStart > 0) {
-      ctx.fillStyle = '#7d8e9f';
-      ctx.font = `${Math.round(10 * uiScale)}px monospace`;
-      ctx.fillText('\u25B2 more', leftX + Math.round(8 * uiScale), paneTop + Math.round(28 * uiScale));
-    }
-    if (stashEnd < stashItems.length) {
-      ctx.fillStyle = '#7d8e9f';
-      ctx.font = `${Math.round(10 * uiScale)}px monospace`;
-      ctx.fillText('\u25BC more', leftX + Math.round(8 * uiScale), paneTop + paneHeight - Math.round(6 * uiScale));
-    }
+    this.drawScrollIndicators(ctx, leftX + Math.round(8 * uiScale),
+      paneTop + Math.round(28 * uiScale), paneTop + paneHeight - Math.round(6 * uiScale),
+      stashSv.showUpArrow, stashSv.showDownArrow, uiScale);
 
     // Draw right pane (run items) with scrolling
-    const runStart = this.hubRunScrollOffset;
-    const runEnd = Math.min(this.hubRunCarryover.length, runStart + maxVisible);
-    for (let i = runStart; i < runEnd; i++) {
-      const row = i - runStart;
+    for (let i = runSv.startIdx; i < runSv.endIdx; i++) {
+      const row = i - runSv.startIdx;
       const selected = this.hubStashPane === 'run' && i === this.hubRunItemsCursor;
       if (selected) {
         ctx.fillStyle = '#2b3a4d';
@@ -3756,16 +3787,9 @@ export class Game {
       ctx.font = `${Math.round(12 * uiScale)}px monospace`;
       ctx.fillText(this.truncateLabel(item.name, 24), rightX + Math.round(10 * uiScale), startY + row * lineH);
     }
-    if (runStart > 0) {
-      ctx.fillStyle = '#7d8e9f';
-      ctx.font = `${Math.round(10 * uiScale)}px monospace`;
-      ctx.fillText('\u25B2 more', rightX + Math.round(8 * uiScale), paneTop + Math.round(28 * uiScale));
-    }
-    if (runEnd < this.hubRunCarryover.length) {
-      ctx.fillStyle = '#7d8e9f';
-      ctx.font = `${Math.round(10 * uiScale)}px monospace`;
-      ctx.fillText('\u25BC more', rightX + Math.round(8 * uiScale), paneTop + paneHeight - Math.round(6 * uiScale));
-    }
+    this.drawScrollIndicators(ctx, rightX + Math.round(8 * uiScale),
+      paneTop + Math.round(28 * uiScale), paneTop + paneHeight - Math.round(6 * uiScale),
+      runSv.showUpArrow, runSv.showDownArrow, uiScale);
 
     // Bottom section: item inspect + status
     const bottomY = paneTop + paneHeight + Math.round(10 * uiScale);
@@ -3832,18 +3856,27 @@ export class Game {
     ctx.font = `${Math.round(28 * uiScale)}px monospace`;
     ctx.fillText('Achievements', x + Math.round(20 * uiScale), y + Math.round(42 * uiScale));
 
-    for (let i = 0; i < ACHIEVEMENTS.length; i++) {
+    const bottomY = y + panelH - Math.round(40 * uiScale);
+    const maxVisible = Math.max(1, Math.floor((bottomY - startY) / lineH));
+    const sv = this.getScrollView(this.hubAchievementsCursor, this.hubAchievementsScrollOffset, ACHIEVEMENTS.length, maxVisible);
+    this.hubAchievementsScrollOffset = sv.scrollOffset;
+
+    for (let i = sv.startIdx; i < sv.endIdx; i++) {
+      const row = i - sv.startIdx;
       const ach = ACHIEVEMENTS[i];
       const record = this.saveData.achievements[ach.id] || { progress: 0, unlocked: false };
       const selected = i === this.hubAchievementsCursor;
       if (selected) {
         ctx.fillStyle = '#2b3a4d';
-        ctx.fillRect(x + Math.round(16 * uiScale), startY - Math.round(17 * uiScale) + i * lineH, listW - Math.round(28 * uiScale), Math.round(22 * uiScale));
+        ctx.fillRect(x + Math.round(16 * uiScale), startY - Math.round(17 * uiScale) + row * lineH, listW - Math.round(28 * uiScale), Math.round(22 * uiScale));
       }
       ctx.fillStyle = record.unlocked ? '#9ce2a3' : (selected ? '#ffffff' : '#b8c7d7');
       ctx.font = `${Math.round(13 * uiScale)}px monospace`;
-      ctx.fillText(`${ach.name}`, x + Math.round(22 * uiScale), startY + i * lineH);
+      ctx.fillText(`${ach.name}`, x + Math.round(22 * uiScale), startY + row * lineH);
     }
+    this.drawScrollIndicators(ctx, x + Math.round(22 * uiScale),
+      startY - Math.round(28 * uiScale), bottomY,
+      sv.showUpArrow, sv.showDownArrow, uiScale);
 
     const selectedAchievement = this.getSelectedAchievement();
     if (selectedAchievement) {
@@ -3906,6 +3939,10 @@ export class Game {
       this.drawHubAchievements();
       return;
     }
+    if (this.state === 'skillTree') {
+      this.drawSkillTree();
+      return;
+    }
     if (!this.map || !this.player) {
       this.ctx.fillStyle = '#000';
       this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -3938,10 +3975,6 @@ export class Game {
 
     if (this.state === 'pauseMenu') {
       this.drawPauseMenu();
-      return;
-    }
-    if (this.state === 'skillTree') {
-      this.drawSkillTree();
       return;
     }
     if (this.inventoryOpen) this.drawInventoryOverlay();
@@ -3979,9 +4012,11 @@ export class Game {
 
     // Header
     const className = classKey.charAt(0).toUpperCase() + classKey.slice(1);
+    const fromHub = this.skillTreeReturnState === 'hubMenu';
     ctx.fillStyle = '#e8eef5';
     ctx.font = `bold ${Math.round(18 * uiScale)}px monospace`;
-    ctx.fillText(`${className} Skill Tree`, x + Math.round(20 * uiScale), y + Math.round(30 * uiScale));
+    const headerText = fromHub ? `< ${className} Skill Tree >` : `${className} Skill Tree`;
+    ctx.fillText(headerText, x + Math.round(20 * uiScale), y + Math.round(30 * uiScale));
 
     // Level and XP
     ctx.fillStyle = '#afc0d2';
@@ -4006,61 +4041,78 @@ export class Game {
       ctx.fillRect(barX, barY, barW, barH);
     }
 
-    // Skill nodes
+    // Skill nodes — build flat display rows (branch headers + nodes)
     const nodeStartY = y + Math.round(74 * uiScale);
     const lineH = Math.round(24 * uiScale);
-    const branches = [...new Set(nodes.map(n => n.branch))];
-    let drawIdx = 0;
+    const detailY = y + panelH - Math.round(92 * uiScale);
+    const listAreaH = detailY - nodeStartY - Math.round(8 * uiScale);
+    const maxVisible = Math.max(1, Math.floor(listAreaH / lineH));
 
+    const branches = [...new Set(nodes.map(n => n.branch))];
+    const displayRows = [];
     for (const branch of branches) {
       const branchNodes = nodes.filter(n => n.branch === branch);
       const branchLabel = branch.charAt(0).toUpperCase() + branch.slice(1);
-
-      const branchY = nodeStartY + drawIdx * lineH;
-      if (branchY > y + panelH - Math.round(100 * uiScale)) break;
-      ctx.fillStyle = '#6a8ab0';
-      ctx.font = `bold ${Math.round(11 * uiScale)}px monospace`;
-      ctx.fillText(`── ${branchLabel} ──`, x + Math.round(20 * uiScale), branchY);
-      drawIdx++;
-
+      displayRows.push({ type: 'branch', label: branchLabel });
       for (const node of branchNodes) {
-        const nodeY = nodeStartY + drawIdx * lineH;
-        if (nodeY > y + panelH - Math.round(100 * uiScale)) break;
+        displayRows.push({ type: 'node', nodeIdx: nodes.indexOf(node), node });
+      }
+    }
 
+    // Clamp scroll to keep cursor visible (using display-row index)
+    const cursorDisplayIdx = displayRows.findIndex(r => r.type === 'node' && r.nodeIdx === this.skillTreeCursor);
+    if (cursorDisplayIdx >= 0) {
+      if (cursorDisplayIdx < this.skillTreeScrollOffset) this.skillTreeScrollOffset = cursorDisplayIdx;
+      if (cursorDisplayIdx >= this.skillTreeScrollOffset + maxVisible) this.skillTreeScrollOffset = cursorDisplayIdx - maxVisible + 1;
+    }
+    if (this.skillTreeScrollOffset > displayRows.length - maxVisible) this.skillTreeScrollOffset = Math.max(0, displayRows.length - maxVisible);
+
+    const startRow = this.skillTreeScrollOffset;
+    const endRow = Math.min(displayRows.length, startRow + maxVisible);
+
+    for (let i = startRow; i < endRow; i++) {
+      const row = displayRows[i];
+      const rowY = nodeStartY + (i - startRow) * lineH;
+
+      if (row.type === 'branch') {
+        ctx.fillStyle = '#6a8ab0';
+        ctx.font = `bold ${Math.round(11 * uiScale)}px monospace`;
+        ctx.fillText(`── ${row.label} ──`, x + Math.round(20 * uiScale), rowY);
+      } else {
+        const { node, nodeIdx } = row;
         const rank = investments[node.id] || 0;
         const canInv = canInvestSkill(classKey, node.id, investments) && available > 0;
         const isMaxed = rank >= node.maxRank;
-        const nodeIdx = nodes.indexOf(node);
 
         if (nodeIdx === this.skillTreeCursor) {
           ctx.fillStyle = '#1f2d42';
-          ctx.fillRect(x + Math.round(10 * uiScale), nodeY - Math.round(14 * uiScale), panelW - Math.round(20 * uiScale), Math.round(20 * uiScale));
+          ctx.fillRect(x + Math.round(10 * uiScale), rowY - Math.round(14 * uiScale), panelW - Math.round(20 * uiScale), Math.round(20 * uiScale));
         }
 
         ctx.fillStyle = '#4a5568';
         ctx.font = `${Math.round(10 * uiScale)}px monospace`;
-        ctx.fillText(`T${node.tier}`, x + Math.round(20 * uiScale), nodeY);
+        ctx.fillText(`T${node.tier}`, x + Math.round(20 * uiScale), rowY);
 
         ctx.fillStyle = isMaxed ? '#9ce2a3' : (rank > 0 ? '#e8eef5' : (canInv ? '#c8d4e0' : '#5a6a7a'));
         ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-        ctx.fillText(node.name, x + Math.round(50 * uiScale), nodeY);
+        ctx.fillText(node.name, x + Math.round(50 * uiScale), rowY);
 
         ctx.fillStyle = isMaxed ? '#9ce2a3' : '#afc0d2';
-        ctx.fillText(`${rank}/${node.maxRank}`, x + Math.round(280 * uiScale), nodeY);
+        ctx.fillText(`${rank}/${node.maxRank}`, x + Math.round(280 * uiScale), rowY);
 
         ctx.fillStyle = node.skillType === 'active' ? '#ff9f43' : '#7ad1d1';
         ctx.font = `${Math.round(9 * uiScale)}px monospace`;
-        ctx.fillText(node.skillType === 'active' ? 'ACT' : 'PAS', x + Math.round(330 * uiScale), nodeY);
-
-        drawIdx++;
+        ctx.fillText(node.skillType === 'active' ? 'ACT' : 'PAS', x + Math.round(330 * uiScale), rowY);
       }
     }
+    this.drawScrollIndicators(ctx, x + Math.round(20 * uiScale),
+      nodeStartY - Math.round(12 * uiScale), detailY - Math.round(6 * uiScale),
+      startRow > 0, endRow < displayRows.length, uiScale);
 
     // Selected node detail
     if (this.skillTreeCursor < nodes.length) {
       const selected = nodes[this.skillTreeCursor];
       const rank = investments[selected.id] || 0;
-      const detailY = y + panelH - Math.round(92 * uiScale);
 
       ctx.fillStyle = '#1a2535';
       ctx.fillRect(x + Math.round(10 * uiScale), detailY, panelW - Math.round(20 * uiScale), Math.round(72 * uiScale));
@@ -4096,7 +4148,10 @@ export class Game {
     // Controls
     ctx.fillStyle = '#7d8e9f';
     ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-    ctx.fillText('Up/Down: Select  Enter/Space: Invest  ESC: Close', x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
+    const controlsText = fromHub
+      ? 'L/R: Class  Up/Down: Select  Enter: Invest  ESC: Close'
+      : 'Up/Down: Select  Enter/Space: Invest  ESC: Close';
+    ctx.fillText(controlsText, x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
   }
 
   loop(nowMs = null) {
