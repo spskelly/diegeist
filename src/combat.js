@@ -46,8 +46,10 @@ export function resolveAttack(attacker, defender, options = {}) {
     isAffinity = affinityStats.includes('INT');
   }
 
-  // Determine crit
-  const critChance = attacker.stats.LCK * 1.5;
+  // Determine crit (lucky_strike doubles crit chance)
+  let critChance = attacker.stats.LCK * 1.5;
+  const luckyStrike = attacker.hasStatusEffect?.('lucky_strike');
+  if (luckyStrike) critChance *= luckyStrike.value;
   const isCrit = forceCrit !== null ? forceCrit : Math.random() * 100 < critChance;
 
   // Calculate defense (CON-based rough defense)
@@ -64,18 +66,50 @@ export function resolveAttack(attacker, defender, options = {}) {
     targetWIS: defender.stats.WIS,
   });
 
+  // War Cry: attacker damage boost
+  const warCry = attacker.hasStatusEffect?.('war_cry');
+  if (warCry) damage = Math.floor(damage * warCry.value);
+
   if (isCrit) {
     damage = Math.floor(damage * 2);
   }
 
+  // Fortify: defender damage reduction
+  const fortify = defender.hasStatusEffect?.('fortify');
+  if (fortify) damage = Math.max(1, Math.floor(damage * (1 - fortify.value)));
+
+  // Iron Skin: defender damage reduction
+  const ironSkin = defender.hasStatusEffect?.('iron_skin');
+  if (ironSkin) damage = Math.max(1, Math.floor(damage * (1 - ironSkin.value)));
+
+  // Mana Shield: absorb damage
+  const manaShield = defender.hasStatusEffect?.('mana_shield');
+  if (manaShield) {
+    const absorbed = Math.min(damage, manaShield.value);
+    damage -= absorbed;
+    manaShield.value -= absorbed;
+    if (manaShield.value <= 0) {
+      defender.statusEffects = defender.statusEffects.filter(e => e.type !== 'mana_shield');
+    }
+  }
+
   damage = Math.max(1, damage);
   defender.takeDamage(damage);
+
+  // Thorns: reflect damage back to attacker
+  let thornsDamage = 0;
+  const thorns = defender.hasStatusEffect?.('thorns');
+  if (thorns && damageType === 'melee') {
+    thornsDamage = Math.max(1, Math.floor(damage * thorns.value));
+    attacker.takeDamage(thornsDamage);
+  }
 
   return {
     hit: true,
     dodged: false,
     crit: isCrit,
     damage,
+    thornsDamage,
     killed: !defender.isAlive(),
   };
 }

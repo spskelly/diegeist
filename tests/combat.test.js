@@ -178,3 +178,84 @@ describe('resolveAttack', () => {
     expect(result.killed).toBe(true);
   });
 });
+
+describe('status effects in combat', () => {
+  it('fortify reduces damage taken', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['STR', 'CON'];
+    const defenderNormal = makeDefender({ maxHp: 100 });
+    const defenderFortified = makeDefender({ maxHp: 100 });
+    defenderFortified.addStatusEffect({ type: 'fortify', duration: 3, value: 0.4 });
+
+    const resultNormal = resolveAttack(attacker, defenderNormal, {
+      baseDamage: 5, damageType: 'melee', weaponMultiplier: 1.0, forceCrit: false, forceDodge: false,
+    });
+    const resultFortified = resolveAttack(attacker, defenderFortified, {
+      baseDamage: 5, damageType: 'melee', weaponMultiplier: 1.0, forceCrit: false, forceDodge: false,
+    });
+
+    expect(resultFortified.damage).toBeLessThan(resultNormal.damage);
+  });
+
+  it('war_cry increases damage dealt', () => {
+    const attackerNormal = makeAttacker();
+    attackerNormal.affinityStats = ['STR', 'CON'];
+    const attackerBuffed = makeAttacker();
+    attackerBuffed.affinityStats = ['STR', 'CON'];
+    attackerBuffed.addStatusEffect({ type: 'war_cry', duration: 3, value: 1.3 });
+
+    const defender1 = makeDefender({ maxHp: 100 });
+    const defender2 = makeDefender({ maxHp: 100 });
+
+    const resultNormal = resolveAttack(attackerNormal, defender1, {
+      baseDamage: 5, damageType: 'melee', weaponMultiplier: 1.0, forceCrit: false, forceDodge: false,
+    });
+    const resultBuffed = resolveAttack(attackerBuffed, defender2, {
+      baseDamage: 5, damageType: 'melee', weaponMultiplier: 1.0, forceCrit: false, forceDodge: false,
+    });
+
+    expect(resultBuffed.damage).toBeGreaterThan(resultNormal.damage);
+  });
+
+  it('thorns reflects damage back on melee attacks', () => {
+    const attacker = makeAttacker({ maxHp: 100 });
+    attacker.affinityStats = ['STR', 'CON'];
+    const defender = makeDefender({ maxHp: 100 });
+    defender.addStatusEffect({ type: 'thorns', duration: 3, value: 0.5 });
+
+    const result = resolveAttack(attacker, defender, {
+      baseDamage: 5, damageType: 'melee', weaponMultiplier: 1.0, forceCrit: false, forceDodge: false,
+    });
+
+    expect(result.thornsDamage).toBeGreaterThan(0);
+    expect(attacker.hp).toBeLessThan(100);
+  });
+
+  it('thorns does not reflect on ranged attacks', () => {
+    const attacker = makeAttacker({ maxHp: 100 });
+    attacker.affinityStats = ['DEX', 'LCK'];
+    const defender = makeDefender({ maxHp: 100 });
+    defender.addStatusEffect({ type: 'thorns', duration: 3, value: 0.5 });
+
+    const result = resolveAttack(attacker, defender, {
+      baseDamage: 5, damageType: 'ranged', weaponMultiplier: 1.0, forceCrit: false, forceDodge: false,
+    });
+
+    expect(result.thornsDamage).toBe(0);
+    expect(attacker.hp).toBe(100);
+  });
+
+  it('mana_shield absorbs damage', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['STR', 'CON'];
+    const defender = makeDefender({ maxHp: 100 });
+    defender.addStatusEffect({ type: 'mana_shield', duration: 999, value: 100 });
+
+    const result = resolveAttack(attacker, defender, {
+      baseDamage: 5, damageType: 'melee', weaponMultiplier: 1.0, forceCrit: false, forceDodge: false,
+    });
+
+    // Mana shield absorbs damage, so actual HP damage should be minimal (1 min)
+    expect(result.damage).toBe(1);
+  });
+});
