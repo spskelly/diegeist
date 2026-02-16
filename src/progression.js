@@ -40,6 +40,10 @@ export class SaveData {
     this.settings = { volume: 0.7 };
     this.pendingLoadoutItem = null;
     this.materials = { timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 };
+    this.classXP = { fighter: 0, archer: 0, mage: 0 };
+    this.classLevels = { fighter: 1, archer: 1, mage: 1 };
+    this.skillPoints = { fighter: 0, archer: 0, mage: 0 };
+    this.skillInvestments = { fighter: {}, archer: {}, mage: {} };
   }
 
   addCurrency(amount) {
@@ -121,6 +125,10 @@ export class SaveData {
       settings: this.settings,
       pendingLoadoutItem: this.pendingLoadoutItem,
       materials: this.materials,
+      classXP: this.classXP,
+      classLevels: this.classLevels,
+      skillPoints: this.skillPoints,
+      skillInvestments: this.skillInvestments,
     });
   }
 
@@ -131,6 +139,10 @@ export class SaveData {
     if (!save.materials) {
       save.materials = { timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 };
     }
+    if (!save.classXP) save.classXP = { fighter: 0, archer: 0, mage: 0 };
+    if (!save.classLevels) save.classLevels = { fighter: 1, archer: 1, mage: 1 };
+    if (!save.skillPoints) save.skillPoints = { fighter: 0, archer: 0, mage: 0 };
+    if (!save.skillInvestments) save.skillInvestments = { fighter: {}, archer: {}, mage: {} };
     return save;
   }
 }

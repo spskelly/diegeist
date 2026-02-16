@@ -250,3 +250,38 @@ describe('Achievements', () => {
     expect(save.achievements.rat_slayer.unlocked).toBe(true);
   });
 });
+
+describe('SaveData skill tree fields', () => {
+  it('initializes with empty skill tree state', () => {
+    const save = new SaveData();
+    expect(save.classXP).toEqual({ fighter: 0, archer: 0, mage: 0 });
+    expect(save.classLevels).toEqual({ fighter: 1, archer: 1, mage: 1 });
+    expect(save.skillPoints).toEqual({ fighter: 0, archer: 0, mage: 0 });
+    expect(save.skillInvestments).toEqual({ fighter: {}, archer: {}, mage: {} });
+  });
+
+  it('serializes and deserializes skill tree state', () => {
+    const save = new SaveData();
+    save.classXP.fighter = 500;
+    save.classLevels.fighter = 5;
+    save.skillPoints.fighter = 2;
+    save.skillInvestments.fighter = { fighter_heavy_strike: 2 };
+
+    const json = save.serialize();
+    const restored = SaveData.deserialize(json);
+
+    expect(restored.classXP.fighter).toBe(500);
+    expect(restored.classLevels.fighter).toBe(5);
+    expect(restored.skillPoints.fighter).toBe(2);
+    expect(restored.skillInvestments.fighter.fighter_heavy_strike).toBe(2);
+  });
+
+  it('backward-compatible: old saves without skill fields get defaults', () => {
+    const oldJson = JSON.stringify({ currency: 100, stash: [] });
+    const save = SaveData.deserialize(oldJson);
+    expect(save.classXP).toEqual({ fighter: 0, archer: 0, mage: 0 });
+    expect(save.classLevels).toEqual({ fighter: 1, archer: 1, mage: 1 });
+    expect(save.skillPoints).toEqual({ fighter: 0, archer: 0, mage: 0 });
+    expect(save.skillInvestments).toEqual({ fighter: {}, archer: {}, mage: {} });
+  });
+});
