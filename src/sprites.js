@@ -430,6 +430,49 @@ export const SPRITE_DEFINITIONS = {
       ctx.fillRect(9, 11, 2, 4);
     },
   },
+  skeleton_archer: {
+    size: 16,
+    draw(ctx) {
+      // Skull
+      ctx.fillStyle = '#d0d0c0';
+      ctx.fillRect(5, 1, 6, 5);
+      // Eye sockets (red tint)
+      ctx.fillStyle = '#802020';
+      ctx.fillRect(6, 3, 2, 1);
+      ctx.fillRect(9, 3, 2, 1);
+      // Ribcage
+      ctx.fillStyle = '#b0b0a0';
+      ctx.fillRect(6, 6, 4, 5);
+      ctx.fillStyle = '#d0d0c0';
+      ctx.fillRect(5, 7, 1, 1);
+      ctx.fillRect(10, 7, 1, 1);
+      ctx.fillRect(5, 9, 1, 1);
+      ctx.fillRect(10, 9, 1, 1);
+      // Left arm (drawing bow)
+      ctx.fillStyle = '#c0c0b0';
+      ctx.fillRect(3, 7, 2, 3);
+      // Right arm (extended holding bow)
+      ctx.fillRect(12, 6, 2, 2);
+      // Bow (right side)
+      ctx.fillStyle = '#8b6914';
+      ctx.fillRect(14, 4, 1, 8);
+      ctx.fillStyle = '#c0a040';
+      ctx.fillRect(15, 5, 1, 1);
+      ctx.fillRect(15, 10, 1, 1);
+      // Bowstring
+      ctx.fillStyle = '#e0d0b0';
+      ctx.fillRect(13, 5, 1, 6);
+      // Quiver on back
+      ctx.fillStyle = '#6a4a2a';
+      ctx.fillRect(2, 6, 1, 5);
+      ctx.fillStyle = '#c08040';
+      ctx.fillRect(2, 5, 1, 1);
+      // Legs
+      ctx.fillStyle = '#b0b0a0';
+      ctx.fillRect(6, 11, 2, 4);
+      ctx.fillRect(9, 11, 2, 4);
+    },
+  },
   zombie: {
     size: 16,
     draw(ctx) {

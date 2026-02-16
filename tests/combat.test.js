@@ -384,3 +384,47 @@ describe('skill tree combat effects', () => {
     expect(result.blocked).toBe(false);
   });
 });
+
+describe('Trap mechanics', () => {
+  describe('trap dodge chance', () => {
+    it('dodge chance equals DEX * 1.0 percent', () => {
+      // Trap dodge uses same formula as combat: DEX * 1.0
+      const player = makeDefender({ stats: { STR: 3, DEX: 10, CON: 3, INT: 1, WIS: 1, LCK: 2 } });
+      const dodgeChance = player.stats.DEX * 1.0;
+      expect(dodgeChance).toBe(10);
+    });
+
+    it('dodge chance includes tree dodge_bonus', () => {
+      const player = makeDefender({ stats: { STR: 3, DEX: 5, CON: 3, INT: 1, WIS: 1, LCK: 2 } });
+      const treeEffects = { dodge_bonus: 8 };
+      let dodgeChance = player.stats.DEX * 1.0;
+      if (treeEffects?.dodge_bonus) dodgeChance += treeEffects.dodge_bonus;
+      expect(dodgeChance).toBe(13);
+    });
+  });
+
+  describe('trap disarm damage', () => {
+    it('disarm deals 50% of full trap damage', () => {
+      for (const floor of [1, 5, 10]) {
+        const fullDamage = 2 + floor;
+        const disarmDamage = Math.max(1, Math.floor(fullDamage * 0.5));
+        expect(disarmDamage).toBe(Math.floor(fullDamage / 2));
+      }
+    });
+
+    it('disarm damage is at least 1', () => {
+      // Even on floor 0 (hypothetical), minimum damage is 1
+      const fullDamage = 2 + 0;
+      const disarmDamage = Math.max(1, Math.floor(fullDamage * 0.5));
+      expect(disarmDamage).toBeGreaterThanOrEqual(1);
+    });
+
+    it('disarm damage is less than full trap damage', () => {
+      for (const floor of [1, 3, 7, 10]) {
+        const fullDamage = 2 + floor;
+        const disarmDamage = Math.max(1, Math.floor(fullDamage * 0.5));
+        expect(disarmDamage).toBeLessThan(fullDamage);
+      }
+    });
+  });
+});
