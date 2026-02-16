@@ -1241,6 +1241,8 @@ export class Game {
       const isVictory = causeOfDeath === 'Victory';
       const mats = isVictory ? this.runMaterials : scaleMaterials(this.runMaterials, 0.5);
       this.saveData.addMaterials(mats);
+      this.committedMaterials = { ...mats };
+      this.rawRunMaterials = { ...this.runMaterials };
     }
     this.saveData.addRunHistory({
       classKey: this.runSummary.classKey,
@@ -3036,16 +3038,39 @@ export class Game {
     ctx.fillText(`Enemies Killed: ${this.runSummary?.enemiesKilled || 0}`, x + Math.round(20 * uiScale), y + Math.round(122 * uiScale));
     ctx.fillText(`Essence Earned: ${this.runSummary?.currencyEarned || 0}`, x + Math.round(20 * uiScale), y + Math.round(144 * uiScale));
 
+    // Material summary
+    let matOffset = 0;
+    if (this.rawRunMaterials) {
+      const matNames = { timber: 'Timber', stone: 'Stone', iron: 'Iron', crystal: 'Crystal', aether: 'Aether' };
+      let matLine = 'Materials: ';
+      let hasMats = false;
+      for (const [key, label] of Object.entries(matNames)) {
+        const raw = this.rawRunMaterials[key] || 0;
+        if (raw > 0) {
+          const kept = this.committedMaterials?.[key] || 0;
+          matLine += `${label}:${kept}/${raw} `;
+          hasMats = true;
+        }
+      }
+      if (hasMats) {
+        ctx.fillText(matLine.trim(), x + Math.round(20 * uiScale), y + Math.round(166 * uiScale));
+        ctx.fillStyle = '#ff8a6a';
+        ctx.fillText('(50% kept on death)', x + Math.round(20 * uiScale), y + Math.round(184 * uiScale));
+        ctx.fillStyle = '#afc0d2';
+        matOffset = Math.round(48 * uiScale);
+      }
+    }
+
     const options = ['Retry', 'Hub', 'Main Menu'];
     for (let i = 0; i < options.length; i++) {
       const selected = i === this.postDeathMenuIndex;
       if (selected) {
         ctx.fillStyle = '#2b3a4d';
-        ctx.fillRect(x + Math.round(18 * uiScale), y + Math.round(186 * uiScale) + i * Math.round(36 * uiScale), Math.round(170 * uiScale), Math.round(26 * uiScale));
+        ctx.fillRect(x + Math.round(18 * uiScale), y + Math.round(186 * uiScale) + matOffset + i * Math.round(36 * uiScale), Math.round(170 * uiScale), Math.round(26 * uiScale));
       }
       ctx.fillStyle = selected ? '#ffffff' : '#9db0c4';
       ctx.font = `${Math.round(18 * uiScale)}px monospace`;
-      ctx.fillText(options[i], x + Math.round(28 * uiScale), y + Math.round(206 * uiScale) + i * Math.round(36 * uiScale));
+      ctx.fillText(options[i], x + Math.round(28 * uiScale), y + Math.round(206 * uiScale) + matOffset + i * Math.round(36 * uiScale));
     }
 
     ctx.fillStyle = '#7d8e9f';
@@ -3084,6 +3109,26 @@ export class Game {
     ctx.fillText(`Floors Reached: ${this.runSummary?.floorsReached || this.floorNumber}`, x + Math.round(20 * uiScale), y + Math.round(134 * uiScale));
     ctx.fillText(`Enemies Killed: ${this.runSummary?.enemiesKilled || 0}`, x + Math.round(20 * uiScale), y + Math.round(156 * uiScale));
     ctx.fillText(`Essence Earned: ${this.runSummary?.currencyEarned || 0}`, x + Math.round(20 * uiScale), y + Math.round(178 * uiScale));
+
+    // Material summary (100% kept on victory)
+    if (this.rawRunMaterials) {
+      const matNames = { timber: 'Timber', stone: 'Stone', iron: 'Iron', crystal: 'Crystal', aether: 'Aether' };
+      let matLine = 'Materials: ';
+      let hasMats = false;
+      for (const [key, label] of Object.entries(matNames)) {
+        const val = this.rawRunMaterials[key] || 0;
+        if (val > 0) {
+          matLine += `${label}:${val} `;
+          hasMats = true;
+        }
+      }
+      if (hasMats) {
+        ctx.fillText(matLine.trim(), x + Math.round(20 * uiScale), y + Math.round(200 * uiScale));
+        ctx.fillStyle = '#7ad1a0';
+        ctx.fillText('(100% kept on victory)', x + Math.round(20 * uiScale), y + Math.round(218 * uiScale));
+        ctx.fillStyle = '#b7e3c2';
+      }
+    }
 
     ctx.fillStyle = '#86c99b';
     ctx.font = `${Math.round(12 * uiScale)}px monospace`;
