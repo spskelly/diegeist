@@ -20,14 +20,25 @@ export function resolveAttack(attacker, defender, options = {}) {
     weaponMultiplier = 1.0,
     forceCrit = null,
     forceDodge = null,
+    attackerTreeEffects = null,
+    defenderTreeEffects = null,
   } = options;
 
   // Determine if dodged
-  const dodgeChance = defender.stats.DEX * 1.0; // DEX% dodge chance
+  let dodgeChance = defender.stats.DEX * 1.0; // DEX% dodge chance
+  if (defenderTreeEffects?.dodge_bonus) dodgeChance += defenderTreeEffects.dodge_bonus;
   const dodged = forceDodge !== null ? forceDodge : Math.random() * 100 < dodgeChance;
 
   if (dodged) {
-    return { hit: false, dodged: true, crit: false, damage: 0, killed: false };
+    return { hit: false, dodged: true, blocked: false, crit: false, damage: 0, killed: false, thornsDamage: 0 };
+  }
+
+  // Block chance (Shield Wall) — skill tree passive
+  if (defenderTreeEffects?.block_chance > 0) {
+    const blocked = Math.random() * 100 < defenderTreeEffects.block_chance * 100;
+    if (blocked) {
+      return { hit: false, dodged: false, blocked: true, crit: false, damage: 0, killed: false, thornsDamage: 0 };
+    }
   }
 
   // Determine relevant stat and affinity
@@ -50,6 +61,7 @@ export function resolveAttack(attacker, defender, options = {}) {
   let critChance = attacker.stats.LCK * 1.5;
   const luckyStrike = attacker.hasStatusEffect?.('lucky_strike');
   if (luckyStrike) critChance *= luckyStrike.value;
+  if (attackerTreeEffects?.crit_bonus) critChance += attackerTreeEffects.crit_bonus;
   const isCrit = forceCrit !== null ? forceCrit : Math.random() * 100 < critChance;
 
   // Calculate defense (CON-based rough defense)
@@ -66,12 +78,25 @@ export function resolveAttack(attacker, defender, options = {}) {
     targetWIS: defender.stats.WIS,
   });
 
+  // Skill tree damage type multipliers
+  if (attackerTreeEffects) {
+    if (damageType === 'melee' && attackerTreeEffects.melee_damage_mult > 1.0) {
+      damage = Math.floor(damage * attackerTreeEffects.melee_damage_mult);
+    } else if (damageType === 'ranged' && attackerTreeEffects.ranged_damage_mult > 1.0) {
+      damage = Math.floor(damage * attackerTreeEffects.ranged_damage_mult);
+    } else if (damageType === 'magic' && attackerTreeEffects.magic_damage_mult > 1.0) {
+      damage = Math.floor(damage * attackerTreeEffects.magic_damage_mult);
+    }
+  }
+
   // War Cry: attacker damage boost
   const warCry = attacker.hasStatusEffect?.('war_cry');
   if (warCry) damage = Math.floor(damage * warCry.value);
 
   if (isCrit) {
-    damage = Math.floor(damage * 2);
+    let critMult = 2;
+    if (attackerTreeEffects?.crit_damage_bonus) critMult += attackerTreeEffects.crit_damage_bonus;
+    damage = Math.floor(damage * critMult);
   }
 
   // Fortify: defender damage reduction
@@ -81,6 +106,11 @@ export function resolveAttack(attacker, defender, options = {}) {
   // Iron Skin: defender damage reduction
   const ironSkin = defender.hasStatusEffect?.('iron_skin');
   if (ironSkin) damage = Math.max(1, Math.floor(damage * (1 - ironSkin.value)));
+
+  // Skill tree damage reduction
+  if (defenderTreeEffects?.damage_reduction > 0) {
+    damage = Math.max(1, Math.floor(damage * (1 - defenderTreeEffects.damage_reduction)));
+  }
 
   // Mana Shield: absorb damage
   const manaShield = defender.hasStatusEffect?.('mana_shield');
@@ -107,6 +137,7 @@ export function resolveAttack(attacker, defender, options = {}) {
   return {
     hit: true,
     dodged: false,
+    blocked: false,
     crit: isCrit,
     damage,
     thornsDamage,

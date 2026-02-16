@@ -259,3 +259,128 @@ describe('status effects in combat', () => {
     expect(result.damage).toBe(1);
   });
 });
+
+describe('skill tree combat effects', () => {
+  it('applies melee damage multiplier from tree effects', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['STR', 'CON'];
+    const d1 = makeDefender({ maxHp: 100 });
+    const d2 = makeDefender({ maxHp: 100 });
+
+    const r1 = resolveAttack(attacker, d1, {
+      baseDamage: 5, damageType: 'melee', forceCrit: false, forceDodge: false,
+    });
+    const r2 = resolveAttack(attacker, d2, {
+      baseDamage: 5, damageType: 'melee', forceCrit: false, forceDodge: false,
+      attackerTreeEffects: { melee_damage_mult: 1.24 },
+    });
+
+    expect(r2.damage).toBeGreaterThan(r1.damage);
+  });
+
+  it('applies ranged damage multiplier from tree effects', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['DEX', 'LCK'];
+    const d1 = makeDefender({ maxHp: 100 });
+    const d2 = makeDefender({ maxHp: 100 });
+
+    const r1 = resolveAttack(attacker, d1, {
+      baseDamage: 5, damageType: 'ranged', forceCrit: false, forceDodge: false,
+    });
+    const r2 = resolveAttack(attacker, d2, {
+      baseDamage: 5, damageType: 'ranged', forceCrit: false, forceDodge: false,
+      attackerTreeEffects: { ranged_damage_mult: 1.24 },
+    });
+
+    expect(r2.damage).toBeGreaterThan(r1.damage);
+  });
+
+  it('applies dodge bonus from tree effects', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['STR', 'CON'];
+    const defender = makeDefender({ stats: { STR: 3, DEX: 0, CON: 3, INT: 1, WIS: 1, LCK: 2 }, maxHp: 100 });
+
+    // With 100% dodge bonus, should always dodge
+    const result = resolveAttack(attacker, defender, {
+      baseDamage: 5, damageType: 'melee', forceCrit: false,
+      defenderTreeEffects: { dodge_bonus: 100 },
+    });
+
+    expect(result.dodged).toBe(true);
+  });
+
+  it('applies damage reduction from tree effects', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['STR', 'CON'];
+    const d1 = makeDefender({ maxHp: 100 });
+    const d2 = makeDefender({ maxHp: 100 });
+
+    const r1 = resolveAttack(attacker, d1, {
+      baseDamage: 10, damageType: 'melee', forceCrit: false, forceDodge: false,
+    });
+    const r2 = resolveAttack(attacker, d2, {
+      baseDamage: 10, damageType: 'melee', forceCrit: false, forceDodge: false,
+      defenderTreeEffects: { damage_reduction: 0.09 },
+    });
+
+    expect(r2.damage).toBeLessThanOrEqual(r1.damage);
+  });
+
+  it('applies crit bonus from tree effects', () => {
+    const attacker = makeAttacker({ stats: { STR: 8, DEX: 5, CON: 7, INT: 2, WIS: 3, LCK: 0 } });
+    attacker.affinityStats = ['STR', 'CON'];
+    const defender = makeDefender({ maxHp: 100 });
+
+    // LCK=0 so base crit chance is 0%. With 100% crit bonus, should always crit.
+    const result = resolveAttack(attacker, defender, {
+      baseDamage: 5, damageType: 'melee', forceDodge: false,
+      attackerTreeEffects: { crit_bonus: 100 },
+    });
+
+    expect(result.crit).toBe(true);
+  });
+
+  it('applies crit damage bonus from tree effects', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['STR', 'CON'];
+    const d1 = makeDefender({ maxHp: 100 });
+    const d2 = makeDefender({ maxHp: 100 });
+
+    const r1 = resolveAttack(attacker, d1, {
+      baseDamage: 5, damageType: 'melee', forceCrit: true, forceDodge: false,
+    });
+    const r2 = resolveAttack(attacker, d2, {
+      baseDamage: 5, damageType: 'melee', forceCrit: true, forceDodge: false,
+      attackerTreeEffects: { crit_damage_bonus: 0.50 },
+    });
+
+    expect(r2.damage).toBeGreaterThan(r1.damage);
+  });
+
+  it('applies block chance from tree effects', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['STR', 'CON'];
+    const defender = makeDefender({ maxHp: 100 });
+
+    // 100% block chance — should always block
+    const result = resolveAttack(attacker, defender, {
+      baseDamage: 5, damageType: 'melee', forceCrit: false, forceDodge: false,
+      defenderTreeEffects: { block_chance: 1.0, dodge_bonus: 0 },
+    });
+
+    expect(result.blocked).toBe(true);
+    expect(result.damage).toBe(0);
+  });
+
+  it('returns blocked: false normally', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['STR', 'CON'];
+    const defender = makeDefender({ maxHp: 100 });
+
+    const result = resolveAttack(attacker, defender, {
+      baseDamage: 5, damageType: 'melee', forceCrit: false, forceDodge: false,
+    });
+
+    expect(result.blocked).toBe(false);
+  });
+});
