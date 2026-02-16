@@ -81,6 +81,53 @@ describe('SaveData', () => {
     expect(save.permanentPerks).toContain('potion_boost');
   });
 
+  it('initializes with empty materials', () => {
+    expect(save.materials).toEqual({ timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 });
+  });
+
+  it('adds materials', () => {
+    save.addMaterials({ timber: 5, stone: 3 });
+    expect(save.materials.timber).toBe(5);
+    expect(save.materials.stone).toBe(3);
+    expect(save.materials.iron).toBe(0);
+  });
+
+  it('checks if materials are affordable', () => {
+    save.addMaterials({ timber: 10, stone: 5 });
+    expect(save.canAfford({ timber: 5, stone: 3 })).toBe(true);
+    expect(save.canAfford({ timber: 15 })).toBe(false);
+  });
+
+  it('spends materials when affordable', () => {
+    save.addMaterials({ timber: 10, stone: 5 });
+    const result = save.spendMaterials({ timber: 4, stone: 2 });
+    expect(result).toBe(true);
+    expect(save.materials.timber).toBe(6);
+    expect(save.materials.stone).toBe(3);
+  });
+
+  it('rejects spending materials when not affordable', () => {
+    save.addMaterials({ timber: 3 });
+    const result = save.spendMaterials({ timber: 5 });
+    expect(result).toBe(false);
+    expect(save.materials.timber).toBe(3); // unchanged
+  });
+
+  it('serializes and deserializes materials', () => {
+    save.addMaterials({ timber: 10, iron: 5 });
+    const json = save.serialize();
+    const loaded = SaveData.deserialize(json);
+    expect(loaded.materials.timber).toBe(10);
+    expect(loaded.materials.iron).toBe(5);
+    expect(loaded.materials.crystal).toBe(0);
+  });
+
+  it('deserializes old saves without materials to defaults', () => {
+    const oldJson = JSON.stringify({ currency: 50, stash: [] });
+    const loaded = SaveData.deserialize(oldJson);
+    expect(loaded.materials).toEqual({ timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 });
+  });
+
   it('serializes and deserializes correctly', () => {
     save.addCurrency(100);
     save.addPermanentStat('DEX', 3);

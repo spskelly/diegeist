@@ -39,6 +39,7 @@ export class SaveData {
     this.runHistory = [];
     this.settings = { volume: 0.7 };
     this.pendingLoadoutItem = null;
+    this.materials = { timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 };
   }
 
   addCurrency(amount) {
@@ -77,6 +78,29 @@ export class SaveData {
     }
   }
 
+  addMaterials(mats) {
+    for (const [key, val] of Object.entries(mats)) {
+      if (key in this.materials && val > 0) {
+        this.materials[key] += val;
+      }
+    }
+  }
+
+  canAfford(cost) {
+    for (const [key, val] of Object.entries(cost)) {
+      if ((this.materials[key] || 0) < val) return false;
+    }
+    return true;
+  }
+
+  spendMaterials(cost) {
+    if (!this.canAfford(cost)) return false;
+    for (const [key, val] of Object.entries(cost)) {
+      this.materials[key] -= val;
+    }
+    return true;
+  }
+
   updateAchievementProgress(achievementId, newProgress) {
     if (!this.achievements[achievementId]) {
       this.achievements[achievementId] = { progress: 0, unlocked: false };
@@ -96,6 +120,7 @@ export class SaveData {
       runHistory: this.runHistory,
       settings: this.settings,
       pendingLoadoutItem: this.pendingLoadoutItem,
+      materials: this.materials,
     });
   }
 
@@ -103,6 +128,9 @@ export class SaveData {
     const data = JSON.parse(json);
     const save = new SaveData();
     Object.assign(save, data);
+    if (!save.materials) {
+      save.materials = { timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 };
+    }
     return save;
   }
 }
