@@ -28,7 +28,7 @@ import {
 import { assignSkillToSlot, canUseSkill, syncClassSkillCooldown, tickCooldowns, updateActiveSkills, useSkill } from './skills.js';
 import { ACHIEVEMENTS, HubShop, loadSaveData, persistSaveData } from './progression.js';
 import { AudioManager } from './audio.js';
-import { createEmptyMaterials, addMaterials, scaleMaterials, rollMaterialDrop, getFloorClearMaterials, getBossKillMaterials } from './resources.js';
+import { createEmptyMaterials, addMaterials, scaleMaterials, rollMaterialDrop, getFloorClearMaterials, getBossKillMaterials, MATERIAL_COLORS } from './resources.js';
 
 function isDirectionalAction(action) {
   return action.type === 'move' || action.type === 'attack';
@@ -1216,13 +1216,15 @@ export class Game {
       const bossMats = getBossKillMaterials(biome, this.currentRank || 1);
       for (const drop of bossMats) {
         this.runMaterials[drop.type] += drop.quantity;
-        this.messageLog.add(`Gained ${drop.quantity} ${drop.type}.`, this.turnCount);
+        this.messageLog.add(`+${drop.quantity} ${drop.type}`, this.turnCount, MATERIAL_COLORS[drop.type]);
+        this.addFloatingText(enemy.position.x, enemy.position.y, `+${drop.quantity} ${drop.type}`, MATERIAL_COLORS[drop.type], 900);
       }
     } else {
       const matDrop = rollMaterialDrop(biome, this.currentRank || 1);
       if (matDrop) {
         this.runMaterials[matDrop.type] += matDrop.quantity;
-        this.messageLog.add(`Gained ${matDrop.quantity} ${matDrop.type}.`, this.turnCount);
+        this.messageLog.add(`+${matDrop.quantity} ${matDrop.type}`, this.turnCount, MATERIAL_COLORS[matDrop.type]);
+        this.addFloatingText(enemy.position.x, enemy.position.y, `+${matDrop.quantity} ${matDrop.type}`, MATERIAL_COLORS[matDrop.type], 900);
       }
     }
 
@@ -2586,7 +2588,7 @@ export class Game {
     const floorBiome = getBiome(this.floorNumber);
     const floorMats = getFloorClearMaterials(floorBiome, this.currentRank || 1);
     this.runMaterials[floorMats.type] += floorMats.quantity;
-    this.messageLog.add(`Floor clear: +${floorMats.quantity} ${floorMats.type}.`, this.turnCount);
+    this.messageLog.add(`Floor clear: +${floorMats.quantity} ${floorMats.type}`, this.turnCount, MATERIAL_COLORS[floorMats.type]);
     this.floorNumber++;
     this.runSummary.floorsReached = Math.max(this.runSummary.floorsReached, this.floorNumber);
     this.syncMilestoneAchievements();

@@ -1,5 +1,13 @@
 export const MATERIALS = ['timber', 'stone', 'iron', 'crystal', 'aether'];
 
+export const MATERIAL_COLORS = {
+  timber: '#c4a05a',
+  stone: '#b8b8a8',
+  iron: '#8eaaba',
+  crystal: '#b48ee8',
+  aether: '#d8b4ff',
+};
+
 export const BIOME_MATERIALS = {
   jungle:     { primary: 'timber',  secondary: 'stone',   tertiary: 'iron' },
   dirt_cave:  { primary: 'stone',   secondary: 'iron',    tertiary: 'timber' },

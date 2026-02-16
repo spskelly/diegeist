@@ -166,17 +166,19 @@ export class HUD {
     // Run materials
     if (runMaterials) {
       const matNames = { timber: 'TMB', stone: 'STN', iron: 'IRN', crystal: 'CRY', aether: 'ATH' };
-      const matColors = { timber: '#8b6b3b', stone: '#9a9a8a', iron: '#7a8a9a', crystal: '#9a7ac8', aether: '#c8a0ff' };
+      const matColors = { timber: '#c4a05a', stone: '#b8b8a8', iron: '#8eaaba', crystal: '#b48ee8', aether: '#d8b4ff' };
       let matX = infoX;
-      const matY = hpBarY + Math.round(30 * s);
-      ctx.font = `${Math.round(10 * s)}px monospace`;
+      const matY = hpBarY + Math.round(32 * s);
+      ctx.font = `bold ${Math.round(12 * s)}px monospace`;
       for (const [key, abbr] of Object.entries(matNames)) {
         const val = runMaterials[key] || 0;
         if (val === 0) continue;
-        ctx.fillStyle = matColors[key];
+        ctx.fillStyle = '#000000';
         const label = `${abbr}:${val}`;
+        ctx.fillText(label, matX + 1, matY + 1);
+        ctx.fillStyle = matColors[key];
         ctx.fillText(label, matX, matY);
-        matX += ctx.measureText(label).width + Math.round(10 * s);
+        matX += ctx.measureText(label).width + Math.round(12 * s);
       }
     }
 
@@ -236,7 +238,14 @@ export class HUD {
     const messageLineH = Math.round(16 * s);
     for (let i = 0; i < messages.length; i++) {
       const alpha = i === messages.length - 1 ? 1.0 : 0.5 + (i / messages.length) * 0.3;
-      ctx.fillStyle = `rgba(200, 200, 200, ${alpha})`;
+      if (messages[i].color) {
+        const r = parseInt(messages[i].color.slice(1, 3), 16);
+        const g = parseInt(messages[i].color.slice(3, 5), 16);
+        const b = parseInt(messages[i].color.slice(5, 7), 16);
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      } else {
+        ctx.fillStyle = `rgba(200, 200, 200, ${alpha})`;
+      }
       ctx.fillText(messages[i].text, Math.round(12 * s), messageStartY + i * messageLineH);
     }
 
