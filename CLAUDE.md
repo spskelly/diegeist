@@ -24,9 +24,9 @@ Diegeist is a roguelite dungeon crawler. All game code lives in `src/` as ES mod
 
 ### Module dependency order
 
-`constants` → `game-map` → `entity` → `player` → `turn-system` → `camera` → `fov` → `pathfinding` → `combat` → `ai` → `dungeon-gen` → `items` → `inventory` → `skills` → `progression` → `message-log` → `input` → `sprites` → `renderer` → `hud` → `audio` → `game`
+`constants` → `resources` → `skill-tree` → `game-map` → `entity` → `player` → `turn-system` → `camera` → `fov` → `pathfinding` → `combat` → `ai` → `dungeon-gen` → `items` → `inventory` → `skills` → `progression` → `message-log` → `input` → `sprites` → `renderer` → `hud` → `audio` → `game`
 
-`game.js` is the main orchestrator. It imports everything else and runs a state machine (`init`, `class-select`, `playing`, `inventory`, `stats`, `pause`, `dead`, `hub`, `post-death`).
+`game.js` is the main orchestrator. It imports everything else and runs a state machine (`init`, `startMenu`, `playing`, `pauseMenu`, `skillTree`, `deathSplash`, `deathSaveChoice`, `postDeathMenu`, `victory`, `hubMenu`, `hubShop`, `hubStash`, `hubAchievements`).
 
 ### Key design patterns
 

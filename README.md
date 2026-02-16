@@ -4,27 +4,32 @@ Tile-based roguelite dungeon crawler built in vanilla JavaScript. Outputs a sing
 
 ## Current Status
 
-Playable prototype with a complete core loop: class select, explore procedural dungeons, fight, loot, descend, die, persist progression, repeat.
+Playable game with v1 core loop complete and v2 Phases 1–2 (resources, skill trees) implemented. Class select, explore procedural dungeons, fight, loot, descend, die, persist progression, repeat.
 
 ### Implemented
 
 - Procedural dungeon generation (BSP room archetypes, corridors, start/boss/special rooms)
 - Turn-based energy system
 - Melee, ranged, and magic combat with crit, dodge, and floor scaling
-- Five enemy AI behaviours (wander, rushdown, ambush, summoner with minion cap, kiting)
+- Six enemy AI behaviours (wander, rushdown, ambush, summoner with minion cap, kiting, patrol)
 - FOV / line-of-sight with exploration fog
 - Loot drops with rarity tiers, gear-bound skills, belt consumables with auto-refill
 - Combined inventory UI with inspect panel, compare panel, and character stats overlay
 - Hub menu between runs (shop, stash, achievements)
-- Pause menu with save & quit
+- Pause menu with save & quit and skill tree access
 - Split input: arrow keys for movement, WASD for directional attacks
 - Adaptive camera zoom with scaled sprite rendering
 - Procedural audio via Web Audio API (SFX + ambient)
 - Save data persistence (meta-currency, run history, stash) via localStorage
 - PWA service worker and manifest for offline play and desktop install
+- Resource system with material drops (Timber, Stone, Iron, Crystal, Aether) scaled by biome
+- Death-save choice between keeping one item or hauling all collected materials
+- Class skill trees: 3 branches × 5 nodes per class (Fighter, Archer, Mage) with passive and active skills
+- XP progression with 20-level cap, skill point investment, and HUD XP bar
 
 ### Known Gaps vs Full Spec
 
+- Town building system (v2 Phase 3+) not yet started
 - Later content phases (full boss roster, special room mechanics, balance pass) still in progress
 - PWA install prompt requires icon assets (placeholder SVG included; Chrome may need raster PNGs)
 
@@ -89,8 +94,8 @@ npx serve dist
 ## Project Structure
 
 ```
-src/               22 modules — the game source
-tests/             18 test files (Vitest)
+src/               24 modules — the game source
+tests/             20 test files (Vitest)
 template.html      HTML shell with PWA meta tags and SW registration
 build.js           concatenates src/ into a single HTML file + PWA assets
 dist/              build output (gitignored)
