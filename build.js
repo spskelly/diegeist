@@ -7,6 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SOURCE_ORDER = [
   'constants.js',
   'resources.js',
+  'skill-tree.js',
   'game-map.js',
   'entity.js',
   'player.js',
