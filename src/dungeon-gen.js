@@ -60,10 +60,13 @@ export class BSPNode {
 }
 
 function createRoom(leaf, minSize, maxSize) {
-  const roomW = Math.floor(Math.random() * (Math.min(maxSize, leaf.width - 2) - minSize + 1)) + minSize;
-  const roomH = Math.floor(Math.random() * (Math.min(maxSize, leaf.height - 2) - minSize + 1)) + minSize;
-  const roomX = leaf.x + Math.floor(Math.random() * (leaf.width - roomW - 1)) + 1;
-  const roomY = leaf.y + Math.floor(Math.random() * (leaf.height - roomH - 1)) + 1;
+  // 2-tile margin from leaf edges guarantees rooms are at least 4 tiles apart,
+  // giving corridors space for clean perpendicular entries and doors.
+  const margin = 2;
+  const roomW = Math.floor(Math.random() * (Math.min(maxSize, leaf.width - margin * 2) - minSize + 1)) + minSize;
+  const roomH = Math.floor(Math.random() * (Math.min(maxSize, leaf.height - margin * 2) - minSize + 1)) + minSize;
+  const roomX = leaf.x + Math.floor(Math.random() * (leaf.width - roomW - margin * 2 + 1)) + margin;
+  const roomY = leaf.y + Math.floor(Math.random() * (leaf.height - roomH - margin * 2 + 1)) + margin;
   return { x: roomX, y: roomY, width: roomW, height: roomH, type: 'standard' };
 }
 
@@ -75,162 +78,366 @@ function carveRoom(map, room) {
   }
 }
 
-function carveCorridor(map, x1, y1, x2, y2) {
-  let x = x1, y = y1;
-  // L-shaped corridor: go horizontal first, then vertical (or vice versa randomly)
-  if (Math.random() > 0.5) {
-    while (x !== x2) {
-      if (map.getTile(x, y) !== TILE.FLOOR) map.setTile(x, y, TILE.CORRIDOR);
-      x += x < x2 ? 1 : -1;
+function buildRoomBuffer(rooms) {
+  // Full ring around each room including corners — discourages corridors from
+  // cutting through room corners (which creates non-perpendicular entries)
+  const buffer = new Set();
+  for (const room of rooms) {
+    for (let x = room.x - 1; x <= room.x + room.width; x++) {
+      buffer.add(`${x},${room.y - 1}`);           // north edge + corners
+      buffer.add(`${x},${room.y + room.height}`);  // south edge + corners
     }
-    while (y !== y2) {
-      if (map.getTile(x, y) !== TILE.FLOOR) map.setTile(x, y, TILE.CORRIDOR);
-      y += y < y2 ? 1 : -1;
-    }
-  } else {
-    while (y !== y2) {
-      if (map.getTile(x, y) !== TILE.FLOOR) map.setTile(x, y, TILE.CORRIDOR);
-      y += y < y2 ? 1 : -1;
-    }
-    while (x !== x2) {
-      if (map.getTile(x, y) !== TILE.FLOOR) map.setTile(x, y, TILE.CORRIDOR);
-      x += x < x2 ? 1 : -1;
+    for (let y = room.y; y < room.y + room.height; y++) {
+      buffer.add(`${room.x - 1},${y}`);
+      buffer.add(`${room.x + room.width},${y}`);
     }
   }
-  if (map.getTile(x, y) !== TILE.FLOOR) map.setTile(x, y, TILE.CORRIDOR);
+  return buffer;
 }
 
-function connectRooms(map, node) {
+function pickExitPoint(room, side) {
+  // Pick a point on the room's wall, clamped 1 tile from corners when possible
+  if (side === 'north' || side === 'south') {
+    const center = Math.floor(room.x + room.width / 2);
+    const x = room.width >= 3
+      ? Math.max(room.x + 1, Math.min(center, room.x + room.width - 2))
+      : center;
+    const y = side === 'north' ? room.y - 1 : room.y + room.height;
+    return { x, y };
+  }
+  const center = Math.floor(room.y + room.height / 2);
+  const y = room.height >= 3
+    ? Math.max(room.y + 1, Math.min(center, room.y + room.height - 2))
+    : center;
+  const x = side === 'west' ? room.x - 1 : room.x + room.width;
+  return { x, y };
+}
+
+function facingSide(room, targetX, targetY) {
+  const c = roomCenter(room);
+  const dx = targetX - c.x, dy = targetY - c.y;
+  if (Math.abs(dy) >= Math.abs(dx)) return dy >= 0 ? 'south' : 'north';
+  return dx >= 0 ? 'east' : 'west';
+}
+
+function carveCorridor(map, x1, y1, x2, y2, roomBuffer) {
+  // Dijkstra from (x1,y1) to (x2,y2).
+  // Buffer tiles are expensive (cost 50) but passable — no separate fallback needed.
+  const key = (x, y) => `${x},${y}`;
+  const startKey = key(x1, y1), endKey = key(x2, y2);
+
+  const canPass = (x, y) => {
+    if (!map.inBounds(x, y)) return false;
+    if (key(x, y) === endKey) return true;
+    const t = map.getTile(x, y);
+    return t === TILE.WALL || t === TILE.CORRIDOR;
+  };
+
+  const dist = new Map();
+  const prev = new Map();
+  const pq = [[0, x1, y1]];
+  dist.set(startKey, 0);
+
+  while (pq.length > 0) {
+    let minIdx = 0;
+    for (let i = 1; i < pq.length; i++) {
+      if (pq[i][0] < pq[minIdx][0]) minIdx = i;
+    }
+    const [d, cx, cy] = pq[minIdx];
+    pq[minIdx] = pq[pq.length - 1];
+    pq.pop();
+
+    const ck = key(cx, cy);
+    if (d > (dist.get(ck) ?? Infinity)) continue;
+
+    if (cx === x2 && cy === y2) {
+      let cur = ck;
+      while (cur) {
+        const [px, py] = cur.split(',').map(Number);
+        if (map.getTile(px, py) !== TILE.FLOOR) map.setTile(px, py, TILE.CORRIDOR);
+        cur = prev.get(cur);
+      }
+      return;
+    }
+
+    for (const [ddx, ddy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+      const nx = cx + ddx, ny = cy + ddy;
+      if (!canPass(nx, ny)) continue;
+      const nk = key(nx, ny);
+      const cost = (roomBuffer && roomBuffer.has(nk) && nk !== startKey && nk !== endKey) ? 50 : 1;
+      const nd = d + cost;
+      if (nd < (dist.get(nk) ?? Infinity)) {
+        dist.set(nk, nd);
+        prev.set(nk, ck);
+        pq.push([nd, nx, ny]);
+      }
+    }
+  }
+}
+
+function carveWallToWallCorridor(map, room1, room2, roomBuffer) {
+  const c2 = roomCenter(room2);
+  const c1 = roomCenter(room1);
+  const side1 = facingSide(room1, c2.x, c2.y);
+  const side2 = facingSide(room2, c1.x, c1.y);
+  const exit1 = pickExitPoint(room1, side1);
+  const exit2 = pickExitPoint(room2, side2);
+  carveCorridor(map, exit1.x, exit1.y, exit2.x, exit2.y, roomBuffer);
+}
+
+function connectRooms(map, node, roomBuffer) {
   if (!node.left || !node.right) return;
 
   const leftRoom = node.left.getRoom();
   const rightRoom = node.right.getRoom();
 
   if (leftRoom && rightRoom) {
-    const lx = Math.floor(leftRoom.x + leftRoom.width / 2);
-    const ly = Math.floor(leftRoom.y + leftRoom.height / 2);
-    const rx = Math.floor(rightRoom.x + rightRoom.width / 2);
-    const ry = Math.floor(rightRoom.y + rightRoom.height / 2);
-    carveCorridor(map, lx, ly, rx, ry);
+    carveWallToWallCorridor(map, leftRoom, rightRoom, roomBuffer);
   }
 
-  connectRooms(map, node.left);
-  connectRooms(map, node.right);
+  connectRooms(map, node.left, roomBuffer);
+  connectRooms(map, node.right, roomBuffer);
 }
 
-function narrowCorridorEntrances(map, rooms) {
-  // Find 2-wide corridor entrances at room edges and fill one tile to create
-  // a proper 1-wide doorway. Without this, isValidDoorGeometry fails for both
-  // tiles (each has a walkable neighbor on the perpendicular axis).
-  // Only fill a tile if it has no corridor neighbors besides its pair partner,
-  // so we never disconnect the corridor network.
+function thinCorridors(map) {
+  // Iteratively remove corridor tiles that are part of 2+ wide sections,
+  // ensuring the corridor network stays connected.
   const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
-  function canFill(fx, fy, keepX, keepY) {
-    // Safe to wall off (fx,fy) only if none of its corridor neighbors lead
-    // deeper into the network (i.e. its only CORRIDOR neighbor is the kept tile).
-    for (const [dx, dy] of dirs) {
-      const nx = fx + dx, ny = fy + dy;
-      if (nx === keepX && ny === keepY) continue; // the partner we're keeping
-      if (map.inBounds(nx, ny) && map.getTile(nx, ny) === TILE.CORRIDOR) return false;
-    }
-    return true;
+
+  function isPassable(x, y) {
+    if (!map.inBounds(x, y)) return false;
+    const t = map.getTile(x, y);
+    return t === TILE.CORRIDOR || t === TILE.FLOOR || t === TILE.STAIRS_DOWN || t === TILE.TRAP;
   }
 
-  for (const room of rooms) {
-    // Horizontal edges (north/south): corridor pairs side-by-side on x axis
-    for (const edgeY of [room.y - 1, room.y + room.height]) {
-      for (let x = room.x; x < room.x + room.width - 1; x++) {
-        if (map.getTile(x, edgeY) !== TILE.CORRIDOR || map.getTile(x + 1, edgeY) !== TILE.CORRIDOR) continue;
-        if (canFill(x + 1, edgeY, x, edgeY)) {
-          map.setTile(x + 1, edgeY, TILE.WALL);
-        } else if (canFill(x, edgeY, x + 1, edgeY)) {
-          map.setTile(x, edgeY, TILE.WALL);
+  function canSafelyRemove(x, y) {
+    // A tile can be removed if all its passable neighbors remain connected
+    // to each other without going through (x,y).
+    const neighbors = [];
+    for (const [dx, dy] of dirs) {
+      if (isPassable(x + dx, y + dy)) neighbors.push([x + dx, y + dy]);
+    }
+    if (neighbors.length <= 1) return true;
+
+    // BFS from first neighbor, blocking (x,y), check all others reachable
+    const visited = new Set([`${x},${y}`]);
+    const queue = [neighbors[0]];
+    visited.add(`${neighbors[0][0]},${neighbors[0][1]}`);
+    const targets = new Set(neighbors.slice(1).map(([nx, ny]) => `${nx},${ny}`));
+    let found = 0;
+
+    while (queue.length > 0 && found < targets.size) {
+      const [cx, cy] = queue.shift();
+      if (targets.has(`${cx},${cy}`)) found++;
+      for (const [dx, dy] of dirs) {
+        const nx = cx + dx, ny = cy + dy;
+        const key = `${nx},${ny}`;
+        if (!visited.has(key) && isPassable(nx, ny)) {
+          visited.add(key);
+          queue.push([nx, ny]);
         }
       }
     }
-    // Vertical edges (west/east): corridor pairs stacked on y axis
-    for (const edgeX of [room.x - 1, room.x + room.width]) {
-      for (let y = room.y; y < room.y + room.height - 1; y++) {
-        if (map.getTile(edgeX, y) !== TILE.CORRIDOR || map.getTile(edgeX, y + 1) !== TILE.CORRIDOR) continue;
-        if (canFill(edgeX, y + 1, edgeX, y)) {
-          map.setTile(edgeX, y + 1, TILE.WALL);
-        } else if (canFill(edgeX, y, edgeX, y + 1)) {
-          map.setTile(edgeX, y, TILE.WALL);
+    return found === targets.size;
+  }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let y = 1; y < map.height - 1; y++) {
+      for (let x = 1; x < map.width - 1; x++) {
+        if (map.getTile(x, y) !== TILE.CORRIDOR) continue;
+
+        // Check if this tile is part of a 2+ wide corridor section.
+        // Two adjacent corridor tiles are "wide" if they both have passable
+        // tiles on the same perpendicular side (i.e. the passage is 2+ wide).
+        let isWide = false;
+        for (const [dx, dy] of dirs) {
+          const nx = x + dx, ny = y + dy;
+          if (!map.inBounds(nx, ny) || map.getTile(nx, ny) !== TILE.CORRIDOR) continue;
+
+          if (dx !== 0) { // horizontal pair (side by side)
+            if ((isPassable(x, y - 1) && isPassable(nx, ny - 1)) ||
+                (isPassable(x, y + 1) && isPassable(nx, ny + 1))) {
+              isWide = true;
+              break;
+            }
+          } else { // vertical pair (stacked)
+            if ((isPassable(x - 1, y) && isPassable(nx - 1, ny)) ||
+                (isPassable(x + 1, y) && isPassable(nx + 1, ny))) {
+              isWide = true;
+              break;
+            }
+          }
+        }
+
+        if (isWide && canSafelyRemove(x, y)) {
+          map.setTile(x, y, TILE.WALL);
+          changed = true;
         }
       }
     }
   }
 }
 
-function findBestDoorCandidate(candidates) {
-  // Pick the candidate closest to the wall's midpoint for a natural look
-  if (candidates.length === 0) return null;
-  if (candidates.length === 1) return candidates[0];
-  const mid = (candidates.length - 1) / 2;
-  let best = candidates[0], bestDist = Infinity;
-  for (let i = 0; i < candidates.length; i++) {
-    const d = Math.abs(i - mid);
-    if (d < bestDist) { bestDist = d; best = candidates[i]; }
+function getWallCorridors(map, room, side) {
+  const tiles = [];
+  if (side === 'north') {
+    const wy = room.y - 1;
+    for (let x = room.x; x < room.x + room.width; x++)
+      if (map.getTile(x, wy) === TILE.CORRIDOR) tiles.push({ x, y: wy });
+  } else if (side === 'south') {
+    const wy = room.y + room.height;
+    for (let x = room.x; x < room.x + room.width; x++)
+      if (map.getTile(x, wy) === TILE.CORRIDOR) tiles.push({ x, y: wy });
+  } else if (side === 'west') {
+    const wx = room.x - 1;
+    for (let y = room.y; y < room.y + room.height; y++)
+      if (map.getTile(wx, y) === TILE.CORRIDOR) tiles.push({ x: wx, y });
+  } else {
+    const wx = room.x + room.width;
+    for (let y = room.y; y < room.y + room.height; y++)
+      if (map.getTile(wx, y) === TILE.CORRIDOR) tiles.push({ x: wx, y });
   }
-  return best;
+  return tiles;
+}
+
+function canSafelyWallOff(map, x, y) {
+  const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+  const isPassable = (px, py) => {
+    if (!map.inBounds(px, py)) return false;
+    const t = map.getTile(px, py);
+    return t === TILE.CORRIDOR || t === TILE.FLOOR || t === TILE.DOOR ||
+           t === TILE.STAIRS_DOWN || t === TILE.TRAP;
+  };
+  const neighbors = [];
+  for (const [dx, dy] of dirs) {
+    if (isPassable(x + dx, y + dy)) neighbors.push([x + dx, y + dy]);
+  }
+  if (neighbors.length <= 1) return true;
+  // BFS from first neighbor, blocking (x,y), check all others reachable
+  const visited = new Set([`${x},${y}`]);
+  const queue = [neighbors[0]];
+  visited.add(`${neighbors[0][0]},${neighbors[0][1]}`);
+  const targets = new Set(neighbors.slice(1).map(([nx, ny]) => `${nx},${ny}`));
+  let found = 0;
+  while (queue.length > 0 && found < targets.size) {
+    const [cx, cy] = queue.shift();
+    if (targets.has(`${cx},${cy}`)) found++;
+    for (const [dx, dy] of dirs) {
+      const nx = cx + dx, ny = cy + dy;
+      const key = `${nx},${ny}`;
+      if (!visited.has(key) && isPassable(nx, ny)) {
+        visited.add(key);
+        queue.push([nx, ny]);
+      }
+    }
+  }
+  return found === targets.size;
+}
+
+function hasValidDoorGeometry(map, x, y) {
+  const walkable = (px, py) => map.inBounds(px, py) && map.isWalkable(px, py);
+  const n = walkable(x, y - 1), s = walkable(x, y + 1);
+  const w = walkable(x - 1, y), e = walkable(x + 1, y);
+  return (n && s && !w && !e) || (w && e && !n && !s);
 }
 
 function placeDoors(map, rooms) {
-  narrowCorridorEntrances(map, rooms);
-  // Place at most one door per room wall (north/south/east/west)
+  // Outward direction per wall side (away from room, into corridor)
+  const outDir = { north: [0, -1], south: [0, 1], west: [-1, 0], east: [1, 0] };
+
   for (const room of rooms) {
-    const walls = {
-      north: [], south: [], west: [], east: [],
-    };
-    // Gather valid candidates per wall
-    for (let x = room.x; x < room.x + room.width; x++) {
-      if (isDoorCandidate(map, x, room.y - 1, x, room.y))
-        walls.north.push([x, room.y - 1, x, room.y]);
-      if (isDoorCandidate(map, x, room.y + room.height, x, room.y + room.height - 1))
-        walls.south.push([x, room.y + room.height, x, room.y + room.height - 1]);
-    }
-    for (let y = room.y; y < room.y + room.height; y++) {
-      if (isDoorCandidate(map, room.x - 1, y, room.x, y))
-        walls.west.push([room.x - 1, y, room.x, y]);
-      if (isDoorCandidate(map, room.x + room.width, y, room.x + room.width - 1, y))
-        walls.east.push([room.x + room.width, y, room.x + room.width - 1, y]);
-    }
-    // Place one door per wall, choosing the most central candidate
     for (const side of ['north', 'south', 'west', 'east']) {
-      const pick = findBestDoorCandidate(walls[side]);
-      if (pick) map.setTile(pick[0], pick[1], TILE.DOOR);
+      const corridors = getWallCorridors(map, room, side);
+      for (const c of corridors) {
+        if (map.getTile(c.x, c.y) !== TILE.CORRIDOR) continue;
+        // Door needs corridor on outward side (room is already on inward side)
+        const [odx, ody] = outDir[side];
+        const outTile = map.getTile(c.x + odx, c.y + ody);
+        if (outTile === TILE.CORRIDOR || outTile === TILE.DOOR) {
+          map.setTile(c.x, c.y, TILE.DOOR);
+        } else if (canSafelyWallOff(map, c.x, c.y)) {
+          map.setTile(c.x, c.y, TILE.WALL);
+        }
+      }
+    }
+  }
+
+  // Safety net: any remaining CORRIDOR adjacent to FLOOR
+  for (let y = 1; y < map.height - 1; y++) {
+    for (let x = 1; x < map.width - 1; x++) {
+      if (map.getTile(x, y) !== TILE.CORRIDOR) continue;
+      const adjFloor = [[0, -1], [0, 1], [-1, 0], [1, 0]].some(
+        ([dx, dy]) => map.getTile(x + dx, y + dy) === TILE.FLOOR
+      );
+      if (!adjFloor) continue;
+      if (hasValidDoorGeometry(map, x, y)) {
+        map.setTile(x, y, TILE.DOOR);
+      } else if (canSafelyWallOff(map, x, y)) {
+        map.setTile(x, y, TILE.WALL);
+      }
     }
   }
 }
 
-function isDoorCandidate(map, corridorX, corridorY, floorX, floorY) {
-  if (!map.inBounds(corridorX, corridorY) || !map.inBounds(floorX, floorY)) return false;
-  if (map.getTile(corridorX, corridorY) !== TILE.CORRIDOR) return false;
-  if (map.getTile(floorX, floorY) !== TILE.FLOOR) return false;
-  const dx = corridorX - floorX;
-  const dy = corridorY - floorY;
-  if (Math.abs(dx) + Math.abs(dy) !== 1) return false;
-  const oppositeX = corridorX + dx;
-  const oppositeY = corridorY + dy;
-  if (!map.inBounds(oppositeX, oppositeY)) return false;
-  if (!isWalkableTile(map, oppositeX, oppositeY)) return false;
-  if (!isValidDoorGeometry(map, corridorX, corridorY)) return false;
-  return true;
+function repairCorridorConnectivity(map) {
+  // Flood-fill from any navigable tile (treating doors as passable).
+  // Any corridor tile not reached is orphaned — convert to WALL.
+  const isNavigable = (x, y) => {
+    if (!map.inBounds(x, y)) return false;
+    const t = map.getTile(x, y);
+    return t === TILE.FLOOR || t === TILE.CORRIDOR || t === TILE.DOOR ||
+           t === TILE.STAIRS_DOWN || t === TILE.TRAP;
+  };
+
+  let seedX = -1, seedY = -1;
+  for (let y = 0; y < map.height && seedX === -1; y++)
+    for (let x = 0; x < map.width && seedX === -1; x++)
+      if (isNavigable(x, y)) { seedX = x; seedY = y; }
+  if (seedX === -1) return;
+
+  const visited = new Set();
+  const queue = [[seedX, seedY]];
+  visited.add(`${seedX},${seedY}`);
+  while (queue.length > 0) {
+    const [cx, cy] = queue.shift();
+    for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+      const nx = cx + dx, ny = cy + dy;
+      const key = `${nx},${ny}`;
+      if (!visited.has(key) && isNavigable(nx, ny)) {
+        visited.add(key);
+        queue.push([nx, ny]);
+      }
+    }
+  }
+
+  for (let y = 0; y < map.height; y++)
+    for (let x = 0; x < map.width; x++)
+      if (map.getTile(x, y) === TILE.CORRIDOR && !visited.has(`${x},${y}`))
+        map.setTile(x, y, TILE.WALL);
 }
 
-function isWalkableTile(map, x, y) {
-  return map.inBounds(x, y) && map.isWalkable(x, y);
-}
-
-function isValidDoorGeometry(map, x, y) {
-  const northOpen = isWalkableTile(map, x, y - 1);
-  const southOpen = isWalkableTile(map, x, y + 1);
-  const westOpen = isWalkableTile(map, x - 1, y);
-  const eastOpen = isWalkableTile(map, x + 1, y);
-
-  const verticalDoor = northOpen && southOpen && !westOpen && !eastOpen;
-  const horizontalDoor = westOpen && eastOpen && !northOpen && !southOpen;
-  return verticalDoor || horizontalDoor;
+function trimDeadEndCorridors(map) {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let y = 1; y < map.height - 1; y++) {
+      for (let x = 1; x < map.width - 1; x++) {
+        if (map.getTile(x, y) !== TILE.CORRIDOR) continue;
+        let passable = 0;
+        for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+          const t = map.getTile(x + dx, y + dy);
+          if (t === TILE.CORRIDOR || t === TILE.FLOOR || t === TILE.DOOR ||
+              t === TILE.STAIRS_DOWN || t === TILE.TRAP) passable++;
+        }
+        if (passable <= 1) {
+          map.setTile(x, y, TILE.WALL);
+          changed = true;
+        }
+      }
+    }
+  }
 }
 
 function roomCenter(room) {
@@ -260,10 +467,20 @@ function fixRoomWaterConnectivity(map, room) {
       if (walkable(x, y)) allWalkable.push([x, y]);
   if (allWalkable.length === 0) return;
 
-  // Flood-fill from the first walkable tile
+  // Prefer seeding from an entrance tile (adjacent to door/corridor) so
+  // flood-fill guarantees connectivity to exits, not just internal connectivity
+  const dirs4 = [[0,-1],[0,1],[-1,0],[1,0]];
+  const seed = allWalkable.find(([wx, wy]) =>
+    dirs4.some(([dx, dy]) => {
+      const t = map.getTile(wx + dx, wy + dy);
+      return t === TILE.DOOR || t === TILE.CORRIDOR;
+    })
+  ) || allWalkable[0];
+
+  // Flood-fill from the seed tile
   const visited = new Set();
-  const queue = [allWalkable[0]];
-  visited.add(`${allWalkable[0][0]},${allWalkable[0][1]}`);
+  const queue = [seed];
+  visited.add(`${seed[0]},${seed[1]}`);
   while (queue.length > 0) {
     const [cx, cy] = queue.shift();
     for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
@@ -348,19 +565,14 @@ export function generateDungeon(width, height, archetype, floorNumber, biomeConf
     carveRoom(map, room);
   }
 
-  // Connect rooms
-  connectRooms(map, root);
-
-  // Designate boss room (largest room or ensure >=8x8)
+  // Designate and expand boss room BEFORE corridor carving so the buffer
+  // includes expanded bounds and corridors route around them properly
   rooms.sort((a, b) => (b.width * b.height) - (a.width * a.height));
   const bossRoom = rooms[0];
   bossRoom.type = 'boss';
-  // Ensure boss room is at least 8x8
   if (bossRoom.width < 8 || bossRoom.height < 8) {
-    // Expand the boss room if possible
     const newW = Math.max(bossRoom.width, 8);
     const newH = Math.max(bossRoom.height, 8);
-    // Re-carve the expanded room
     bossRoom.width = Math.min(newW, width - bossRoom.x - 2);
     bossRoom.height = Math.min(newH, height - bossRoom.y - 2);
     carveRoom(map, bossRoom);
@@ -369,6 +581,10 @@ export function generateDungeon(width, height, archetype, floorNumber, biomeConf
   // Place stairs in boss room center
   const bossCenter = roomCenter(bossRoom);
   map.setTile(bossCenter.x, bossCenter.y, TILE.STAIRS_DOWN);
+
+  // Connect rooms (BFS pathfinding avoids room buffer zones)
+  const roomBuffer = buildRoomBuffer(rooms);
+  connectRooms(map, root, roomBuffer);
 
   // Designate start room (furthest from boss)
   let maxDist = -1;
@@ -391,8 +607,15 @@ export function generateDungeon(width, height, archetype, floorNumber, biomeConf
     shuffled[i].type = SPECIAL_ROOM_TYPES[Math.floor(Math.random() * SPECIAL_ROOM_TYPES.length)];
   }
 
-  // Place doors at room-corridor junctions
+  // Thin any 2+ wide corridor sections down to 1-tile width
+  thinCorridors(map);
+
+  // Place doors at room-corridor junctions (seal-and-punch)
   placeDoors(map, rooms);
+
+  // Clean up orphaned and dead-end corridor segments
+  repairCorridorConnectivity(map);
+  trimDeadEndCorridors(map);
 
   // Place biome-specific environmental tiles
   if (biomeConfig) {
@@ -401,11 +624,14 @@ export function generateDungeon(width, height, archetype, floorNumber, biomeConf
       for (let y = room.y; y < room.y + room.height; y++) {
         for (let x = room.x; x < room.x + room.width; x++) {
           if (map.getTile(x, y) !== TILE.FLOOR) continue;
-          // Never place water/traps next to doors — water blocks access
-          const adjDoor = [[0,-1],[0,1],[-1,0],[1,0]].some(
-            ([dx, dy]) => map.getTile(x + dx, y + dy) === TILE.DOOR
+          // Never place water/traps next to doors or corridor entrances
+          const adjEntrance = [[0,-1],[0,1],[-1,0],[1,0]].some(
+            ([dx, dy]) => {
+              const t = map.getTile(x + dx, y + dy);
+              return t === TILE.DOOR || t === TILE.CORRIDOR;
+            }
           );
-          if (adjDoor) continue;
+          if (adjEntrance) continue;
           if (biomeConfig.waterChance && Math.random() < biomeConfig.waterChance) {
             map.setTile(x, y, TILE.WATER);
           } else if (biomeConfig.trapChance && Math.random() < biomeConfig.trapChance) {
