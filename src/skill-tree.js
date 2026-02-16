@@ -80,7 +80,7 @@ const FIGHTER_TREE = [
     id: 'fighter_cleave', name: 'Cleave', branch: 'warfare', tier: 2,
     maxRank: 3, prerequisites: [{ skillId: 'fighter_heavy_strike', minRank: 1 }],
     skillType: 'passive', cooldown: null,
-    description: 'Melee hits have a chance to splash to one adjacent enemy.',
+    description: '15/25/35% chance melee hits splash to adjacent enemy.',
     effectPerRank: [
       { type: 'cleave_chance', value: 0.15 },
       { type: 'cleave_chance', value: 0.25 },
@@ -91,7 +91,7 @@ const FIGHTER_TREE = [
     id: 'fighter_staggering_blow', name: 'Staggering Blow', branch: 'warfare', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'fighter_heavy_strike', minRank: 2 }],
     skillType: 'passive', cooldown: null,
-    description: 'Melee crits stun the target, causing them to skip turns.',
+    description: 'Melee crits stun target for 1/2 turn(s).',
     effectPerRank: [
       { type: 'stun_on_crit', value: 1 },
       { type: 'stun_on_crit', value: 2 },
@@ -138,7 +138,7 @@ const FIGHTER_TREE = [
     id: 'fighter_shield_wall', name: 'Shield Wall', branch: 'bulwark', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'fighter_iron_hide', minRank: 1 }],
     skillType: 'passive', cooldown: null,
-    description: 'Block chance when not moving (negate hit entirely).',
+    description: '10/18% block chance when stationary (negates hit).',
     effectPerRank: [
       { type: 'block_chance', value: 0.10 },
       { type: 'block_chance', value: 0.18 },
@@ -148,7 +148,7 @@ const FIGHTER_TREE = [
     id: 'fighter_retaliation', name: 'Retaliation', branch: 'bulwark', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'fighter_iron_hide', minRank: 2 }],
     skillType: 'passive', cooldown: null,
-    description: 'When hit in melee, chance to counter-attack for 50% damage.',
+    description: '20/35% chance to counter-attack for 50% damage when hit in melee.',
     effectPerRank: [
       { type: 'retaliation_chance', value: 0.20 },
       { type: 'retaliation_chance', value: 0.35 },
@@ -183,7 +183,7 @@ const FIGHTER_TREE = [
     id: 'fighter_vigilance', name: 'Vigilance', branch: 'vanguard', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'Dodge chance increased.',
+    description: 'Dodge chance +5/+10/+15.',
     effectPerRank: [
       { type: 'dodge_bonus', value: 5 },
       { type: 'dodge_bonus', value: 10 },
@@ -194,7 +194,7 @@ const FIGHTER_TREE = [
     id: 'fighter_war_shout', name: 'War Shout', branch: 'vanguard', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'fighter_rush', minRank: 1 }],
     skillType: 'active', cooldown: 12,
-    description: 'All enemies in FOV have speed reduced for 4 turns.',
+    description: 'Slow all visible enemies by 15/25% for 4 turns.',
     effectPerRank: [
       { type: 'aoe_slow', speedReduction: 0.15, duration: 4 },
       { type: 'aoe_slow', speedReduction: 0.25, duration: 4 },
@@ -204,7 +204,7 @@ const FIGHTER_TREE = [
     id: 'fighter_tactical_advance', name: 'Tactical Advance', branch: 'vanguard', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'fighter_vigilance', minRank: 2 }],
     skillType: 'passive', cooldown: null,
-    description: 'Moving adjacent to an enemy grants bonus damage on next attack.',
+    description: 'Moving next to an enemy grants +15/25% damage on next attack.',
     effectPerRank: [
       { type: 'tactical_advance', value: 0.15 },
       { type: 'tactical_advance', value: 0.25 },
@@ -242,7 +242,7 @@ const ARCHER_TREE = [
     id: 'archer_eagle_eye', name: 'Eagle Eye', branch: 'marksmanship', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'Crit chance increased.',
+    description: 'Crit chance +5/+10/+15%.',
     effectPerRank: [
       { type: 'crit_bonus', value: 5 },
       { type: 'crit_bonus', value: 10 },
@@ -253,7 +253,7 @@ const ARCHER_TREE = [
     id: 'archer_piercing_shot', name: 'Piercing Shot', branch: 'marksmanship', tier: 2,
     maxRank: 3, prerequisites: [{ skillId: 'archer_steady_aim', minRank: 1 }],
     skillType: 'passive', cooldown: null,
-    description: 'Ranged attacks have a chance to hit a second target behind the first.',
+    description: '15/25/35% chance ranged attacks pierce to a second target.',
     effectPerRank: [
       { type: 'piercing_chance', value: 0.15 },
       { type: 'piercing_chance', value: 0.25 },
@@ -264,7 +264,7 @@ const ARCHER_TREE = [
     id: 'archer_lethal_focus', name: 'Lethal Focus', branch: 'marksmanship', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'archer_eagle_eye', minRank: 2 }],
     skillType: 'passive', cooldown: null,
-    description: 'Crit damage multiplier increased.',
+    description: 'Crit damage +25/+50%.',
     effectPerRank: [
       { type: 'crit_damage_bonus', value: 0.25 },
       { type: 'crit_damage_bonus', value: 0.50 },
@@ -289,7 +289,7 @@ const ARCHER_TREE = [
     id: 'archer_evasion', name: 'Evasion', branch: 'survival', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'Dodge chance increased.',
+    description: 'Dodge chance +5/+10/+15.',
     effectPerRank: [
       { type: 'dodge_bonus', value: 5 },
       { type: 'dodge_bonus', value: 10 },
@@ -300,7 +300,7 @@ const ARCHER_TREE = [
     id: 'archer_quick_recovery', name: 'Quick Recovery', branch: 'survival', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'Potion healing increased.',
+    description: 'Potion healing +10/+20/+30%.',
     effectPerRank: [
       { type: 'potion_healing_mult', value: 1.10 },
       { type: 'potion_healing_mult', value: 1.20 },
@@ -321,7 +321,7 @@ const ARCHER_TREE = [
     id: 'archer_vital_strike', name: 'Vital Strike', branch: 'survival', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'archer_quick_recovery', minRank: 1 }],
     skillType: 'passive', cooldown: null,
-    description: 'Killing an enemy heals a percentage of max HP.',
+    description: 'Killing an enemy heals 3/6% of max HP.',
     effectPerRank: [
       { type: 'kill_heal', value: 0.03 },
       { type: 'kill_heal', value: 0.06 },
@@ -346,7 +346,7 @@ const ARCHER_TREE = [
     id: 'archer_trap_mastery', name: 'Trap Mastery', branch: 'trapper', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'Traps deal less damage to player. Can disarm traps.',
+    description: 'Trap damage reduced 50/75/100%. Rank 3 disarms traps.',
     effectPerRank: [
       { type: 'trap_resistance', value: 0.50 },
       { type: 'trap_resistance', value: 0.75 },
@@ -357,7 +357,7 @@ const ARCHER_TREE = [
     id: 'archer_scavenger', name: 'Scavenger', branch: 'trapper', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'Item drop rate from enemies increased.',
+    description: 'Enemy item drop rate +10/+20/+30%.',
     effectPerRank: [
       { type: 'drop_rate_bonus', value: 0.10 },
       { type: 'drop_rate_bonus', value: 0.20 },
@@ -368,7 +368,7 @@ const ARCHER_TREE = [
     id: 'archer_caltrops', name: 'Caltrops', branch: 'trapper', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'archer_trap_mastery', minRank: 1 }],
     skillType: 'active', cooldown: 10,
-    description: 'Place a 3x3 area of caltrops that slow enemies.',
+    description: 'Place 3x3 caltrops: 30/50% slow for 3 turns.',
     effectPerRank: [
       { type: 'caltrops', slowAmount: 0.30, duration: 3 },
       { type: 'caltrops', slowAmount: 0.50, duration: 3 },
@@ -378,7 +378,7 @@ const ARCHER_TREE = [
     id: 'archer_salvage', name: 'Salvage', branch: 'trapper', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'archer_scavenger', minRank: 2 }],
     skillType: 'passive', cooldown: null,
-    description: 'Can break down gear for materials.',
+    description: 'Break down gear for 1/2 material(s) each.',
     effectPerRank: [
       { type: 'salvage', materialsPerItem: 1 },
       { type: 'salvage', materialsPerItem: 2 },
@@ -416,7 +416,7 @@ const MAGE_TREE = [
     id: 'mage_mana_surge', name: 'Mana Surge', branch: 'destruction', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'Skill cooldowns reduced.',
+    description: 'Skill cooldowns reduced by 1/1/2 turn(s).',
     effectPerRank: [
       { type: 'cooldown_reduction', value: 1 },
       { type: 'cooldown_reduction', value: 1 },
@@ -427,7 +427,7 @@ const MAGE_TREE = [
     id: 'mage_chain_lightning', name: 'Chain Lightning', branch: 'destruction', tier: 2,
     maxRank: 3, prerequisites: [{ skillId: 'mage_arcane_power', minRank: 1 }],
     skillType: 'passive', cooldown: null,
-    description: 'Magic attacks have a chance to arc to a second target for 50% damage.',
+    description: '15/25/35% chance magic attacks chain to second target (50% dmg).',
     effectPerRank: [
       { type: 'chain_chance', value: 0.15 },
       { type: 'chain_chance', value: 0.25 },
@@ -438,7 +438,7 @@ const MAGE_TREE = [
     id: 'mage_overcharge', name: 'Overcharge', branch: 'destruction', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'mage_mana_surge', minRank: 2 }],
     skillType: 'passive', cooldown: null,
-    description: 'Active skills deal bonus damage but cost HP.',
+    description: 'Active skills deal +20/+35% damage but cost 5% HP.',
     effectPerRank: [
       { type: 'overcharge', damageBonus: 0.20, hpCost: 0.05 },
       { type: 'overcharge', damageBonus: 0.35, hpCost: 0.05 },
@@ -452,7 +452,7 @@ const MAGE_TREE = [
       { skillId: 'mage_overcharge', minRank: 1 },
     ],
     skillType: 'active', cooldown: 25,
-    description: 'Deal massive damage to a 3x3 area.',
+    description: 'Deal 15 base damage (INT scaling) to a 3x3 area.',
     effectPerRank: [
       { type: 'aoe_damage', damage: 15, radius: 1, statScaling: 'INT' },
     ],
@@ -463,7 +463,7 @@ const MAGE_TREE = [
     id: 'mage_arcane_barrier', name: 'Arcane Barrier', branch: 'warding', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'Magic damage resistance increased.',
+    description: 'Magic damage resistance +5/+10/+15%.',
     effectPerRank: [
       { type: 'magic_resistance', value: 0.05 },
       { type: 'magic_resistance', value: 0.10 },
@@ -474,7 +474,7 @@ const MAGE_TREE = [
     id: 'mage_enchanted_flesh', name: 'Enchanted Flesh', branch: 'warding', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'Max HP increased.',
+    description: 'Max HP +4/+8/+12%.',
     effectPerRank: [
       { type: 'max_hp_mult', value: 1.04 },
       { type: 'max_hp_mult', value: 1.08 },
@@ -520,7 +520,7 @@ const MAGE_TREE = [
     id: 'mage_insight', name: 'Insight', branch: 'mysticism', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'XP gained from all sources increased.',
+    description: 'XP gained +10/+20/+30%.',
     effectPerRank: [
       { type: 'xp_bonus', value: 0.10 },
       { type: 'xp_bonus', value: 0.20 },
@@ -531,7 +531,7 @@ const MAGE_TREE = [
     id: 'mage_transmutation', name: 'Transmutation', branch: 'mysticism', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'Material drop quantity increased.',
+    description: 'Material drops +10/+20/+30%.',
     effectPerRank: [
       { type: 'material_bonus', value: 0.10 },
       { type: 'material_bonus', value: 0.20 },

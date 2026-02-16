@@ -8,7 +8,7 @@ import { InputHandler } from './input.js';
 import { SpriteRegistry } from './sprites.js';
 import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
-import { TILE, FOV_RADIUS, PLAYER_CLASSES, STAT_NAMES, getBiome, BIOME_THEMES } from './constants.js';
+import { TILE, FOV_RADIUS, PLAYER_CLASSES, STAT_NAMES, STAT_DESCRIPTIONS, getBiome, BIOME_THEMES } from './constants.js';
 import { Entity } from './entity.js';
 import { generateDungeon } from './dungeon-gen.js';
 import { resolveAttack } from './combat.js';
@@ -1434,7 +1434,7 @@ export class Game {
     const h = this.canvas.height;
     const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
     const panelW = Math.min(Math.round(440 * uiScale), w - 40);
-    const panelH = Math.min(Math.round(200 * uiScale), h - 40);
+    const panelH = Math.min(Math.round(230 * uiScale), h - 40);
     const x = Math.floor((w - panelW) / 2);
     const y = Math.floor((h - panelH) / 2);
 
@@ -1449,20 +1449,24 @@ export class Game {
     ctx.font = `${Math.round(22 * uiScale)}px monospace`;
     ctx.fillText('Death Save', x + Math.round(20 * uiScale), y + Math.round(38 * uiScale));
 
+    ctx.fillStyle = '#7a8a9a';
+    ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+    ctx.fillText('Without a save, items are lost and materials are halved.', x + Math.round(20 * uiScale), y + Math.round(56 * uiScale));
+
     ctx.fillStyle = '#afc0d2';
     ctx.font = `${Math.round(13 * uiScale)}px monospace`;
-    ctx.fillText('Choose one to save:', x + Math.round(20 * uiScale), y + Math.round(64 * uiScale));
+    ctx.fillText('Choose one to keep:', x + Math.round(20 * uiScale), y + Math.round(76 * uiScale));
 
-    const options = ['Save 1 Item to Stash', 'Save Full Material Haul'];
+    const options = ['Keep 1 item (lose all materials)', 'Keep all materials (lose all items)'];
     for (let i = 0; i < options.length; i++) {
       const selected = i === this.deathSaveIndex;
       if (selected) {
         ctx.fillStyle = '#2b3a4d';
-        ctx.fillRect(x + Math.round(18 * uiScale), y + Math.round(82 * uiScale) + i * Math.round(36 * uiScale), panelW - Math.round(36 * uiScale), Math.round(28 * uiScale));
+        ctx.fillRect(x + Math.round(18 * uiScale), y + Math.round(96 * uiScale) + i * Math.round(36 * uiScale), panelW - Math.round(36 * uiScale), Math.round(28 * uiScale));
       }
       ctx.fillStyle = selected ? '#ffffff' : '#9db0c4';
-      ctx.font = `${Math.round(16 * uiScale)}px monospace`;
-      ctx.fillText(options[i], x + Math.round(28 * uiScale), y + Math.round(102 * uiScale) + i * Math.round(36 * uiScale));
+      ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+      ctx.fillText(options[i], x + Math.round(28 * uiScale), y + Math.round(116 * uiScale) + i * Math.round(36 * uiScale));
     }
   }
 
@@ -2472,8 +2476,11 @@ export class Game {
     if (this.floorNumber === 1 && this.turnCount === 0) {
       this.messageLog.add('Welcome to Diegeist. Move with arrows. Attack with WASD.', this.turnCount);
       this.messageLog.add('Press G to pick up items. Press I to manage inventory.', this.turnCount);
-      if (this.player.playerClass === 'archer' || this.player.playerClass === 'mage') {
-        this.messageLog.add('WASD fires ranged attacks. Q/E/R for skills.', this.turnCount);
+      this.messageLog.add('Press P for stats. Esc to pause. Q/E/R for skills.', this.turnCount);
+      if (this.player.playerClass === 'fighter') {
+        this.messageLog.add('WASD attacks adjacent enemies in melee.', this.turnCount);
+      } else {
+        this.messageLog.add('WASD fires ranged attacks toward enemies.', this.turnCount);
       }
     }
     this.messageLog.add(`Floor ${this.floorNumber} begins.`, this.turnCount);
@@ -3145,18 +3152,26 @@ export class Game {
     ctx.fillText(`Essence: ${this.player.gold}`, x + Math.round(180 * uiScale), y + Math.round(78 * uiScale));
     ctx.fillText(`Natural Regen: 1 HP every ${this.getNaturalRegenInterval()} turns`, x + Math.round(16 * uiScale), y + Math.round(98 * uiScale));
 
-    const statStartY = y + Math.round(130 * uiScale);
+    const classDef = PLAYER_CLASSES[this.player.playerClass];
+    const affinitySet = classDef ? classDef.affinityStats : [];
+    ctx.fillStyle = '#6bb8e8';
+    ctx.fillText(`Affinity: ${affinitySet.join(', ')} (full scaling)`, x + Math.round(16 * uiScale), y + Math.round(118 * uiScale));
+
+    const statStartY = y + Math.round(140 * uiScale);
     const rowH = Math.round(20 * uiScale);
     for (let i = 0; i < STAT_NAMES.length; i++) {
       const stat = STAT_NAMES[i];
       const total = totalStats[stat] || 0;
       const base = this.player.stats[stat] || 0;
       const bonus = equippedBonuses[stat] || 0;
+      const isAffinity = affinitySet.includes(stat);
       const bonusText = bonus === 0 ? '' : ` (${bonus > 0 ? '+' : ''}${bonus} gear)`;
-      ctx.fillStyle = '#b8c3ce';
+      ctx.fillStyle = isAffinity ? '#a3d9ff' : '#b8c3ce';
       ctx.fillText(`${stat}: ${total}${bonusText}`, x + Math.round(16 * uiScale), statStartY + i * rowH);
       ctx.fillStyle = '#6f7d8a';
       ctx.fillText(`Base ${base}`, x + Math.round(190 * uiScale), statStartY + i * rowH);
+      ctx.fillStyle = '#555f6a';
+      ctx.fillText(STAT_DESCRIPTIONS[stat] || '', x + Math.round(260 * uiScale), statStartY + i * rowH);
     }
 
     const skillStartY = statStartY + STAT_NAMES.length * rowH + Math.round(14 * uiScale);
@@ -3249,18 +3264,29 @@ export class Game {
     }
 
     const statX = x + Math.round(320 * uiScale);
-    const statY = y + Math.round(152 * uiScale);
+    const statY = y + Math.round(132 * uiScale);
     ctx.fillStyle = '#d4dfeb';
     ctx.font = `${Math.round(16 * uiScale)}px monospace`;
-    ctx.fillText(`${classDef.name} Base Stats`, statX, statY);
-    ctx.font = `${Math.round(13 * uiScale)}px monospace`;
+    ctx.fillText(`${classDef.name}`, statX, statY);
+    ctx.fillStyle = '#8ca2b8';
+    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    ctx.fillText(classDef.description || '', statX, statY + Math.round(18 * uiScale));
+    ctx.fillStyle = '#6bb8e8';
+    ctx.fillText(`Affinity: ${classDef.affinity || ''}`, statX, statY + Math.round(34 * uiScale));
+
+    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    const statStartY = statY + Math.round(56 * uiScale);
     for (let i = 0; i < STAT_NAMES.length; i++) {
       const stat = STAT_NAMES[i];
-      ctx.fillStyle = '#aab8c7';
-      ctx.fillText(`${stat}: ${classDef.baseStats[stat]}`, statX, statY + Math.round(24 * uiScale) + i * Math.round(18 * uiScale));
+      const isAffinity = classDef.affinityStats.includes(stat);
+      const rowY = statStartY + i * Math.round(17 * uiScale);
+      ctx.fillStyle = isAffinity ? '#a3d9ff' : '#aab8c7';
+      ctx.fillText(`${stat}: ${classDef.baseStats[stat]}`, statX, rowY);
+      ctx.fillStyle = '#6a7a8a';
+      ctx.fillText(STAT_DESCRIPTIONS[stat] || '', statX + Math.round(60 * uiScale), rowY);
     }
     ctx.fillStyle = '#aab8c7';
-    ctx.fillText(`HP: ${classDef.baseHp}`, statX, statY + Math.round(24 * uiScale) + STAT_NAMES.length * Math.round(18 * uiScale));
+    ctx.fillText(`HP: ${classDef.baseHp}`, statX, statStartY + STAT_NAMES.length * Math.round(17 * uiScale));
 
     const essence = this.saveData?.currency || 0;
     ctx.fillStyle = '#d9e5f2';
@@ -3937,26 +3963,36 @@ export class Game {
     if (this.skillTreeCursor < nodes.length) {
       const selected = nodes[this.skillTreeCursor];
       const rank = investments[selected.id] || 0;
-      const detailY = y + panelH - Math.round(80 * uiScale);
+      const detailY = y + panelH - Math.round(92 * uiScale);
 
       ctx.fillStyle = '#1a2535';
-      ctx.fillRect(x + Math.round(10 * uiScale), detailY, panelW - Math.round(20 * uiScale), Math.round(60 * uiScale));
+      ctx.fillRect(x + Math.round(10 * uiScale), detailY, panelW - Math.round(20 * uiScale), Math.round(72 * uiScale));
 
       ctx.fillStyle = '#e8eef5';
       ctx.font = `${Math.round(13 * uiScale)}px monospace`;
-      ctx.fillText(selected.name, x + Math.round(20 * uiScale), detailY + Math.round(18 * uiScale));
+      const typeLabel = selected.skillType === 'active' ? `Active (CD ${selected.cooldown})` : 'Passive';
+      ctx.fillText(`${selected.name}  [${typeLabel}]  Rank ${rank}/${selected.maxRank}`, x + Math.round(20 * uiScale), detailY + Math.round(16 * uiScale));
 
       ctx.fillStyle = '#afc0d2';
       ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-      ctx.fillText(selected.description, x + Math.round(20 * uiScale), detailY + Math.round(36 * uiScale));
+      ctx.fillText(selected.description, x + Math.round(20 * uiScale), detailY + Math.round(34 * uiScale));
 
+      let infoY = detailY + Math.round(48 * uiScale);
       if (selected.prerequisites.length > 0) {
         const prereqNames = selected.prerequisites.map(p => {
           const pNode = nodes.find(n => n.id === p.skillId);
           return `${pNode?.name || p.skillId} ${p.minRank}+`;
         }).join(', ');
         ctx.fillStyle = '#7a8a9a';
-        ctx.fillText(`Requires: ${prereqNames}`, x + Math.round(20 * uiScale), detailY + Math.round(50 * uiScale));
+        ctx.fillText(`Requires: ${prereqNames}`, x + Math.round(20 * uiScale), infoY);
+        infoY += Math.round(14 * uiScale);
+      }
+      if (rank > 0 && rank < selected.maxRank) {
+        ctx.fillStyle = '#9ce2a3';
+        ctx.fillText(`Next rank: ${rank + 1}/${selected.maxRank}`, x + Math.round(20 * uiScale), infoY);
+      } else if (rank >= selected.maxRank) {
+        ctx.fillStyle = '#9ce2a3';
+        ctx.fillText('MAX RANK', x + Math.round(20 * uiScale), infoY);
       }
     }
 

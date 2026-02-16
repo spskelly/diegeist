@@ -14,10 +14,19 @@ export const RARITY = {
 };
 
 export const EQUIPMENT_SLOTS = ['head', 'torso', 'legs', 'leftHand', 'rightHand', 'accessory1', 'accessory2'];
+export const STAT_DESCRIPTIONS = {
+  STR: 'Melee damage',
+  DEX: 'Dodge, ranged dmg',
+  CON: 'Max HP, defense',
+  INT: 'Magic damage',
+  WIS: 'Magic resist',
+  LCK: 'Crit chance',
+};
+
 export const PLAYER_CLASSES = {
-  fighter: { name: 'Fighter', baseStats: { STR: 8, DEX: 5, CON: 7, INT: 2, WIS: 3, LCK: 5 }, baseHp: 15, affinityStats: ['STR', 'CON'] },
-  archer: { name: 'Archer', baseStats: { STR: 4, DEX: 8, CON: 5, INT: 3, WIS: 4, LCK: 6 }, baseHp: 10, affinityStats: ['DEX', 'LCK'] },
-  mage: { name: 'Mage', baseStats: { STR: 3, DEX: 4, CON: 4, INT: 8, WIS: 7, LCK: 4 }, baseHp: 10, affinityStats: ['INT', 'WIS'] },
+  fighter: { name: 'Fighter', description: 'Tough melee brawler. High STR and CON.', affinity: 'STR, CON — full melee and health scaling', baseStats: { STR: 8, DEX: 5, CON: 7, INT: 2, WIS: 3, LCK: 5 }, baseHp: 15, affinityStats: ['STR', 'CON'] },
+  archer: { name: 'Archer', description: 'Agile ranged striker. High DEX and LCK.', affinity: 'DEX, LCK — full ranged and crit scaling', baseStats: { STR: 4, DEX: 8, CON: 5, INT: 3, WIS: 4, LCK: 6 }, baseHp: 10, affinityStats: ['DEX', 'LCK'] },
+  mage: { name: 'Mage', description: 'Powerful spellcaster. High INT and WIS.', affinity: 'INT, WIS — full magic and resist scaling', baseStats: { STR: 3, DEX: 4, CON: 4, INT: 8, WIS: 7, LCK: 4 }, baseHp: 10, affinityStats: ['INT', 'WIS'] },
 };
 
 export const CLASS_SKILLS = {
