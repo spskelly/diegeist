@@ -50,4 +50,20 @@ export class Entity {
     this.position.x = x;
     this.position.y = y;
   }
+
+  addStatusEffect({ type, duration, value }) {
+    this.statusEffects = this.statusEffects.filter(e => e.type !== type);
+    this.statusEffects.push({ type, turnsRemaining: duration, value });
+  }
+
+  hasStatusEffect(type) {
+    return this.statusEffects.find(e => e.type === type) || null;
+  }
+
+  tickStatusEffects() {
+    this.statusEffects = this.statusEffects.filter(e => {
+      e.turnsRemaining--;
+      return e.turnsRemaining > 0;
+    });
+  }
 }
