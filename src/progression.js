@@ -37,7 +37,7 @@ export class SaveData {
     this.permanentStats = {};
     this.permanentPerks = [];
     this.runHistory = [];
-    this.settings = { volume: 0.7 };
+    this.settings = { sfxVolume: 0.7, ambientVolume: 0.7 };
     this.pendingLoadoutItem = null;
     this.materials = { timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 };
     this.classXP = { fighter: 0, archer: 0, mage: 0 };

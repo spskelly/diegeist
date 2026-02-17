@@ -399,6 +399,7 @@ export function startFloor(game) {
   }
   game.messageLog.add(`Floor ${game.floorNumber} begins.`, game.turnCount);
   if (game.audio) game.audio.startAmbient(game.floorNumber);
+  game._currentAmbientBiome = getBiome(game.floorNumber);
 
   computeFOV(game.map, game.player.position.x, game.player.position.y, FOV_RADIUS);
   game.camera.centerOn(game.player.position.x, game.player.position.y, game.map.width, game.map.height);
