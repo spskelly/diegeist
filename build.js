@@ -28,6 +28,11 @@ const SOURCE_ORDER = [
   'renderer.js',
   'hud.js',
   'audio.js',
+  'game-utils.js',
+  'game-save.js',
+  'game-actions.js',
+  'game-floor.js',
+  'game-screens.js',
   'game.js',
 ];
 
