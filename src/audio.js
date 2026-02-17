@@ -276,6 +276,42 @@ export class AudioManager {
     this._tone(1200, 0.04, 'sine', 0.1);
   }
 
+  _generatePhrase(mood, currentChord) {
+    const [minLen, maxLen] = mood.phraseLength;
+    const length = minLen + Math.floor(Math.random() * (maxLen - minLen + 1));
+    const scale = mood.melodyScale;
+
+    // Start on a chord tone that exists in the melody scale
+    const chordTonesInScale = currentChord
+      .flatMap(f => scale.filter(s => Math.abs(s - f) < 1 || Math.abs(s - f * 2) < 1))
+      .filter(f => f >= scale[0] && f <= scale[scale.length - 1]);
+    const startPool = chordTonesInScale.length > 0 ? chordTonesInScale : scale;
+    const startNote = startPool[Math.floor(Math.random() * startPool.length)];
+
+    const phrase = [startNote];
+    let currentIdx = scale.indexOf(startNote);
+    if (currentIdx === -1) currentIdx = Math.floor(scale.length / 2);
+
+    for (let i = 1; i < length; i++) {
+      if (Math.random() < 0.3) {
+        // Leap to a chord tone in scale
+        const leapPool = chordTonesInScale.length > 0 ? chordTonesInScale : scale;
+        const target = leapPool[Math.floor(Math.random() * leapPool.length)];
+        currentIdx = scale.indexOf(target);
+        if (currentIdx === -1) currentIdx = Math.floor(scale.length / 2);
+        phrase.push(target);
+      } else {
+        // Stepwise motion with direction bias
+        const bias = mood.directionBias;
+        const direction = (Math.random() + bias > 0.5) ? 1 : -1;
+        currentIdx = Math.max(0, Math.min(scale.length - 1, currentIdx + direction));
+        phrase.push(scale[currentIdx]);
+      }
+    }
+
+    return phrase;
+  }
+
   startAmbient(floorNumber) {
     const biome = getBiome(floorNumber);
     this.startAmbientBiome(biome);
@@ -352,7 +388,69 @@ export class AudioManager {
 
     const chordInterval = setInterval(advanceChord, profile.chordDuration);
 
-    // --- Melody phrase scheduling (Task 3) ---
+    // --- Melody phrase layer ---
+    const playPhrase = () => {
+      if (!this.ctx || !this.ambientNode) return;
+
+      const chord = this.ambientNode.getCurrentChord();
+      const phrase = this._generatePhrase(mood, chord);
+      const [minSpacing, maxSpacing] = mood.noteSpacing;
+      const now = this.ctx.currentTime;
+
+      phrase.forEach((freq, i) => {
+        const noteTime = now + i * (minSpacing + Math.random() * (maxSpacing - minSpacing)) / 1000;
+        const duration = 0.6 + Math.random() * 0.8;
+
+        const osc = this.ctx.createOscillator();
+        osc.type = profile.melodyWave;
+        osc.frequency.value = freq;
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.001, noteTime);
+        gain.gain.linearRampToValueAtTime(profile.melodyVolume * this.volume, noteTime + 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.001, noteTime + duration);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(noteTime);
+        osc.stop(noteTime + duration);
+      });
+
+      // Accent: chance to play a high chord-tone ping after the phrase
+      if (Math.random() < mood.accentChance) {
+        const accentDelay = phrase.length * maxSpacing / 1000 + 0.2;
+        const accentTime = now + accentDelay;
+        const accentPool = mood.accentScale;
+        const accentFreq = accentPool[Math.floor(Math.random() * accentPool.length)];
+        const accentDur = 0.3 + Math.random() * 0.4;
+
+        const accentOsc = this.ctx.createOscillator();
+        accentOsc.type = profile.melodyWave;
+        accentOsc.frequency.value = accentFreq;
+
+        const accentGain = this.ctx.createGain();
+        accentGain.gain.setValueAtTime(0.001, accentTime);
+        accentGain.gain.linearRampToValueAtTime(profile.accentVolume * this.volume, accentTime + 0.08);
+        accentGain.gain.exponentialRampToValueAtTime(0.001, accentTime + accentDur);
+
+        accentOsc.connect(accentGain);
+        accentGain.connect(this.ctx.destination);
+        accentOsc.start(accentTime);
+        accentOsc.stop(accentTime + accentDur);
+      }
+
+      // Schedule next phrase
+      const [minPause, maxPause] = mood.phrasePause;
+      const nextDelay = minPause + Math.random() * (maxPause - minPause);
+      const timeout = setTimeout(playPhrase, nextDelay);
+      if (this.ambientNode) {
+        this.ambientNode.melodyTimeout = timeout;
+      }
+    };
+
+    // Start first phrase after a short delay
+    const initialDelay = 2000 + Math.random() * 3000;
+    const initialTimeout = setTimeout(playPhrase, initialDelay);
 
     // --- Store references for cleanup ---
     this.ambientNode = {
@@ -361,7 +459,7 @@ export class AudioManager {
       padGain,
       bassGain,
       chordInterval,
-      melodyTimeout: null,
+      melodyTimeout: initialTimeout,
       getCurrentChord: () => currentChord,
       profile,
       mood,
