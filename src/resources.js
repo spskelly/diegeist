@@ -9,10 +9,10 @@ export const MATERIAL_COLORS = {
 };
 
 export const BIOME_MATERIALS = {
-  jungle:     { primary: 'timber',  secondary: 'stone',   tertiary: 'iron' },
-  dirt_cave:  { primary: 'stone',   secondary: 'iron',    tertiary: 'timber' },
-  stone_cave: { primary: 'iron',    secondary: 'crystal', tertiary: 'stone' },
-  dungeon:    { primary: 'crystal', secondary: 'iron',    tertiary: 'aether' },
+  wilds:    { primary: 'timber',  secondary: 'stone',   tertiary: 'iron' },
+  cave:     { primary: 'stone',   secondary: 'iron',    tertiary: 'timber' },
+  dungeon:  { primary: 'iron',    secondary: 'crystal', tertiary: 'stone' },
+  eldritch: { primary: 'crystal', secondary: 'iron',    tertiary: 'aether' },
 };
 
 const BASE_DROP_CHANCE = 0.40;
@@ -44,7 +44,7 @@ export function rollMaterialDrop(biome, rank = 1, opts = {}) {
   const roll = opts.forceRoll ?? Math.random();
   if (roll >= BASE_DROP_CHANCE) return null;
 
-  const biomeMats = BIOME_MATERIALS[biome] || BIOME_MATERIALS.jungle;
+  const biomeMats = BIOME_MATERIALS[biome] || BIOME_MATERIALS.wilds;
   const qtyRoll = opts.forceQtyRoll ?? Math.random();
 
   // Determine which material type drops
@@ -72,7 +72,7 @@ export function rollMaterialDrop(biome, rank = 1, opts = {}) {
 }
 
 export function getFloorClearMaterials(biome, rank = 1, qtyRoll = null) {
-  const biomeMats = BIOME_MATERIALS[biome] || BIOME_MATERIALS.jungle;
+  const biomeMats = BIOME_MATERIALS[biome] || BIOME_MATERIALS.wilds;
   const roll = qtyRoll ?? Math.random();
   const baseMin = 3;
   const baseMax = 5;
@@ -84,7 +84,7 @@ export function getFloorClearMaterials(biome, rank = 1, qtyRoll = null) {
 }
 
 export function getBossKillMaterials(biome, rank = 1, qtyRoll = null) {
-  const biomeMats = BIOME_MATERIALS[biome] || BIOME_MATERIALS.jungle;
+  const biomeMats = BIOME_MATERIALS[biome] || BIOME_MATERIALS.wilds;
   const roll = qtyRoll ?? Math.random();
   const aetherQty = 2 + Math.floor(roll * 3); // 2-4
 

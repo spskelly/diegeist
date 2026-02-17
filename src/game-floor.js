@@ -23,7 +23,7 @@ export function getEnemyBaseTemplatesForFloor(floorNumber) {
   const biome = getBiome(floorNumber);
 
   const ENEMY_POOLS = {
-    jungle: [
+    wilds: [
       {
         name: 'Leech', maxHp: 5, speed: 80, behavior: 'rushdown',
         stats: { STR: 3, DEX: 2, CON: 4, INT: 1, WIS: 1, LCK: 2 },
@@ -35,7 +35,7 @@ export function getEnemyBaseTemplatesForFloor(floorNumber) {
         spriteKey: 'slime', weight: 35,
       },
     ],
-    dirt_cave: [
+    cave: [
       {
         name: 'Rat', maxHp: 5, speed: 100, behavior: 'rushdown',
         stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 },
@@ -47,7 +47,7 @@ export function getEnemyBaseTemplatesForFloor(floorNumber) {
         spriteKey: 'bat', weight: 22 + floorNumber * 1.2,
       },
     ],
-    stone_cave: [
+    dungeon: [
       {
         name: 'Skeleton', maxHp: 7, speed: 100, behavior: 'rushdown',
         stats: { STR: 5, DEX: 4, CON: 4, INT: 2, WIS: 2, LCK: 2 },
@@ -64,7 +64,7 @@ export function getEnemyBaseTemplatesForFloor(floorNumber) {
         spriteKey: 'skeleton_archer', weight: 25,
       },
     ],
-    dungeon: [
+    eldritch: [
       {
         name: 'Demon', maxHp: 10, speed: 95, behavior: 'summoner',
         stats: { STR: 5, DEX: 3, CON: 5, INT: 6, WIS: 5, LCK: 3 },
@@ -74,7 +74,7 @@ export function getEnemyBaseTemplatesForFloor(floorNumber) {
     ],
   };
 
-  return ENEMY_POOLS[biome] || ENEMY_POOLS.dirt_cave;
+  return ENEMY_POOLS[biome] || ENEMY_POOLS.cave;
 }
 
 export function chooseWeightedEnemyTemplate(templates) {

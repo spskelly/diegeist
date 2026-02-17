@@ -53,15 +53,15 @@ export const CLASS_SKILLS = {
 };
 
 export function getBiome(floorNumber) {
-  if (floorNumber <= 3) return 'jungle';
-  if (floorNumber <= 6) return 'dirt_cave';
-  if (floorNumber <= 9) return 'stone_cave';
-  return 'dungeon';
+  if (floorNumber <= 3) return 'wilds';
+  if (floorNumber <= 6) return 'cave';
+  if (floorNumber <= 9) return 'dungeon';
+  return 'eldritch';
 }
 
 export const BIOME_THEMES = {
-  jungle: {
-    name: 'Jungle',
+  wilds: {
+    name: 'Wilds',
     floors: [1, 2, 3],
     palette: {
       wall:      { primary: '#2a4a2a', secondary: '#1e3a1e', outline: '#152515' },
@@ -77,8 +77,8 @@ export const BIOME_THEMES = {
     waterChance: 0.12,
     trapChance: 0.03,
   },
-  dirt_cave: {
-    name: 'Dirt Cave',
+  cave: {
+    name: 'Cave',
     floors: [4, 5, 6],
     palette: {
       wall:      { primary: '#4a3a2a', secondary: '#3a2e1e', outline: '#2a2015' },
@@ -94,8 +94,8 @@ export const BIOME_THEMES = {
     waterChance: 0.04,
     trapChance: 0.06,
   },
-  stone_cave: {
-    name: 'Stone Cave',
+  dungeon: {
+    name: 'Dungeon',
     floors: [7, 8, 9],
     palette: {
       wall:      { primary: '#2a2a4a', secondary: '#1e1e3e', outline: '#151535' },
@@ -111,8 +111,8 @@ export const BIOME_THEMES = {
     waterChance: 0.06,
     trapChance: 0.08,
   },
-  dungeon: {
-    name: 'Dungeon',
+  eldritch: {
+    name: 'Eldritch',
     floors: [10],
     palette: {
       wall:      { primary: '#3a1a2a', secondary: '#2e1020', outline: '#200a18' },

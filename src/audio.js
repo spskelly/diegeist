@@ -1,85 +1,303 @@
 // src/audio.js
 import { getBiome } from './constants.js';
 
-// Note frequencies
+// ─── note frequencies ───────────────────────────────────────────────
 const N = {
-  A2: 110.00, C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.00,
-  A3: 220.00, C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.00,
-  A4: 440.00, C5: 523.25, D5: 587.33, E5: 659.25, G5: 784.00
+  A2: 110.00, B2: 123.47, C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61,
+  G3: 196.00, A3: 220.00, B3: 246.94, C4: 261.63, D4: 293.66, E4: 329.63,
+  F4: 349.23, G4: 392.00, A4: 440.00, B4: 493.88, C5: 523.25, D5: 587.33,
+  E5: 659.25, G5: 784.00, A5: 880.00
 };
 
-// Chord definitions: arrays of 3 frequencies (root, third, fifth)
-const CHORDS = {
-  Am:  [N.A2, N.C3, N.E3],
-  C:   [N.C3, N.E3, N.G3],
-  Dm:  [N.D3, N.F3, N.A3],
-  Em:  [N.E3, N.G3, N.A3], // using A3 instead of B for pentatonic compatibility
-  F:   [N.F3, N.A3, N.C4],
-  G:   [N.G3, N.C4, N.D4], // Gsus4-ish voicing, avoids B
+// ─── chord voicings ─────────────────────────────────────────────────
+// low voicings for darker moods
+const CH = {
+  Am:   [N.A2, N.C3, N.E3],
+  C:    [N.C3, N.E3, N.G3],
+  Dm:   [N.D3, N.F3, N.A3],
+  Em:   [N.E3, N.G3, N.B3],
+  F:    [N.F3, N.A3, N.C4],
+  G:    [N.G3, N.B3, N.D4],
+  // higher voicings for brighter moods
+  Am_h: [N.A3, N.C4, N.E4],
+  C_h:  [N.C4, N.E4, N.G4],
+  Dm_h: [N.D4, N.F4, N.A4],
+  F_h:  [N.F4, N.A4, N.C5],
+  G_h:  [N.G4, N.B4, N.D5],
 };
 
-// Higher voicings for peaceful mood (one octave up from CHORDS)
-const CHORDS_HIGH = {
-  Am:  [N.A3, N.C4, N.E4],
-  C:   [N.C4, N.E4, N.G4],
-  F:   [N.F4, N.A4, N.C5],
-  G:   [N.G4, N.C5, N.D5],
-};
-
-// Scale notes available for stepwise melody motion, per mood
-const MOOD_GROUPS = {
+// ─── mood definitions ───────────────────────────────────────────────
+// each mood defines harmonic, melodic, and phrasing behavior
+const MOODS = {
   oppressive: {
     progressions: [
-      [CHORDS.Am, CHORDS.Dm, CHORDS.Em, CHORDS.Am],
-      [CHORDS.Am, CHORDS.F,  CHORDS.Dm, CHORDS.Am],
+      [CH.Am, CH.Dm, CH.Em, CH.Am],
+      [CH.Am, CH.F,  CH.Dm, CH.Em],
+      [CH.Dm, CH.Am, CH.Em, CH.Dm],
     ],
     melodyScale: [N.A3, N.C4, N.D4, N.E4, N.G4],
     accentScale: [N.A4, N.C5, N.E5],
-    phraseLength: [2, 3],       // min, max notes per phrase
-    noteSpacing: [350, 500],    // ms between notes in a phrase
-    phrasePause: [6000, 10000], // ms between phrases
-    directionBias: -0.3,        // negative = descending tendency
-    accentChance: 0.2,
+    phraseLength: [2, 3],
+    noteSpacing: [400, 600],
+    phrasePause: [7000, 12000],
+    directionBias: -0.3,       // tends downward
+    accentChance: 0.15,
+    restChance: 0.2,           // chance to insert a silent beat in a phrase
   },
   mysterious: {
     progressions: [
-      [CHORDS.Am, CHORDS.C,  CHORDS.G,  CHORDS.Em],
-      [CHORDS.C,  CHORDS.Am, CHORDS.F,  CHORDS.G],
+      [CH.Am, CH.C,  CH.G,  CH.Em],
+      [CH.C,  CH.Am, CH.F,  CH.G],
+      [CH.Em, CH.C,  CH.Am, CH.F],
     ],
     melodyScale: [N.A3, N.C4, N.D4, N.E4, N.G4, N.A4],
     accentScale: [N.A4, N.C5, N.E5, N.G5],
-    phraseLength: [2, 4],
-    noteSpacing: [250, 400],
-    phrasePause: [4000, 8000],
+    phraseLength: [2, 5],
+    noteSpacing: [250, 450],
+    phrasePause: [5000, 9000],
     directionBias: 0,
     accentChance: 0.25,
+    restChance: 0.15,
   },
   peaceful: {
     progressions: [
-      [CHORDS_HIGH.C,  CHORDS_HIGH.G,  CHORDS_HIGH.Am, CHORDS_HIGH.F],
-      [CHORDS_HIGH.F,  CHORDS_HIGH.C,  CHORDS_HIGH.G,  CHORDS_HIGH.Am],
+      [CH.C_h, CH.G_h, CH.Am_h, CH.F_h],
+      [CH.F_h, CH.C_h, CH.G_h,  CH.Am_h],
+      [CH.C_h, CH.Am_h, CH.F_h, CH.G_h],
     ],
     melodyScale: [N.C4, N.D4, N.E4, N.G4, N.A4, N.C5],
-    accentScale: [N.E5, N.G5],
-    phraseLength: [3, 4],
-    noteSpacing: [200, 300],
+    accentScale: [N.E5, N.G5, N.A5],
+    phraseLength: [3, 5],
+    noteSpacing: [200, 350],
     phrasePause: [4000, 7000],
-    directionBias: 0.3,
-    accentChance: 0.15,
-  }
+    directionBias: 0.2,        // tends upward
+    accentChance: 0.2,
+    restChance: 0.1,
+  },
+  eldritch: {
+    progressions: [
+      [CH.Em, CH.Dm, CH.Am, CH.Em],
+      [CH.Dm, CH.Em, CH.Dm, CH.Am],
+    ],
+    melodyScale: [N.E3, N.G3, N.A3, N.C4, N.D4],
+    accentScale: [N.E4, N.G4, N.A4],
+    phraseLength: [1, 3],
+    noteSpacing: [500, 800],
+    phrasePause: [8000, 14000],
+    directionBias: -0.4,
+    accentChance: 0.1,
+    restChance: 0.3,           // lots of silence
+  },
 };
 
-// Per-biome timbre and tempo settings
+// ─── texture types ──────────────────────────────────────────────────
+// these define the procedural environmental sound layer
+// each texture type configures how filtered noise bursts are generated
+const TEXTURES = {
+  // water drips: short, bright, resonant pings at random intervals
+  drips: {
+    burstDuration: [0.02, 0.08],   // seconds
+    burstInterval: [800, 3000],     // ms between bursts
+    filterType: 'bandpass',
+    filterFreq: [1200, 3500],       // randomized per burst
+    filterQ: [8, 20],
+    volume: [0.01, 0.03],
+    toneChance: 0.6,                // chance to add a tonal ping alongside noise
+    toneFreqs: [2000, 2800, 3500],
+    toneDuration: [0.05, 0.15],
+    toneVolume: 0.015,
+  },
+  // rumble: low, rolling, distant thuds and creaks
+  rumble: {
+    burstDuration: [0.1, 0.4],
+    burstInterval: [3000, 8000],
+    filterType: 'lowpass',
+    filterFreq: [60, 150],
+    filterQ: [1, 3],
+    volume: [0.02, 0.05],
+    toneChance: 0.3,
+    toneFreqs: [40, 55, 70],
+    toneDuration: [0.3, 0.8],
+    toneVolume: 0.02,
+  },
+  // rustle: mid-frequency swishing, organic movement
+  rustle: {
+    burstDuration: [0.05, 0.2],
+    burstInterval: [600, 2500],
+    filterType: 'bandpass',
+    filterFreq: [400, 2000],
+    filterQ: [1, 4],
+    volume: [0.008, 0.02],
+    toneChance: 0.2,
+    toneFreqs: [800, 1200, 1600],
+    toneDuration: [0.03, 0.08],
+    toneVolume: 0.008,
+  },
+  // wind: long, filtered noise sweeps
+  wind: {
+    burstDuration: [0.3, 1.0],
+    burstInterval: [2000, 5000],
+    filterType: 'bandpass',
+    filterFreq: [200, 800],
+    filterQ: [0.5, 2],
+    volume: [0.005, 0.015],
+    toneChance: 0,
+    toneFreqs: [],
+    toneDuration: [0, 0],
+    toneVolume: 0,
+  },
+};
+
+// ─── biome profiles ─────────────────────────────────────────────────
+// each biome combines a mood, texture, timbre settings, and reverb character
 const BIOME_PROFILES = {
-  jungle:     { mood: 'mysterious',  padWave: 'triangle', melodyWave: 'triangle', filterFreq: 200, chordDuration: 7000, padVolume: 0.02,  bassVolume: 0.012, melodyVolume: 0.015, accentVolume: 0.01  },
-  dirt_cave:  { mood: 'mysterious',  padWave: 'sine',     melodyWave: 'sine',     filterFreq: 150, chordDuration: 7000, padVolume: 0.018, bassVolume: 0.01,  melodyVolume: 0.012, accentVolume: 0.008 },
-  stone_cave: { mood: 'oppressive',  padWave: 'square',   melodyWave: 'square',   filterFreq: 120, chordDuration: 8000, padVolume: 0.015, bassVolume: 0.01,  melodyVolume: 0.01,  accentVolume: 0.007 },
-  dungeon:    { mood: 'oppressive',  padWave: 'sawtooth', melodyWave: 'sawtooth', filterFreq: 80,  chordDuration: 8000, padVolume: 0.018, bassVolume: 0.012, melodyVolume: 0.012, accentVolume: 0.008 },
-  town:       { mood: 'peaceful',    padWave: 'sine',     melodyWave: 'sine',     filterFreq: 400, chordDuration: 6000, padVolume: 0.015, bassVolume: 0.008, melodyVolume: 0.012, accentVolume: 0.006 },
+  cave: {
+    mood: 'mysterious',
+    texture: 'drips',
+    // pad: detuned oscillator pairs, wave type, filter settings
+    padWave: 'triangle',
+    padDetune: 6,              // cents of detuning between paired oscs
+    padFilterBase: 250,        // base lowpass cutoff for pad
+    padFilterLFODepth: 120,    // how much the lfo sweeps the filter (hz)
+    padFilterLFORate: 0.07,    // lfo speed in hz (slow = organic)
+    padVolume: 0.018,
+    // bass
+    bassVolume: 0.012,
+    bassFilterFreq: 120,
+    // melody: wave type, vibrato, note shape
+    melodyWave: 'triangle',
+    melodyVolume: 0.014,
+    melodyVibRate: 4,          // vibrato speed hz
+    melodyVibDepth: 3,         // vibrato depth cents
+    melodyAttack: 0.12,        // note fade-in seconds
+    // accent
+    accentVolume: 0.009,
+    accentWave: 'sine',
+    // reverb
+    reverbDuration: 3.0,       // impulse response length in seconds
+    reverbDecay: 1.8,          // exponential decay rate
+    reverbWet: 0.35,           // wet/dry mix (0 = dry, 1 = fully wet)
+    // chord timing
+    chordDuration: 7000,       // ms per chord
+    chordGlide: 2.5,           // seconds to glide between chords
+    // stereo spread for melody notes
+    stereoPanRange: 0.6,       // -0.6 to +0.6
+  },
+  dungeon: {
+    mood: 'oppressive',
+    texture: 'rumble',
+    padWave: 'sawtooth',
+    padDetune: 4,
+    padFilterBase: 100,
+    padFilterLFODepth: 40,
+    padFilterLFORate: 0.04,
+    padVolume: 0.015,
+    bassVolume: 0.014,
+    bassFilterFreq: 80,
+    melodyWave: 'square',
+    melodyVolume: 0.01,
+    melodyVibRate: 0,
+    melodyVibDepth: 0,
+    melodyAttack: 0.2,
+    accentVolume: 0.007,
+    accentWave: 'sawtooth',
+    reverbDuration: 2.0,
+    reverbDecay: 2.5,
+    reverbWet: 0.25,
+    chordDuration: 8000,
+    chordGlide: 3.0,
+    stereoPanRange: 0.4,
+  },
+  wilds: {
+    mood: 'mysterious',
+    texture: 'rustle',
+    padWave: 'triangle',
+    padDetune: 8,
+    padFilterBase: 350,
+    padFilterLFODepth: 200,
+    padFilterLFORate: 0.1,
+    padVolume: 0.016,
+    bassVolume: 0.008,
+    bassFilterFreq: 140,
+    melodyWave: 'triangle',
+    melodyVolume: 0.015,
+    melodyVibRate: 5,
+    melodyVibDepth: 6,
+    melodyAttack: 0.08,
+    accentVolume: 0.01,
+    accentWave: 'sine',
+    reverbDuration: 1.5,
+    reverbDecay: 1.2,
+    reverbWet: 0.2,
+    chordDuration: 6500,
+    chordGlide: 2.0,
+    stereoPanRange: 0.8,
+  },
+  town: {
+    mood: 'peaceful',
+    texture: 'wind',
+    padWave: 'sine',
+    padDetune: 3,
+    padFilterBase: 500,
+    padFilterLFODepth: 150,
+    padFilterLFORate: 0.06,
+    padVolume: 0.014,
+    bassVolume: 0.006,
+    bassFilterFreq: 160,
+    melodyWave: 'sine',
+    melodyVolume: 0.013,
+    melodyVibRate: 5,
+    melodyVibDepth: 4,
+    melodyAttack: 0.06,
+    accentVolume: 0.008,
+    accentWave: 'sine',
+    reverbDuration: 1.8,
+    reverbDecay: 1.5,
+    reverbWet: 0.3,
+    chordDuration: 6000,
+    chordGlide: 1.8,
+    stereoPanRange: 0.7,
+  },
+  eldritch: {
+    mood: 'eldritch',
+    texture: 'rumble',
+    padWave: 'sawtooth',
+    padDetune: 10,
+    padFilterBase: 80,
+    padFilterLFODepth: 30,
+    padFilterLFORate: 0.03,
+    padVolume: 0.012,
+    bassVolume: 0.016,
+    bassFilterFreq: 60,
+    melodyWave: 'square',
+    melodyVolume: 0.008,
+    melodyVibRate: 2,
+    melodyVibDepth: 8,
+    melodyAttack: 0.3,
+    accentVolume: 0.006,
+    accentWave: 'sawtooth',
+    reverbDuration: 4.0,
+    reverbDecay: 1.5,
+    reverbWet: 0.45,
+    chordDuration: 10000,
+    chordGlide: 4.0,
+    stereoPanRange: 0.3,
+  },
 };
 
 export const BIOME_KEYS = Object.keys(BIOME_PROFILES);
 
+
+// ─── utility ────────────────────────────────────────────────────────
+// random float in [min, max]
+function rand(min, max) { return min + Math.random() * (max - min); }
+// random element from array
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+
+// ═══════════════════════════════════════════════════════════════════
+// audio manager
+// ═══════════════════════════════════════════════════════════════════
 export class AudioManager {
   constructor() {
     this.ctx = null;
@@ -92,7 +310,7 @@ export class AudioManager {
     try {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     } catch (e) {
-      console.warn('Web Audio API not available');
+      console.warn('web audio api not available');
     }
   }
 
@@ -108,8 +326,16 @@ export class AudioManager {
 
   setAmbientVolume(v) {
     this.ambientVolume = Math.max(0, Math.min(1, v));
+    // live-update ambient gain if playing
+    if (this.ambientNode) {
+      const p = this.ambientNode.profile;
+      if (this.ambientNode.padGain)  this.ambientNode.padGain.gain.value  = p.padVolume  * v;
+      if (this.ambientNode.bassGain) this.ambientNode.bassGain.gain.value = p.bassVolume * v;
+    }
   }
 
+
+  // ─── sfx utilities ──────────────────────────────────────────────
   _createGain(volume) {
     if (!this.ctx) return null;
     const gain = this.ctx.createGain();
@@ -150,10 +376,9 @@ export class AudioManager {
     osc.stop(this.ctx.currentTime + duration);
   }
 
-  // Sound effects
-  footstep() {
-    this._noise(0.05, 0.1);
-  }
+
+  // ─── sound effects ──────────────────────────────────────────────
+  footstep()     { this._noise(0.05, 0.1); }
 
   meleeHit() {
     if (!this.ctx) return;
@@ -162,9 +387,7 @@ export class AudioManager {
     this._tone(200, 0.1, 'sine', 0.2);
   }
 
-  rangedShot() {
-    this._tone(800, 0.1, 'sine', 0.2);
-  }
+  rangedShot()   { this._tone(800, 0.1, 'sine', 0.2); }
 
   magicCast() {
     if (!this.ctx) return;
@@ -183,9 +406,7 @@ export class AudioManager {
     osc.stop(now + 0.3);
   }
 
-  enemyHit() {
-    this._noise(0.06, 0.2);
-  }
+  enemyHit()     { this._noise(0.06, 0.2); }
 
   enemyDeath() {
     if (!this.ctx) return;
@@ -247,9 +468,7 @@ export class AudioManager {
     });
   }
 
-  doorOpen() {
-    this._tone(300, 0.08, 'square', 0.15);
-  }
+  doorOpen()     { this._tone(300, 0.08, 'square', 0.15); }
 
   stairsDescend() {
     if (!this.ctx) return;
@@ -272,7 +491,6 @@ export class AudioManager {
     if (!this.ctx) return;
     this.ensureContext();
     const now = this.ctx.currentTime;
-    // Low drone
     const drone = this.ctx.createOscillator();
     drone.type = 'sawtooth';
     drone.frequency.value = 55;
@@ -283,50 +501,177 @@ export class AudioManager {
     drone.connect(droneGain);
     drone.start();
     drone.stop(now + 1.0);
-    // Impact
     this._noise(0.15, 0.3);
   }
 
-  uiClick() {
-    this._tone(1200, 0.04, 'sine', 0.1);
+  uiClick()      { this._tone(1200, 0.04, 'sine', 0.1); }
+
+
+  // ═══════════════════════════════════════════════════════════════
+  // ambient system
+  // ═══════════════════════════════════════════════════════════════
+
+  // ─── reverb: generate a stereo impulse response procedurally ──
+  _createReverb(duration, decay) {
+    const length = Math.floor(this.ctx.sampleRate * duration);
+    const impulse = this.ctx.createBuffer(2, length, this.ctx.sampleRate);
+
+    for (let ch = 0; ch < 2; ch++) {
+      const data = impulse.getChannelData(ch);
+      for (let i = 0; i < length; i++) {
+        // exponential decay envelope with random noise
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+      }
+    }
+
+    const convolver = this.ctx.createConvolver();
+    convolver.buffer = impulse;
+    return convolver;
   }
 
+  // ─── phrase generation ────────────────────────────────────────
+  // builds a short melodic phrase that relates to the current chord
   _generatePhrase(mood, currentChord) {
     const [minLen, maxLen] = mood.phraseLength;
     const length = minLen + Math.floor(Math.random() * (maxLen - minLen + 1));
     const scale = mood.melodyScale;
 
-    // Start on a chord tone that exists in the melody scale
+    // find chord tones that exist in the melody scale (or octave equivalents)
     const chordTonesInScale = currentChord
-      .flatMap(f => scale.filter(s => Math.abs(s - f) < 1 || Math.abs(s - f * 2) < 1))
-      .filter(f => f >= scale[0] && f <= scale[scale.length - 1]);
+      .flatMap(f => scale.filter(s => {
+        const ratio = s / f;
+        return Math.abs(ratio - 1) < 0.01 || Math.abs(ratio - 2) < 0.01 || Math.abs(ratio - 0.5) < 0.01;
+      }))
+      .filter((v, i, a) => a.indexOf(v) === i); // deduplicate
+
     const startPool = chordTonesInScale.length > 0 ? chordTonesInScale : scale;
-    const startNote = startPool[Math.floor(Math.random() * startPool.length)];
+    const startNote = pick(startPool);
 
     const phrase = [startNote];
-    let currentIdx = scale.indexOf(startNote);
-    if (currentIdx === -1) currentIdx = Math.floor(scale.length / 2);
+    let idx = scale.indexOf(startNote);
+    if (idx === -1) idx = Math.floor(scale.length / 2);
 
     for (let i = 1; i < length; i++) {
-      if (Math.random() < 0.3) {
-        // Leap to a chord tone in scale
-        const leapPool = chordTonesInScale.length > 0 ? chordTonesInScale : scale;
-        const target = leapPool[Math.floor(Math.random() * leapPool.length)];
-        currentIdx = scale.indexOf(target);
-        if (currentIdx === -1) currentIdx = Math.floor(scale.length / 2);
+      // rest: insert null to create rhythmic gaps
+      if (Math.random() < (mood.restChance || 0)) {
+        phrase.push(null);
+        continue;
+      }
+
+      if (Math.random() < 0.25) {
+        // leap to a chord tone
+        const target = pick(chordTonesInScale.length > 0 ? chordTonesInScale : scale);
+        idx = scale.indexOf(target);
+        if (idx === -1) idx = Math.floor(scale.length / 2);
         phrase.push(target);
       } else {
-        // Stepwise motion with direction bias
-        const bias = mood.directionBias;
-        const direction = (Math.random() + bias > 0.5) ? 1 : -1;
-        currentIdx = Math.max(0, Math.min(scale.length - 1, currentIdx + direction));
-        phrase.push(scale[currentIdx]);
+        // stepwise motion with direction bias
+        const direction = (Math.random() + mood.directionBias > 0.5) ? 1 : -1;
+        idx = Math.max(0, Math.min(scale.length - 1, idx + direction));
+        phrase.push(scale[idx]);
       }
     }
 
     return phrase;
   }
 
+  // ─── texture layer: procedural environmental sounds ───────────
+  // schedules recurring filtered noise bursts + optional tonal pings
+  _startTexture(profile, reverbSend) {
+    const texDef = TEXTURES[profile.texture];
+    if (!texDef) return null;
+
+    let running = true;
+    let timeout = null;
+
+    const playBurst = () => {
+      if (!running || !this.ctx) return;
+
+      const now = this.ctx.currentTime;
+      const duration = rand(...texDef.burstDuration);
+      const vol = rand(...texDef.volume) * this.ambientVolume;
+
+      // noise burst
+      const bufLen = Math.floor(this.ctx.sampleRate * duration);
+      const buf = this.ctx.createBuffer(1, bufLen, this.ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufLen; i++) {
+        // apply a fade-in/fade-out envelope to avoid clicks
+        const env = Math.sin(Math.PI * i / bufLen);
+        data[i] = (Math.random() * 2 - 1) * env;
+      }
+
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+
+      // filter
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = texDef.filterType;
+      filter.frequency.value = rand(...texDef.filterFreq);
+      filter.Q.value = rand(...texDef.filterQ);
+
+      // gain
+      const gain = this.ctx.createGain();
+      gain.gain.value = vol;
+
+      // stereo placement
+      const pan = this.ctx.createStereoPanner();
+      pan.pan.value = rand(-0.8, 0.8);
+
+      // connect: src → filter → gain → pan → [destination + reverb send]
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(pan);
+      pan.connect(this.ctx.destination);
+      if (reverbSend) {
+        pan.connect(reverbSend);
+      }
+
+      src.start(now);
+
+      // optional tonal ping (e.g. drip resonance)
+      if (texDef.toneChance > 0 && Math.random() < texDef.toneChance && texDef.toneFreqs.length > 0) {
+        const tFreq = pick(texDef.toneFreqs);
+        const tDur = rand(...texDef.toneDuration);
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = tFreq;
+
+        const tGain = this.ctx.createGain();
+        tGain.gain.setValueAtTime(0.001, now);
+        tGain.gain.linearRampToValueAtTime(texDef.toneVolume * this.ambientVolume, now + 0.005);
+        tGain.gain.exponentialRampToValueAtTime(0.001, now + tDur);
+
+        const tPan = this.ctx.createStereoPanner();
+        tPan.pan.value = pan.pan.value + rand(-0.1, 0.1); // slightly offset from noise
+
+        osc.connect(tGain);
+        tGain.connect(tPan);
+        tPan.connect(this.ctx.destination);
+        if (reverbSend) tPan.connect(reverbSend);
+
+        osc.start(now);
+        osc.stop(now + tDur);
+      }
+
+      // schedule next burst
+      const nextDelay = rand(...texDef.burstInterval);
+      timeout = setTimeout(playBurst, nextDelay);
+    };
+
+    // start after a short random delay
+    timeout = setTimeout(playBurst, rand(500, 2000));
+
+    return {
+      stop() {
+        running = false;
+        if (timeout) clearTimeout(timeout);
+      }
+    };
+  }
+
+
+  // ─── start ambient ────────────────────────────────────────────
   startAmbient(floorNumber) {
     const biome = getBiome(floorNumber);
     this.startAmbientBiome(biome);
@@ -338,43 +683,76 @@ export class AudioManager {
     this.stopAmbient();
 
     const profile = BIOME_PROFILES[biomeKey] || BIOME_PROFILES.dungeon;
-    const mood = MOOD_GROUPS[profile.mood];
+    const mood = MOODS[profile.mood];
 
-    // Pick a random progression from this mood
-    const progression = mood.progressions[Math.floor(Math.random() * mood.progressions.length)];
+    // pick a random chord progression
+    const progression = pick(mood.progressions);
     let chordIndex = 0;
     let currentChord = progression[0];
 
-    // --- Pad layer: 3 oscillators playing chord tones ---
-    const padOscs = currentChord.map(freq => {
-      const osc = this.ctx.createOscillator();
-      osc.type = profile.padWave;
-      osc.frequency.value = freq;
-      return osc;
+    // ── reverb bus ──
+    const reverb = this._createReverb(profile.reverbDuration, profile.reverbDecay);
+    const reverbGain = this.ctx.createGain();
+    reverbGain.gain.value = profile.reverbWet * this.ambientVolume;
+    reverb.connect(reverbGain);
+    reverbGain.connect(this.ctx.destination);
+
+    // ── pad layer: detuned oscillator pairs through lfo-modulated filter ──
+    const padOscs = [];
+    currentChord.forEach(freq => {
+      // two oscillators per chord tone, slightly detuned for chorus
+      const oscA = this.ctx.createOscillator();
+      oscA.type = profile.padWave;
+      oscA.frequency.value = freq;
+      oscA.detune.value = -profile.padDetune;
+
+      const oscB = this.ctx.createOscillator();
+      oscB.type = profile.padWave;
+      oscB.frequency.value = freq;
+      oscB.detune.value = profile.padDetune;
+
+      padOscs.push({ a: oscA, b: oscB, baseFreq: freq });
     });
 
+    // pad filter with lfo modulation
     const padFilter = this.ctx.createBiquadFilter();
     padFilter.type = 'lowpass';
-    padFilter.frequency.value = profile.filterFreq;
+    padFilter.frequency.value = profile.padFilterBase;
+    padFilter.Q.value = 1.5;
 
+    // lfo → pad filter cutoff for organic movement
+    const padLFO = this.ctx.createOscillator();
+    padLFO.type = 'sine';
+    padLFO.frequency.value = profile.padFilterLFORate;
+    const padLFOGain = this.ctx.createGain();
+    padLFOGain.gain.value = profile.padFilterLFODepth;
+    padLFO.connect(padLFOGain);
+    padLFOGain.connect(padFilter.frequency);
+    padLFO.start();
+
+    // pad gain
     const padGain = this.ctx.createGain();
     padGain.gain.value = profile.padVolume * this.ambientVolume;
 
-    padOscs.forEach(osc => {
-      osc.connect(padFilter);
-      osc.start();
+    // connect pad: oscs → filter → gain → [destination + reverb]
+    padOscs.forEach(({ a, b }) => {
+      a.connect(padFilter);
+      b.connect(padFilter);
+      a.start();
+      b.start();
     });
     padFilter.connect(padGain);
     padGain.connect(this.ctx.destination);
+    padGain.connect(reverb);
 
-    // --- Bass layer: single osc one octave below chord root ---
+    // ── bass layer ──
     const bassOsc = this.ctx.createOscillator();
     bassOsc.type = 'sine';
     bassOsc.frequency.value = currentChord[0] / 2;
 
     const bassFilter = this.ctx.createBiquadFilter();
     bassFilter.type = 'lowpass';
-    bassFilter.frequency.value = 100;
+    bassFilter.frequency.value = profile.bassFilterFreq;
 
     const bassGain = this.ctx.createGain();
     bassGain.gain.value = profile.bassVolume * this.ambientVolume;
@@ -384,26 +762,32 @@ export class AudioManager {
     bassGain.connect(this.ctx.destination);
     bassOsc.start();
 
-    // --- Chord progression timer ---
+    // ── chord progression timer ──
     const advanceChord = () => {
       chordIndex = (chordIndex + 1) % progression.length;
       currentChord = progression[chordIndex];
       const now = this.ctx.currentTime;
-      const glide = 2.0;
+      const glide = profile.chordGlide;
 
-      // Glide pad oscillators to new chord tones
-      padOscs.forEach((osc, i) => {
+      // glide pad oscillators to new chord tones
+      padOscs.forEach((pair, i) => {
         const target = currentChord[i % currentChord.length];
-        osc.frequency.linearRampToValueAtTime(target, now + glide);
+        pair.a.frequency.linearRampToValueAtTime(target, now + glide);
+        pair.b.frequency.linearRampToValueAtTime(target, now + glide);
+        pair.baseFreq = target;
       });
 
-      // Glide bass to new root
+      // glide bass
       bassOsc.frequency.linearRampToValueAtTime(currentChord[0] / 2, now + glide);
     };
-
     const chordInterval = setInterval(advanceChord, profile.chordDuration);
 
-    // --- Melody phrase layer ---
+    // ── texture layer ──
+    const textureHandle = this._startTexture(profile, reverb);
+
+    // ── melody layer ──
+    let melodyTimeout = null;
+
     const playPhrase = () => {
       if (!this.ctx || !this.ambientNode) return;
 
@@ -413,94 +797,149 @@ export class AudioManager {
       const now = this.ctx.currentTime;
 
       phrase.forEach((freq, i) => {
-        const noteTime = now + i * (minSpacing + Math.random() * (maxSpacing - minSpacing)) / 1000;
-        const duration = 0.6 + Math.random() * 0.8;
+        if (freq === null) return; // rest
 
+        const noteTime = now + i * rand(minSpacing, maxSpacing) / 1000;
+        const duration = rand(0.5, 1.2);
+        const attack = profile.melodyAttack;
+
+        // oscillator
         const osc = this.ctx.createOscillator();
         osc.type = profile.melodyWave;
         osc.frequency.value = freq;
 
+        // optional vibrato
+        if (profile.melodyVibRate > 0 && profile.melodyVibDepth > 0) {
+          const vibLFO = this.ctx.createOscillator();
+          vibLFO.type = 'sine';
+          vibLFO.frequency.value = profile.melodyVibRate;
+          const vibGain = this.ctx.createGain();
+          vibGain.gain.value = profile.melodyVibDepth;
+          vibLFO.connect(vibGain);
+          vibGain.connect(osc.detune);
+          vibLFO.start(noteTime);
+          vibLFO.stop(noteTime + duration);
+        }
+
+        // gain envelope: soft attack → sustain → decay
         const gain = this.ctx.createGain();
         gain.gain.setValueAtTime(0.001, noteTime);
-        gain.gain.linearRampToValueAtTime(profile.melodyVolume * this.ambientVolume, noteTime + 0.1);
+        gain.gain.linearRampToValueAtTime(
+          profile.melodyVolume * this.ambientVolume,
+          noteTime + attack
+        );
+        gain.gain.setValueAtTime(
+          profile.melodyVolume * this.ambientVolume,
+          noteTime + attack + 0.05
+        );
         gain.gain.exponentialRampToValueAtTime(0.001, noteTime + duration);
 
+        // stereo pan: random position within the biome's spread
+        const pan = this.ctx.createStereoPanner();
+        pan.pan.value = rand(-profile.stereoPanRange, profile.stereoPanRange);
+
+        // connect: osc → gain → pan → [destination + reverb]
         osc.connect(gain);
-        gain.connect(this.ctx.destination);
+        gain.connect(pan);
+        pan.connect(this.ctx.destination);
+        pan.connect(reverb);
+
         osc.start(noteTime);
         osc.stop(noteTime + duration);
       });
 
-      // Accent: chance to play a high chord-tone ping after the phrase
+      // accent: high-register chord-tone ping after the phrase
       if (Math.random() < mood.accentChance) {
-        const accentDelay = phrase.length * maxSpacing / 1000 + 0.2;
+        const accentDelay = phrase.length * maxSpacing / 1000 + rand(0.1, 0.4);
         const accentTime = now + accentDelay;
-        const accentPool = mood.accentScale;
-        const accentFreq = accentPool[Math.floor(Math.random() * accentPool.length)];
-        const accentDur = 0.3 + Math.random() * 0.4;
+        const accentFreq = pick(mood.accentScale);
+        const accentDur = rand(0.4, 0.8);
 
-        const accentOsc = this.ctx.createOscillator();
-        accentOsc.type = profile.melodyWave;
-        accentOsc.frequency.value = accentFreq;
+        const osc = this.ctx.createOscillator();
+        osc.type = profile.accentWave;
+        osc.frequency.value = accentFreq;
 
-        const accentGain = this.ctx.createGain();
-        accentGain.gain.setValueAtTime(0.001, accentTime);
-        accentGain.gain.linearRampToValueAtTime(profile.accentVolume * this.ambientVolume, accentTime + 0.08);
-        accentGain.gain.exponentialRampToValueAtTime(0.001, accentTime + accentDur);
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.001, accentTime);
+        gain.gain.linearRampToValueAtTime(
+          profile.accentVolume * this.ambientVolume,
+          accentTime + 0.06
+        );
+        gain.gain.exponentialRampToValueAtTime(0.001, accentTime + accentDur);
 
-        accentOsc.connect(accentGain);
-        accentGain.connect(this.ctx.destination);
-        accentOsc.start(accentTime);
-        accentOsc.stop(accentTime + accentDur);
+        const pan = this.ctx.createStereoPanner();
+        pan.pan.value = rand(-profile.stereoPanRange, profile.stereoPanRange);
+
+        osc.connect(gain);
+        gain.connect(pan);
+        pan.connect(this.ctx.destination);
+        pan.connect(reverb); // accents go heavy through reverb
+
+        osc.start(accentTime);
+        osc.stop(accentTime + accentDur);
       }
 
-      // Schedule next phrase
+      // schedule next phrase
       const [minPause, maxPause] = mood.phrasePause;
-      const nextDelay = minPause + Math.random() * (maxPause - minPause);
-      const timeout = setTimeout(playPhrase, nextDelay);
-      if (this.ambientNode) {
-        this.ambientNode.melodyTimeout = timeout;
-      }
+      melodyTimeout = setTimeout(playPhrase, rand(minPause, maxPause));
     };
 
-    // Start first phrase after a short delay
-    const initialDelay = 2000 + Math.random() * 3000;
-    const initialTimeout = setTimeout(playPhrase, initialDelay);
+    // start first phrase after a delay
+    melodyTimeout = setTimeout(playPhrase, rand(2000, 4000));
 
-    // --- Store references for cleanup ---
+    // ── store references for cleanup and live access ──
     this.ambientNode = {
       padOscs,
-      bassOsc,
+      padFilter,
+      padLFO,
+      padLFOGain,
       padGain,
+      bassOsc,
       bassGain,
+      reverb,
+      reverbGain,
       chordInterval,
-      melodyTimeout: initialTimeout,
+      melodyTimeout,
+      textureHandle,
       getCurrentChord: () => currentChord,
       profile,
       mood,
     };
   }
 
+
+  // ─── stop ambient ─────────────────────────────────────────────
   stopAmbient() {
-    if (this.ambientNode) {
-      // Stop pad oscillators
-      if (this.ambientNode.padOscs) {
-        this.ambientNode.padOscs.forEach(osc => {
-          try { osc.stop(); } catch (e) {}
-        });
-      }
-      // Stop bass
-      if (this.ambientNode.bassOsc) {
-        try { this.ambientNode.bassOsc.stop(); } catch (e) {}
-      }
-      // Clear timers
-      if (this.ambientNode.chordInterval) {
-        clearInterval(this.ambientNode.chordInterval);
-      }
-      if (this.ambientNode.melodyTimeout) {
-        clearTimeout(this.ambientNode.melodyTimeout);
-      }
-      this.ambientNode = null;
+    if (!this.ambientNode) return;
+    const a = this.ambientNode;
+
+    // stop pad oscillators (detuned pairs)
+    if (a.padOscs) {
+      a.padOscs.forEach(({ a: oscA, b: oscB }) => {
+        try { oscA.stop(); } catch (e) {}
+        try { oscB.stop(); } catch (e) {}
+      });
     }
+
+    // stop pad lfo
+    if (a.padLFO) {
+      try { a.padLFO.stop(); } catch (e) {}
+    }
+
+    // stop bass
+    if (a.bassOsc) {
+      try { a.bassOsc.stop(); } catch (e) {}
+    }
+
+    // clear chord timer
+    if (a.chordInterval) clearInterval(a.chordInterval);
+
+    // clear melody timer
+    if (a.melodyTimeout) clearTimeout(a.melodyTimeout);
+
+    // stop texture layer
+    if (a.textureHandle) a.textureHandle.stop();
+
+    this.ambientNode = null;
   }
 }
