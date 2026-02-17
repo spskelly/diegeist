@@ -1289,7 +1289,7 @@ export function drawPauseMenu(game) {
   ctx.fillRect(0, 0, w, h);
 
   const panelW = Math.round(300 * uiScale);
-  const panelH = Math.round(210 * uiScale);
+  const panelH = Math.round(240 * uiScale);
   const px = Math.floor((w - panelW) / 2);
   const py = Math.floor((h - panelH) / 2);
 
@@ -1302,7 +1302,7 @@ export function drawPauseMenu(game) {
   ctx.font = `${Math.round(22 * uiScale)}px monospace`;
   ctx.fillText('Paused', px + Math.round(20 * uiScale), py + Math.round(36 * uiScale));
 
-  const options = ['Resume', 'Skill Tree', 'Save & Quit', 'Abandon Run'];
+  const options = ['Resume', 'Skill Tree', 'Settings', 'Save & Quit', 'Abandon Run'];
   const lineH = Math.round(28 * uiScale);
   const startY = py + Math.round(70 * uiScale);
   ctx.font = `${Math.round(14 * uiScale)}px monospace`;
