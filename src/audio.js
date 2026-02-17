@@ -1,101 +1,73 @@
 // src/audio.js
 import { getBiome } from './constants.js';
 
-// Note frequency constants (A minor pentatonic)
-const NOTES = {
-  A2: 110,
-  C3: 130.81,
-  D3: 146.83,
-  E3: 164.81,
-  G3: 196,
-  A3: 220,
-  C4: 261.63,
-  D4: 293.66,
-  E4: 329.63,
-  G4: 392,
-  A4: 440,
-  C5: 523.25,
-  E5: 659.25,
-  G5: 784
+// Note frequencies
+const N = {
+  A2: 110.00, C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.00,
+  A3: 220.00, C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.00,
+  A4: 440.00, C5: 523.25, D5: 587.33, E5: 659.25, G5: 784.00
 };
 
-// Biome audio profiles
-const BIOME_AUDIO = {
-  jungle: {
-    padScale: [NOTES.A2, NOTES.C3, NOTES.E3, NOTES.G3],
-    melodyScale: [NOTES.A3, NOTES.C4, NOTES.D4, NOTES.E4, NOTES.G4],
-    accentScale: [NOTES.A4, NOTES.C5, NOTES.E5, NOTES.G5],
-    padWave: 'triangle',
-    melodyWave: 'triangle',
-    accentWave: 'triangle',
-    padFilterFreq: 200,
-    tempoBase: 3000,
-    tempoVariance: 2000,
-    padVolume: 0.02,
-    melodyVolume: 0.015,
-    accentVolume: 0.01,
-    accentChance: 0.3
+// Chord definitions: arrays of 3 frequencies (root, third, fifth)
+const CHORDS = {
+  Am:  [N.A2, N.C3, N.E3],
+  C:   [N.C3, N.E3, N.G3],
+  Dm:  [N.D3, N.F3, N.A3],
+  Em:  [N.E3, N.G3, N.A3], // using A3 instead of B for pentatonic compatibility
+  F:   [N.F3, N.A3, N.C4],
+  G:   [N.G3, N.C4, N.D4], // Gsus4-ish voicing, avoids B
+};
+
+// Scale notes available for stepwise melody motion, per mood
+const MOOD_GROUPS = {
+  oppressive: {
+    progressions: [
+      [CHORDS.Am, CHORDS.Dm, CHORDS.Em, CHORDS.Am],
+      [CHORDS.Am, CHORDS.F,  CHORDS.Dm, CHORDS.Am],
+    ],
+    melodyScale: [N.A3, N.C4, N.D4, N.E4, N.G4],
+    accentScale: [N.A4, N.C5, N.E5],
+    phraseLength: [2, 3],       // min, max notes per phrase
+    noteSpacing: [350, 500],    // ms between notes in a phrase
+    phrasePause: [6000, 10000], // ms between phrases
+    directionBias: -0.3,        // negative = descending tendency
+    accentChance: 0.2,
   },
-  dirt_cave: {
-    padScale: [NOTES.A2, NOTES.C3, NOTES.D3, NOTES.E3],
-    melodyScale: [NOTES.A3, NOTES.C4, NOTES.D4, NOTES.E4],
-    accentScale: [NOTES.A4, NOTES.C5, NOTES.E5],
-    padWave: 'sine',
-    melodyWave: 'sine',
-    accentWave: 'sine',
-    padFilterFreq: 150,
-    tempoBase: 4000,
-    tempoVariance: 3000,
-    padVolume: 0.018,
-    melodyVolume: 0.012,
-    accentVolume: 0.008,
-    accentChance: 0.15
+  mysterious: {
+    progressions: [
+      [CHORDS.Am, CHORDS.C,  CHORDS.G,  CHORDS.Em],
+      [CHORDS.C,  CHORDS.Am, CHORDS.F,  CHORDS.G],
+    ],
+    melodyScale: [N.A3, N.C4, N.D4, N.E4, N.G4, N.A4],
+    accentScale: [N.A4, N.C5, N.E5, N.G5],
+    phraseLength: [2, 4],
+    noteSpacing: [250, 400],
+    phrasePause: [4000, 8000],
+    directionBias: 0,
+    accentChance: 0.25,
   },
-  stone_cave: {
-    padScale: [NOTES.A2, NOTES.C3, NOTES.E3],
-    melodyScale: [NOTES.A3, NOTES.C4, NOTES.E4, NOTES.G4],
-    accentScale: [NOTES.A4, NOTES.E5, NOTES.G5],
-    padWave: 'square',
-    melodyWave: 'square',
-    accentWave: 'square',
-    padFilterFreq: 120,
-    tempoBase: 5000,
-    tempoVariance: 3000,
-    padVolume: 0.015,
-    melodyVolume: 0.01,
-    accentVolume: 0.007,
-    accentChance: 0.2
-  },
-  dungeon: {
-    padScale: [NOTES.A2, NOTES.C3, NOTES.D3],
-    melodyScale: [NOTES.A3, NOTES.C4, NOTES.D4, NOTES.E4],
-    accentScale: [NOTES.A4, NOTES.C5, NOTES.E5],
-    padWave: 'sawtooth',
-    melodyWave: 'sawtooth',
-    accentWave: 'sawtooth',
-    padFilterFreq: 80,
-    tempoBase: 6000,
-    tempoVariance: 4000,
-    padVolume: 0.018,
-    melodyVolume: 0.012,
-    accentVolume: 0.008,
-    accentChance: 0.25
-  },
-  town: {
-    padScale: [NOTES.C3, NOTES.E3, NOTES.G3, NOTES.A3],
-    melodyScale: [NOTES.C4, NOTES.E4, NOTES.G4, NOTES.A4, NOTES.C5],
-    accentScale: [NOTES.E5, NOTES.G5],
-    padWave: 'sine',
-    melodyWave: 'sine',
-    accentWave: 'triangle',
-    padFilterFreq: 250,
-    tempoBase: 5000,
-    tempoVariance: 4000,
-    padVolume: 0.015,
-    melodyVolume: 0.012,
-    accentVolume: 0.006,
-    accentChance: 0.15
+  peaceful: {
+    progressions: [
+      [CHORDS.C,  CHORDS.G,  CHORDS.Am, CHORDS.F],
+      [CHORDS.F,  CHORDS.C,  CHORDS.G,  CHORDS.Am],
+    ],
+    melodyScale: [N.C4, N.D4, N.E4, N.G4, N.A4, N.C5],
+    accentScale: [N.E5, N.G5],
+    phraseLength: [3, 4],
+    noteSpacing: [200, 300],
+    phrasePause: [4000, 7000],
+    directionBias: 0.3,
+    accentChance: 0.15,
   }
+};
+
+// Per-biome timbre and tempo settings
+const BIOME_PROFILES = {
+  jungle:     { mood: 'mysterious',  padWave: 'triangle', melodyWave: 'triangle', filterFreq: 200, chordDuration: 7000, padVolume: 0.02,  bassVolume: 0.012, melodyVolume: 0.015, accentVolume: 0.01  },
+  dirt_cave:  { mood: 'mysterious',  padWave: 'sine',     melodyWave: 'sine',     filterFreq: 150, chordDuration: 7000, padVolume: 0.018, bassVolume: 0.01,  melodyVolume: 0.012, accentVolume: 0.008 },
+  stone_cave: { mood: 'oppressive',  padWave: 'square',   melodyWave: 'square',   filterFreq: 120, chordDuration: 8000, padVolume: 0.015, bassVolume: 0.01,  melodyVolume: 0.01,  accentVolume: 0.007 },
+  dungeon:    { mood: 'oppressive',  padWave: 'sawtooth', melodyWave: 'sawtooth', filterFreq: 80,  chordDuration: 8000, padVolume: 0.018, bassVolume: 0.012, melodyVolume: 0.012, accentVolume: 0.008 },
+  town:       { mood: 'peaceful',    padWave: 'sine',     melodyWave: 'sine',     filterFreq: 250, chordDuration: 6000, padVolume: 0.015, bassVolume: 0.008, melodyVolume: 0.012, accentVolume: 0.006 },
 };
 
 export class AudioManager {
