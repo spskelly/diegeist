@@ -81,6 +81,53 @@ describe('SaveData', () => {
     expect(save.permanentPerks).toContain('potion_boost');
   });
 
+  it('initializes with empty materials', () => {
+    expect(save.materials).toEqual({ timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 });
+  });
+
+  it('adds materials', () => {
+    save.addMaterials({ timber: 5, stone: 3 });
+    expect(save.materials.timber).toBe(5);
+    expect(save.materials.stone).toBe(3);
+    expect(save.materials.iron).toBe(0);
+  });
+
+  it('checks if materials are affordable', () => {
+    save.addMaterials({ timber: 10, stone: 5 });
+    expect(save.canAfford({ timber: 5, stone: 3 })).toBe(true);
+    expect(save.canAfford({ timber: 15 })).toBe(false);
+  });
+
+  it('spends materials when affordable', () => {
+    save.addMaterials({ timber: 10, stone: 5 });
+    const result = save.spendMaterials({ timber: 4, stone: 2 });
+    expect(result).toBe(true);
+    expect(save.materials.timber).toBe(6);
+    expect(save.materials.stone).toBe(3);
+  });
+
+  it('rejects spending materials when not affordable', () => {
+    save.addMaterials({ timber: 3 });
+    const result = save.spendMaterials({ timber: 5 });
+    expect(result).toBe(false);
+    expect(save.materials.timber).toBe(3); // unchanged
+  });
+
+  it('serializes and deserializes materials', () => {
+    save.addMaterials({ timber: 10, iron: 5 });
+    const json = save.serialize();
+    const loaded = SaveData.deserialize(json);
+    expect(loaded.materials.timber).toBe(10);
+    expect(loaded.materials.iron).toBe(5);
+    expect(loaded.materials.crystal).toBe(0);
+  });
+
+  it('deserializes old saves without materials to defaults', () => {
+    const oldJson = JSON.stringify({ currency: 50, stash: [] });
+    const loaded = SaveData.deserialize(oldJson);
+    expect(loaded.materials).toEqual({ timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 });
+  });
+
   it('serializes and deserializes correctly', () => {
     save.addCurrency(100);
     save.addPermanentStat('DEX', 3);
@@ -201,5 +248,61 @@ describe('Achievements', () => {
       save.achievements.rat_slayer.unlocked = true;
     }
     expect(save.achievements.rat_slayer.unlocked).toBe(true);
+  });
+});
+
+describe('SaveData skill tree fields', () => {
+  it('initializes with empty skill tree state', () => {
+    const save = new SaveData();
+    expect(save.classXP).toEqual({ fighter: 0, archer: 0, mage: 0 });
+    expect(save.classLevels).toEqual({ fighter: 1, archer: 1, mage: 1 });
+    expect(save.skillPoints).toEqual({ fighter: 0, archer: 0, mage: 0 });
+    expect(save.skillInvestments).toEqual({ fighter: {}, archer: {}, mage: {} });
+  });
+
+  it('serializes and deserializes skill tree state', () => {
+    const save = new SaveData();
+    save.classXP.fighter = 500;
+    save.classLevels.fighter = 5;
+    save.skillPoints.fighter = 2;
+    save.skillInvestments.fighter = { fighter_heavy_strike: 2 };
+
+    const json = save.serialize();
+    const restored = SaveData.deserialize(json);
+
+    expect(restored.classXP.fighter).toBe(500);
+    expect(restored.classLevels.fighter).toBe(5);
+    expect(restored.skillPoints.fighter).toBe(2);
+    expect(restored.skillInvestments.fighter.fighter_heavy_strike).toBe(2);
+  });
+
+  it('backward-compatible: old saves without skill fields get defaults', () => {
+    const oldJson = JSON.stringify({ currency: 100, stash: [] });
+    const save = SaveData.deserialize(oldJson);
+    expect(save.classXP).toEqual({ fighter: 0, archer: 0, mage: 0 });
+    expect(save.classLevels).toEqual({ fighter: 1, archer: 1, mage: 1 });
+    expect(save.skillPoints).toEqual({ fighter: 0, archer: 0, mage: 0 });
+    expect(save.skillInvestments).toEqual({ fighter: {}, archer: {}, mage: {} });
+  });
+});
+
+describe('SaveData townPlayerPos', () => {
+  it('initializes townPlayerPos as null', () => {
+    const save = new SaveData();
+    expect(save.townPlayerPos).toBe(null);
+  });
+
+  it('serializes and deserializes townPlayerPos', () => {
+    const save = new SaveData();
+    save.townPlayerPos = { x: 10, y: 14 };
+    const json = save.serialize();
+    const restored = SaveData.deserialize(json);
+    expect(restored.townPlayerPos).toEqual({ x: 10, y: 14 });
+  });
+
+  it('backward-compatible: old saves without townPlayerPos get null', () => {
+    const oldJson = JSON.stringify({ currency: 50, stash: [] });
+    const save = SaveData.deserialize(oldJson);
+    expect(save.townPlayerPos).toBe(null);
   });
 });

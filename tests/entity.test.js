@@ -88,3 +88,46 @@ describe('Entity', () => {
     expect(e.stats.CON).toBe(0);
   });
 });
+
+describe('Status Effects', () => {
+  it('adds and retrieves status effects', () => {
+    const e = new Entity({ id: 'e1', type: 'player', x: 0, y: 0, stats: {}, maxHp: 10, speed: 100 });
+    e.addStatusEffect({ type: 'fortify', duration: 3, value: 0.4 });
+    const effect = e.hasStatusEffect('fortify');
+    expect(effect).not.toBeNull();
+    expect(effect.turnsRemaining).toBe(3);
+    expect(effect.value).toBe(0.4);
+  });
+
+  it('returns null for missing status effect', () => {
+    const e = new Entity({ id: 'e1', type: 'player', x: 0, y: 0, stats: {}, maxHp: 10, speed: 100 });
+    expect(e.hasStatusEffect('fortify')).toBeNull();
+  });
+
+  it('replaces existing effect of same type (refresh)', () => {
+    const e = new Entity({ id: 'e1', type: 'player', x: 0, y: 0, stats: {}, maxHp: 10, speed: 100 });
+    e.addStatusEffect({ type: 'fortify', duration: 3, value: 0.4 });
+    e.addStatusEffect({ type: 'fortify', duration: 5, value: 0.4 });
+    expect(e.statusEffects.length).toBe(1);
+    expect(e.hasStatusEffect('fortify').turnsRemaining).toBe(5);
+  });
+
+  it('allows multiple different effects', () => {
+    const e = new Entity({ id: 'e1', type: 'player', x: 0, y: 0, stats: {}, maxHp: 10, speed: 100 });
+    e.addStatusEffect({ type: 'fortify', duration: 3, value: 0.4 });
+    e.addStatusEffect({ type: 'thorns', duration: 3, value: 0.5 });
+    expect(e.statusEffects.length).toBe(2);
+  });
+
+  it('ticks and removes expired effects', () => {
+    const e = new Entity({ id: 'e1', type: 'player', x: 0, y: 0, stats: {}, maxHp: 10, speed: 100 });
+    e.addStatusEffect({ type: 'fortify', duration: 2, value: 0.4 });
+    e.addStatusEffect({ type: 'thorns', duration: 1, value: 0.5 });
+    e.tickStatusEffects();
+    expect(e.statusEffects.length).toBe(1);
+    expect(e.hasStatusEffect('fortify')).not.toBeNull();
+    expect(e.hasStatusEffect('thorns')).toBeNull();
+    e.tickStatusEffects();
+    expect(e.statusEffects.length).toBe(0);
+  });
+});

@@ -92,19 +92,18 @@ describe('createStarterWeapon', () => {
     expect(mage.rarity).toBe('common');
   });
 
-  it('gives archer and mage ranged starter skills', () => {
+  it('starter weapons have no embedded skills (class skills are intrinsic)', () => {
     const archer = createStarterWeapon('archer');
     const mage = createStarterWeapon('mage');
+    const fighter = createStarterWeapon('fighter');
 
-    expect(archer.skill).toBeTruthy();
-    expect(archer.skill.range).toBeGreaterThan(1);
-    expect(archer.skill.statScaling).toBe('DEX');
-    expect(archer.skill.cooldown).toBe(0);
+    expect(archer.skill).toBeNull();
+    expect(mage.skill).toBeNull();
+    expect(fighter.skill).toBeNull();
 
-    expect(mage.skill).toBeTruthy();
-    expect(mage.skill.range).toBeGreaterThan(1);
-    expect(mage.skill.statScaling).toBe('INT');
-    expect(mage.skill.cooldown).toBe(0);
+    expect(archer.attackType).toBe('ranged');
+    expect(mage.attackType).toBe('magic');
+    expect(fighter.attackType).toBe('melee');
   });
 
   it('returns null for unknown class', () => {
@@ -119,5 +118,77 @@ describe('ITEM_TEMPLATES', () => {
     expect(types.has('leftHand')).toBe(true);
     expect(types.has('head')).toBe(true);
     expect(types.has('torso')).toBe(true);
+  });
+});
+
+describe('skill-weapon type restrictions', () => {
+  const meleeSkills = new Set(['Cleave']);
+  const shieldSkills = new Set(['Shield Bash']);
+  const rangedSkills = new Set(['Power Shot', 'Multishot']);
+  const magicSkills = new Set(['Fireball', 'Chain Lightning', 'Frost Nova']);
+  const armorSkills = new Set(['Thorns', 'Fortify', 'Second Wind', 'Iron Skin']);
+  const accessorySkills = new Set(['War Cry', 'Regeneration', 'Lucky Strike', 'Mana Shield']);
+
+  it('melee weapons only get melee skills', () => {
+    const meleeWeapons = ['Sword', 'Greataxe', 'Dagger'];
+    for (let i = 0; i < 200; i++) {
+      const item = generateItem({ floorLevel: 5, context: 'drop', forceRarity: 'legendary' });
+      if (meleeWeapons.includes(item.sprite) && item.skill) {
+        expect(meleeSkills.has(item.skill.name)).toBe(true);
+      }
+    }
+  });
+
+  it('shields only get Shield Bash', () => {
+    for (let i = 0; i < 200; i++) {
+      const item = generateItem({ floorLevel: 5, context: 'drop', forceRarity: 'legendary' });
+      if (item.sprite === 'shield' && item.skill) {
+        expect(shieldSkills.has(item.skill.name)).toBe(true);
+      }
+    }
+  });
+
+  it('ranged weapons only get ranged skills', () => {
+    const rangedWeapons = ['longbow', 'crossbow'];
+    for (let i = 0; i < 200; i++) {
+      const item = generateItem({ floorLevel: 5, context: 'drop', forceRarity: 'legendary' });
+      if (rangedWeapons.includes(item.sprite) && item.skill) {
+        expect(rangedSkills.has(item.skill.name)).toBe(true);
+      }
+    }
+  });
+
+  it('magic weapons only get magic skills', () => {
+    const magicWeapons = ['staff', 'wand', 'orb'];
+    for (let i = 0; i < 200; i++) {
+      const item = generateItem({ floorLevel: 5, context: 'drop', forceRarity: 'legendary' });
+      if (magicWeapons.includes(item.sprite) && item.skill) {
+        expect(magicSkills.has(item.skill.name)).toBe(true);
+      }
+    }
+  });
+
+  it('armor only gets armor skills', () => {
+    const armorSprites = ['helmet', 'hood', 'crown', 'plate_armor', 'leather_armor', 'robe', 'greaves', 'boots'];
+    for (let i = 0; i < 200; i++) {
+      const item = generateItem({ floorLevel: 5, context: 'drop', forceRarity: 'legendary' });
+      if (armorSprites.includes(item.sprite) && item.skill) {
+        expect(armorSkills.has(item.skill.name)).toBe(true);
+        expect(item.skill.skillType).toBe('self');
+        expect(item.skill.effect).toBeDefined();
+      }
+    }
+  });
+
+  it('accessories only get accessory skills', () => {
+    const accessorySprites = ['ring', 'amulet'];
+    for (let i = 0; i < 200; i++) {
+      const item = generateItem({ floorLevel: 5, context: 'drop', forceRarity: 'legendary' });
+      if (accessorySprites.includes(item.sprite) && item.skill) {
+        expect(accessorySkills.has(item.skill.name)).toBe(true);
+        expect(item.skill.skillType).toBe('self');
+        expect(item.skill.effect).toBeDefined();
+      }
+    }
   });
 });

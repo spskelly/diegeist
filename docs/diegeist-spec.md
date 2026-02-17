@@ -25,13 +25,13 @@ This specification defines the complete technical requirements for Diegeist, a r
 
 ### Technical Constraints
 
-- **Single HTML file:** All code, styles, sprites, and audio must be contained in a single .html file. No external assets, no build step, no bundler.
+- **Single HTML file output:** Build process (`build.js`) concatenates ES modules into a single .html file. No runtime dependencies, no external assets at runtime, no bundler.
 - **PWA:** Must include inline service worker registration and manifest for installability and offline play. Data URI manifest is acceptable.
 - **Rendering:** HTML5 Canvas with 16x16 pixel tile sprites. Scrolling camera centered on player.
 - **Audio:** Procedural audio via Web Audio API. No audio file assets.
 - **Persistence:** localStorage for meta-progression data (currency, stash, achievements, unlocks).
 - **Input:** Keyboard only (arrow keys/WASD + hotkeys). Touch/mobile support deferred.
-- **Sprites:** 16x16 tiles, dark/grim palette. Bosses use larger sprites (32x32 or larger). Approach (programmatic canvas vs base64) to be determined via prototype in Phase 1.
+- **Sprites:** 16x16 tiles, dark/grim palette. Bosses use larger sprites (32x32 or larger). Programmatic canvas sprites drawn at init and cached to offscreen canvases.
 
 ---
 

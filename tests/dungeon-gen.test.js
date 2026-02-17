@@ -156,31 +156,56 @@ describe('generateDungeon', () => {
     expect(doorCount).toBeGreaterThan(0);
   });
 
-  it('places doors with two open sides and two wall sides', () => {
-    const map = generateDungeon(60, 60, 'hybrid', 1);
-    for (let y = 0; y < map.height; y++) {
-      for (let x = 0; x < map.width; x++) {
-        if (map.getTile(x, y) !== TILE.DOOR) continue;
-        const northOpen = map.isWalkable(x, y - 1);
-        const southOpen = map.isWalkable(x, y + 1);
-        const westOpen = map.isWalkable(x - 1, y);
-        const eastOpen = map.isWalkable(x + 1, y);
-        const verticalDoor = northOpen && southOpen && !westOpen && !eastOpen;
-        const horizontalDoor = westOpen && eastOpen && !northOpen && !southOpen;
-        expect(verticalDoor || horizontalDoor).toBe(true);
+  it('every door has room on one side and corridor on the other', () => {
+    for (let run = 0; run < 10; run++) {
+      const archetype = ['hybrid', 'corridor-heavy', 'cavernous'][run % 3];
+      const map = generateDungeon(60, 60, archetype, 1);
+      for (let y = 0; y < map.height; y++) {
+        for (let x = 0; x < map.width; x++) {
+          if (map.getTile(x, y) !== TILE.DOOR) continue;
+          const tN = map.getTile(x, y - 1), tS = map.getTile(x, y + 1);
+          const tW = map.getTile(x - 1, y), tE = map.getTile(x + 1, y);
+          const isRoom = t => t === TILE.FLOOR || t === TILE.STAIRS_DOWN || t === TILE.TRAP;
+          const isCorridor = t => t === TILE.CORRIDOR || t === TILE.DOOR;
+          const verticalDoor = (isRoom(tN) && isCorridor(tS)) || (isCorridor(tN) && isRoom(tS));
+          const horizontalDoor = (isRoom(tW) && isCorridor(tE)) || (isCorridor(tW) && isRoom(tE));
+          expect(verticalDoor || horizontalDoor,
+            `Door(${x},${y}) N=${tN} S=${tS} W=${tW} E=${tE} run=${run} ${archetype}`
+          ).toBe(true);
+        }
       }
     }
   });
 
-  it('does not place doors adjacent to other doors', () => {
-    const map = generateDungeon(60, 60, 'hybrid', 1);
-    for (let y = 0; y < map.height; y++) {
-      for (let x = 0; x < map.width; x++) {
-        if (map.getTile(x, y) !== TILE.DOOR) continue;
-        expect(map.getTile(x + 1, y)).not.toBe(TILE.DOOR);
-        expect(map.getTile(x - 1, y)).not.toBe(TILE.DOOR);
-        expect(map.getTile(x, y + 1)).not.toBe(TILE.DOOR);
-        expect(map.getTile(x, y - 1)).not.toBe(TILE.DOOR);
+
+  it('all corridors are 1-tile wide', () => {
+    // Run multiple times since dungeon gen is random
+    for (let run = 0; run < 10; run++) {
+      const archetype = ['hybrid', 'corridor-heavy', 'cavernous'][run % 3];
+      const map = generateDungeon(60, 60, archetype, 1);
+      for (let y = 1; y < map.height - 1; y++) {
+        for (let x = 1; x < map.width - 1; x++) {
+          if (map.getTile(x, y) !== TILE.CORRIDOR) continue;
+          // A corridor tile should not have an adjacent corridor tile
+          // that forms a 2-wide section (both have passable on same perp side)
+          const walkable = (tx, ty) => map.inBounds(tx, ty) && (
+            map.getTile(tx, ty) === TILE.CORRIDOR ||
+            map.getTile(tx, ty) === TILE.FLOOR ||
+            map.getTile(tx, ty) === TILE.STAIRS_DOWN
+          );
+          // Check horizontal pair
+          if (map.getTile(x + 1, y) === TILE.CORRIDOR) {
+            const bothN = walkable(x, y - 1) && walkable(x + 1, y - 1);
+            const bothS = walkable(x, y + 1) && walkable(x + 1, y + 1);
+            expect(bothN || bothS, `2-wide corridor at (${x},${y})-(${x+1},${y}) run=${run}`).toBe(false);
+          }
+          // Check vertical pair
+          if (map.getTile(x, y + 1) === TILE.CORRIDOR) {
+            const bothW = walkable(x - 1, y) && walkable(x - 1, y + 1);
+            const bothE = walkable(x + 1, y) && walkable(x + 1, y + 1);
+            expect(bothW || bothE, `2-wide corridor at (${x},${y})-(${x},${y+1}) run=${run}`).toBe(false);
+          }
+        }
       }
     }
   });
@@ -193,5 +218,41 @@ describe('generateDungeon', () => {
     const startCenter = { x: startRoom.x + startRoom.width / 2, y: startRoom.y + startRoom.height / 2 };
     const dist = Math.sqrt((bossCenter.x - startCenter.x) ** 2 + (bossCenter.y - startCenter.y) ** 2);
     expect(dist).toBeGreaterThan(5); // At least some distance apart
+  });
+
+  it('every room has at least one door', () => {
+    for (let run = 0; run < 10; run++) {
+      const archetype = ['hybrid', 'corridor-heavy', 'cavernous'][run % 3];
+      const map = generateDungeon(60, 60, archetype, 1);
+      for (const room of map.rooms) {
+        let hasDoor = false;
+        for (let x = room.x; x < room.x + room.width; x++) {
+          if (map.getTile(x, room.y - 1) === TILE.DOOR) hasDoor = true;
+          if (map.getTile(x, room.y + room.height) === TILE.DOOR) hasDoor = true;
+        }
+        for (let y = room.y; y < room.y + room.height; y++) {
+          if (map.getTile(room.x - 1, y) === TILE.DOOR) hasDoor = true;
+          if (map.getTile(room.x + room.width, y) === TILE.DOOR) hasDoor = true;
+        }
+        expect(hasDoor, `Room at (${room.x},${room.y}) has no door, run=${run}`).toBe(true);
+      }
+    }
+  });
+
+  it('no corridor tile is directly adjacent to a floor tile', () => {
+    for (let run = 0; run < 10; run++) {
+      const archetype = ['hybrid', 'corridor-heavy', 'cavernous'][run % 3];
+      const map = generateDungeon(60, 60, archetype, 1);
+      for (let y = 1; y < map.height - 1; y++) {
+        for (let x = 1; x < map.width - 1; x++) {
+          if (map.getTile(x, y) !== TILE.CORRIDOR) continue;
+          for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+            expect(map.getTile(x + dx, y + dy),
+              `Corridor at (${x},${y}) adjacent to FLOOR at (${x+dx},${y+dy}), run=${run}`
+            ).not.toBe(TILE.FLOOR);
+          }
+        }
+      }
+    }
   });
 });

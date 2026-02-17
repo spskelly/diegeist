@@ -24,17 +24,64 @@ export const ITEM_TEMPLATES = [
   { baseName: 'Amulet', slot: 'accessory2', baseType: 'accessory', primaryStat: 'WIS' },
 ];
 
-const PREFIXES = ['Iron', 'Steel', 'Blessed', 'Cursed', 'Ancient', 'Dark', 'Shadow', 'Flame', 'Frost', 'Thunder', 'Bone', 'Crystal'];
-const SUFFIXES = ['of Power', 'of Speed', 'of Fortitude', 'of Insight', 'of Wisdom', 'of Fortune', 'of Cleaving', 'of Piercing', 'of the Mage'];
+export const STAT_PREFIXES = {
+  STR: ['Mighty', 'Heavy', 'Brutal'],
+  DEX: ['Swift', 'Keen', 'Agile'],
+  CON: ['Hardy', 'Stout', 'Fortified'],
+  INT: ['Arcane', 'Mystic', 'Enchanted'],
+  WIS: ['Wise', 'Blessed', 'Sacred'],
+  LCK: ['Lucky', 'Charmed', 'Fortunate'],
+};
+
+export const SKILL_SUFFIXES = {
+  'Cleave':          'of Cleaving',
+  'Shield Bash':     'of the Aegis',
+  'Power Shot':      'of Piercing',
+  'Multishot':       'of the Volley',
+  'Fireball':        'of the Inferno',
+  'Chain Lightning': 'of Storms',
+  'Frost Nova':      'of the Blizzard',
+  'Thorns':          'of Thorns',
+  'Fortify':         'of the Bastion',
+  'Second Wind':     'of Recovery',
+  'Iron Skin':       'of the Ironclad',
+  'War Cry':         'of Fury',
+  'Regeneration':    'of Renewal',
+  'Lucky Strike':    'of Fortune',
+  'Mana Shield':     'of Warding',
+};
+
+export const STAT_SUFFIXES = {
+  STR: 'of Power',
+  DEX: 'of Speed',
+  CON: 'of Fortitude',
+  INT: 'of Insight',
+  WIS: 'of Wisdom',
+  LCK: 'of Fortune',
+};
 
 const SKILL_POOL = [
-  { name: 'Cleave', description: 'Hit all adjacent enemies', range: 1, area: { type: 'cone', size: 3 }, statScaling: 'STR', baseDamage: 4 },
-  { name: 'Shield Bash', description: 'Stun adjacent enemy for 1 turn', range: 1, area: { type: 'single', size: 1 }, statScaling: 'STR', baseDamage: 2 },
-  { name: 'Power Shot', description: 'Piercing shot through first target', range: 6, area: { type: 'line', size: 6 }, statScaling: 'DEX', baseDamage: 5 },
-  { name: 'Multishot', description: 'Fire at 2-3 targets', range: 5, area: { type: 'single', size: 1 }, statScaling: 'DEX', baseDamage: 3 },
-  { name: 'Fireball', description: 'AoE explosion at target (3x3)', range: 5, area: { type: 'circle', size: 3 }, statScaling: 'INT', baseDamage: 6 },
-  { name: 'Chain Lightning', description: 'Hits target + jumps to 1-2 nearby', range: 5, area: { type: 'single', size: 1 }, statScaling: 'INT', baseDamage: 4 },
-  { name: 'Frost Nova', description: 'AoE around caster, slows enemies', range: 0, area: { type: 'circle', size: 3 }, statScaling: 'INT', baseDamage: 3 },
+  // Melee weapon skills
+  { name: 'Cleave', description: 'Hit all adjacent enemies', range: 1, area: { type: 'cone', size: 3 }, statScaling: 'STR', baseDamage: 4, allowedTags: ['melee'] },
+  // Shield-only skill
+  { name: 'Shield Bash', description: 'Stun adjacent enemy for 1 turn', range: 1, area: { type: 'single', size: 1 }, statScaling: 'STR', baseDamage: 2, allowedTags: ['shield'] },
+  // Ranged weapon skills
+  { name: 'Power Shot', description: 'Piercing shot through first target', range: 6, area: { type: 'line', size: 6 }, statScaling: 'DEX', baseDamage: 5, allowedTags: ['ranged'] },
+  { name: 'Multishot', description: 'Fire at 2-3 targets', range: 5, area: { type: 'single', size: 1 }, statScaling: 'DEX', baseDamage: 3, allowedTags: ['ranged'] },
+  // Magic weapon skills
+  { name: 'Fireball', description: 'AoE explosion at target (3x3)', range: 5, area: { type: 'circle', size: 3 }, statScaling: 'INT', baseDamage: 6, allowedTags: ['magic'] },
+  { name: 'Chain Lightning', description: 'Hits target + jumps to 1-2 nearby', range: 5, area: { type: 'single', size: 1 }, statScaling: 'INT', baseDamage: 4, allowedTags: ['magic'] },
+  { name: 'Frost Nova', description: 'AoE around caster, slows enemies', range: 0, area: { type: 'circle', size: 3 }, statScaling: 'INT', baseDamage: 3, allowedTags: ['magic'] },
+  // Armor skills (defensive/reactive, self-targeted)
+  { name: 'Thorns', description: 'Reflect damage to melee attackers for 3 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'CON', baseDamage: 0, allowedTags: ['armor'], skillType: 'self', effect: { type: 'thorns', duration: 3, value: 0.5 } },
+  { name: 'Fortify', description: 'Reduce incoming damage by 40% for 3 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'CON', baseDamage: 0, allowedTags: ['armor'], skillType: 'self', effect: { type: 'fortify', duration: 3, value: 0.4 } },
+  { name: 'Second Wind', description: 'Heal 30% of max HP', range: 0, area: { type: 'single', size: 1 }, statScaling: 'CON', baseDamage: 0, allowedTags: ['armor'], skillType: 'self', effect: { type: 'heal', value: 0.3 } },
+  { name: 'Iron Skin', description: 'Reduce all damage taken by 50% for 2 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'CON', baseDamage: 0, allowedTags: ['armor'], skillType: 'self', effect: { type: 'iron_skin', duration: 2, value: 0.5 } },
+  // Accessory skills (buff/aura, self-targeted)
+  { name: 'War Cry', description: 'Boost damage by 30% for 3 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'WIS', baseDamage: 0, allowedTags: ['accessory'], skillType: 'self', effect: { type: 'war_cry', duration: 3, value: 1.3 } },
+  { name: 'Regeneration', description: 'Heal 2 HP per turn for 4 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'WIS', baseDamage: 0, allowedTags: ['accessory'], skillType: 'self', effect: { type: 'regeneration', duration: 4, value: 2 } },
+  { name: 'Lucky Strike', description: 'Double crit chance for 3 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'WIS', baseDamage: 0, allowedTags: ['accessory'], skillType: 'self', effect: { type: 'lucky_strike', duration: 3, value: 2.0 } },
+  { name: 'Mana Shield', description: 'Absorb next 8 damage', range: 0, area: { type: 'single', size: 1 }, statScaling: 'WIS', baseDamage: 0, allowedTags: ['accessory'], skillType: 'self', effect: { type: 'mana_shield', duration: 999, value: 8 } },
 ];
 
 const STARTER_CLASS_WEAPONS = {
@@ -53,16 +100,7 @@ const STARTER_CLASS_WEAPONS = {
     type: 'weapon',
     attackType: 'ranged',
     statBonuses: { DEX: 1 },
-    skill: {
-      name: 'Quick Shot',
-      description: 'Basic ranged attack against the nearest visible foe.',
-      cooldown: 0,
-      currentCooldown: 0,
-      range: 6,
-      area: { type: 'single', size: 1 },
-      damage: 3,
-      statScaling: 'DEX',
-    },
+    skill: null,
     description: 'A simple short bow built for fast shots.',
   },
   mage: {
@@ -71,16 +109,7 @@ const STARTER_CLASS_WEAPONS = {
     type: 'weapon',
     attackType: 'magic',
     statBonuses: { INT: 1 },
-    skill: {
-      name: 'Arc Bolt',
-      description: 'Basic magical bolt against the nearest visible foe.',
-      cooldown: 0,
-      currentCooldown: 0,
-      range: 6,
-      area: { type: 'single', size: 1 },
-      damage: 3,
-      statScaling: 'INT',
-    },
+    skill: null,
     description: 'A beginner focus for channeling raw arcane force.',
   },
 };
@@ -136,14 +165,25 @@ function generateStatBonuses(rarity, floorLevel, primaryStat) {
   return bonuses;
 }
 
-function generateSkill(rarity) {
+function getSkillTag(template) {
+  if (template.baseName === 'Shield') return 'shield';
+  if (template.baseType === 'weapon') return template.attackType;
+  return template.baseType; // 'armor' or 'accessory'
+}
+
+function generateSkill(rarity, skillTag) {
   const config = RARITY_CONFIG[rarity];
   if (Math.random() > config.skillChance) return null;
 
-  const template = SKILL_POOL[Math.floor(Math.random() * SKILL_POOL.length)];
+  const pool = skillTag
+    ? SKILL_POOL.filter(s => s.allowedTags.includes(skillTag))
+    : SKILL_POOL;
+  if (pool.length === 0) return null;
+
+  const template = pool[Math.floor(Math.random() * pool.length)];
   const cooldown = config.cooldownRange[0] + Math.floor(Math.random() * (config.cooldownRange[1] - config.cooldownRange[0] + 1));
 
-  return {
+  const skill = {
     name: template.name,
     description: template.description,
     cooldown,
@@ -153,16 +193,56 @@ function generateSkill(rarity) {
     damage: template.baseDamage,
     statScaling: template.statScaling,
   };
+
+  if (template.skillType) {
+    skill.skillType = template.skillType;
+    skill.effect = { ...template.effect };
+  }
+
+  return skill;
 }
 
-function generateName(template, rarity) {
+function getPrimaryStatFromBonuses(statBonuses) {
+  let maxStat = null;
+  let maxVal = -1;
+  for (const [stat, val] of Object.entries(statBonuses)) {
+    if (val > maxVal) { maxVal = val; maxStat = stat; }
+  }
+  return maxStat;
+}
+
+function getSecondaryStatFromBonuses(statBonuses, primaryStat) {
+  let secondStat = null;
+  let secondVal = -1;
+  for (const [stat, val] of Object.entries(statBonuses)) {
+    if (stat === primaryStat) continue;
+    if (val > secondVal) { secondVal = val; secondStat = stat; }
+  }
+  return secondStat;
+}
+
+function generateName(template, rarity, statBonuses, skill) {
   let name = template.baseName;
+
   if (rarity !== 'common' && Math.random() > 0.3) {
-    name = PREFIXES[Math.floor(Math.random() * PREFIXES.length)] + ' ' + name;
+    const primaryStat = getPrimaryStatFromBonuses(statBonuses);
+    if (primaryStat && STAT_PREFIXES[primaryStat]) {
+      const pool = STAT_PREFIXES[primaryStat];
+      name = pool[Math.floor(Math.random() * pool.length)] + ' ' + name;
+    }
   }
+
   if ((rarity === 'rare' || rarity === 'epic' || rarity === 'legendary') && Math.random() > 0.4) {
-    name += ' ' + SUFFIXES[Math.floor(Math.random() * SUFFIXES.length)];
+    if (skill && SKILL_SUFFIXES[skill.name]) {
+      name += ' ' + SKILL_SUFFIXES[skill.name];
+    } else {
+      const secondaryStat = getSecondaryStatFromBonuses(statBonuses, getPrimaryStatFromBonuses(statBonuses));
+      if (secondaryStat && STAT_SUFFIXES[secondaryStat]) {
+        name += ' ' + STAT_SUFFIXES[secondaryStat];
+      }
+    }
   }
+
   return name;
 }
 
@@ -170,8 +250,8 @@ export function generateItem({ floorLevel, luck = 0, context = 'drop', forceRari
   const template = ITEM_TEMPLATES[Math.floor(Math.random() * ITEM_TEMPLATES.length)];
   const rarity = forceRarity || rollRarity(floorLevel, luck, context);
   const statBonuses = generateStatBonuses(rarity, floorLevel, template.primaryStat);
-  const skill = generateSkill(rarity);
-  const name = generateName(template, rarity);
+  const skill = generateSkill(rarity, getSkillTag(template));
+  const name = generateName(template, rarity, statBonuses, skill);
 
   return {
     id: `item_${nextItemId++}`,

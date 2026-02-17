@@ -39,6 +39,12 @@ export class SaveData {
     this.runHistory = [];
     this.settings = { volume: 0.7 };
     this.pendingLoadoutItem = null;
+    this.materials = { timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 };
+    this.classXP = { fighter: 0, archer: 0, mage: 0 };
+    this.classLevels = { fighter: 1, archer: 1, mage: 1 };
+    this.skillPoints = { fighter: 0, archer: 0, mage: 0 };
+    this.skillInvestments = { fighter: {}, archer: {}, mage: {} };
+    this.townPlayerPos = null;
   }
 
   addCurrency(amount) {
@@ -77,6 +83,29 @@ export class SaveData {
     }
   }
 
+  addMaterials(mats) {
+    for (const [key, val] of Object.entries(mats)) {
+      if (key in this.materials && val > 0) {
+        this.materials[key] += val;
+      }
+    }
+  }
+
+  canAfford(cost) {
+    for (const [key, val] of Object.entries(cost)) {
+      if ((this.materials[key] || 0) < val) return false;
+    }
+    return true;
+  }
+
+  spendMaterials(cost) {
+    if (!this.canAfford(cost)) return false;
+    for (const [key, val] of Object.entries(cost)) {
+      this.materials[key] -= val;
+    }
+    return true;
+  }
+
   updateAchievementProgress(achievementId, newProgress) {
     if (!this.achievements[achievementId]) {
       this.achievements[achievementId] = { progress: 0, unlocked: false };
@@ -96,6 +125,12 @@ export class SaveData {
       runHistory: this.runHistory,
       settings: this.settings,
       pendingLoadoutItem: this.pendingLoadoutItem,
+      materials: this.materials,
+      classXP: this.classXP,
+      classLevels: this.classLevels,
+      skillPoints: this.skillPoints,
+      skillInvestments: this.skillInvestments,
+      townPlayerPos: this.townPlayerPos,
     });
   }
 
@@ -103,6 +138,14 @@ export class SaveData {
     const data = JSON.parse(json);
     const save = new SaveData();
     Object.assign(save, data);
+    if (!save.materials) {
+      save.materials = { timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 };
+    }
+    if (!save.classXP) save.classXP = { fighter: 0, archer: 0, mage: 0 };
+    if (!save.classLevels) save.classLevels = { fighter: 1, archer: 1, mage: 1 };
+    if (!save.skillPoints) save.skillPoints = { fighter: 0, archer: 0, mage: 0 };
+    if (!save.skillInvestments) save.skillInvestments = { fighter: {}, archer: {}, mage: {} };
+    if (!save.townPlayerPos) save.townPlayerPos = null;
     return save;
   }
 }

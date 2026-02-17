@@ -1,5 +1,15 @@
 import { STAT_NAMES } from './constants.js';
 
+const STATUS_EFFECT_LABELS = {
+  thorns: 'Thorns',
+  fortify: 'Fortify',
+  iron_skin: 'Iron Skin',
+  war_cry: 'War Cry',
+  regeneration: 'Regen',
+  lucky_strike: 'Lucky',
+  mana_shield: 'Shield',
+};
+
 export class HUD {
   constructor(ctx, canvasWidth, canvasHeight) {
     this.ctx = ctx;
@@ -99,7 +109,7 @@ export class HUD {
     }
   }
 
-  draw(player, messageLog, derivedStats = null) {
+  draw(player, messageLog, derivedStats = null, runMaterials = null, xpData = null) {
     const ctx = this.ctx;
     const s = this.uiScale;
     const y = this.canvasHeight - this.hudHeight;
@@ -153,6 +163,48 @@ export class HUD {
     ctx.fillText(`Floor ${player.floorNumber}`, infoX, hpBarY + Math.round(14 * s));
     ctx.fillText(`Essence ${player.gold}`, infoX + Math.round(110 * s), hpBarY + Math.round(14 * s));
 
+    // Run materials
+    if (runMaterials) {
+      const matNames = { timber: 'TMB', stone: 'STN', iron: 'IRN', crystal: 'CRY', aether: 'ATH' };
+      const matColors = { timber: '#c4a05a', stone: '#b8b8a8', iron: '#8eaaba', crystal: '#b48ee8', aether: '#d8b4ff' };
+      let matX = infoX;
+      const matY = hpBarY + Math.round(32 * s);
+      ctx.font = `bold ${Math.round(12 * s)}px monospace`;
+      for (const [key, abbr] of Object.entries(matNames)) {
+        const val = runMaterials[key] || 0;
+        if (val === 0) continue;
+        ctx.fillStyle = '#000000';
+        const label = `${abbr}:${val}`;
+        ctx.fillText(label, matX + 1, matY + 1);
+        ctx.fillStyle = matColors[key];
+        ctx.fillText(label, matX, matY);
+        matX += ctx.measureText(label).width + Math.round(12 * s);
+      }
+    }
+
+    // XP bar
+    if (xpData) {
+      const xpBarStartX = infoX;
+      const xpBarStartY = hpBarY + Math.round(48 * s);
+      ctx.fillStyle = '#d9e1ea';
+      ctx.font = `${Math.round(11 * s)}px monospace`;
+      ctx.fillText(`Lv${xpData.level}`, xpBarStartX, xpBarStartY);
+
+      const xpBStartX = xpBarStartX + Math.round(40 * s);
+      const xpBW = Math.round(100 * s);
+      const xpBH = Math.round(5 * s);
+
+      ctx.fillStyle = '#1a2030';
+      ctx.fillRect(xpBStartX, xpBarStartY - Math.round(8 * s), xpBW, xpBH);
+      if (xpData.progress !== null) {
+        ctx.fillStyle = '#ffd700';
+        ctx.fillRect(xpBStartX, xpBarStartY - Math.round(8 * s), xpBW * xpData.progress, xpBH);
+      } else {
+        ctx.fillStyle = '#ffd700';
+        ctx.fillRect(xpBStartX, xpBarStartY - Math.round(8 * s), xpBW, xpBH);
+      }
+    }
+
     ctx.fillStyle = '#90a0b0';
     ctx.font = `${Math.round(10 * s)}px monospace`;
     ctx.fillText('BELT', beltX, beltY - Math.round(5 * s));
@@ -192,20 +244,38 @@ export class HUD {
     ctx.font = `${Math.round(11 * s)}px monospace`;
     ctx.fillText(statLine, Math.round(12 * s), y + Math.round(50 * s));
 
+    // Active status effects
+    if (player.statusEffects && player.statusEffects.length > 0) {
+      ctx.font = `${Math.round(10 * s)}px monospace`;
+      const buffStrs = player.statusEffects.map(e => {
+        const label = STATUS_EFFECT_LABELS[e.type] || e.type;
+        return e.turnsRemaining < 900 ? `${label}(${e.turnsRemaining})` : label;
+      });
+      ctx.fillStyle = '#7ad1a0';
+      ctx.fillText(buffStrs.join('  '), Math.round(12 * s), y + Math.round(62 * s));
+    }
+
     const messages = messageLog.getRecent(4);
     ctx.font = `${Math.round(11 * s)}px monospace`;
     const messageStartY = y + Math.round(72 * s);
     const messageLineH = Math.round(16 * s);
     for (let i = 0; i < messages.length; i++) {
       const alpha = i === messages.length - 1 ? 1.0 : 0.5 + (i / messages.length) * 0.3;
-      ctx.fillStyle = `rgba(200, 200, 200, ${alpha})`;
+      if (messages[i].color) {
+        const r = parseInt(messages[i].color.slice(1, 3), 16);
+        const g = parseInt(messages[i].color.slice(3, 5), 16);
+        const b = parseInt(messages[i].color.slice(5, 7), 16);
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      } else {
+        ctx.fillStyle = `rgba(200, 200, 200, ${alpha})`;
+      }
       ctx.fillText(messages[i].text, Math.round(12 * s), messageStartY + i * messageLineH);
     }
 
     ctx.fillStyle = '#7f8a94';
     ctx.font = `${Math.round(11 * s)}px monospace`;
     const line1 = 'Move: Arrows  Attack: WASD  Wait: Space/.  Pickup: G';
-    const line2 = 'Skills: Q/E/R  Belt: 1/2/3  Inventory: I/Tab  Stats: P  Descend stairs: >';
+    const line2 = 'Skills: Q/E/R  Belt: 1/2/3  Inventory: I/Tab  Stats: P  Map: M  Stairs: >';
     ctx.fillText(line1, Math.round(12 * s), y + this.hudHeight - Math.round(28 * s));
     ctx.fillText(line2, Math.round(12 * s), y + this.hudHeight - Math.round(10 * s));
   }

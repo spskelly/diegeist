@@ -27,6 +27,7 @@ const KEY_MAP = {
   u:          { type: 'inventoryUnequip' },
   p:          { type: 'stats' },
   h:          { type: 'hub' },
+  m:          { type: 'map' },
 };
 
 export function mapKeyToAction(key) {
@@ -37,31 +38,45 @@ export class InputHandler {
   constructor() {
     this.pendingAction = null;
     this.listening = false;
+    this.heldKeys = new Set();
   }
 
   start() {
     this.listening = true;
     this._handler = (e) => {
       if (!this.listening) return;
+      this.heldKeys.add(e.key);
       const action = mapKeyToAction(e.key);
       if (action) {
         e.preventDefault();
         this.pendingAction = action;
       }
     };
+    this._upHandler = (e) => {
+      this.heldKeys.delete(e.key);
+    };
     document.addEventListener('keydown', this._handler);
+    document.addEventListener('keyup', this._upHandler);
   }
 
   stop() {
     this.listening = false;
-    if (this._handler) {
-      document.removeEventListener('keydown', this._handler);
-    }
+    if (this._handler) document.removeEventListener('keydown', this._handler);
+    if (this._upHandler) document.removeEventListener('keyup', this._upHandler);
+    this.heldKeys.clear();
   }
 
   consume() {
     const action = this.pendingAction;
     this.pendingAction = null;
     return action;
+  }
+
+  getHeldDirection() {
+    if (this.heldKeys.has('ArrowUp'))    return { dx: 0, dy: -1 };
+    if (this.heldKeys.has('ArrowDown'))  return { dx: 0, dy: 1 };
+    if (this.heldKeys.has('ArrowLeft'))  return { dx: -1, dy: 0 };
+    if (this.heldKeys.has('ArrowRight')) return { dx: 1, dy: 0 };
+    return null;
   }
 }

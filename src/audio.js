@@ -1,4 +1,102 @@
 // src/audio.js
+import { getBiome } from './constants.js';
+
+// Note frequency constants (A minor pentatonic)
+const NOTES = {
+  A2: 110,
+  C3: 130.81,
+  D3: 146.83,
+  E3: 164.81,
+  G3: 196,
+  A3: 220,
+  C4: 261.63,
+  D4: 293.66,
+  E4: 329.63,
+  G4: 392,
+  A4: 440,
+  C5: 523.25,
+  E5: 659.25,
+  G5: 784
+};
+
+// Biome audio profiles
+const BIOME_AUDIO = {
+  jungle: {
+    padScale: [NOTES.A2, NOTES.C3, NOTES.E3, NOTES.G3],
+    melodyScale: [NOTES.A3, NOTES.C4, NOTES.D4, NOTES.E4, NOTES.G4],
+    accentScale: [NOTES.A4, NOTES.C5, NOTES.E5, NOTES.G5],
+    padWave: 'triangle',
+    melodyWave: 'triangle',
+    accentWave: 'triangle',
+    padFilterFreq: 200,
+    tempoBase: 3000,
+    tempoVariance: 2000,
+    padVolume: 0.02,
+    melodyVolume: 0.015,
+    accentVolume: 0.01,
+    accentChance: 0.3
+  },
+  dirt_cave: {
+    padScale: [NOTES.A2, NOTES.C3, NOTES.D3, NOTES.E3],
+    melodyScale: [NOTES.A3, NOTES.C4, NOTES.D4, NOTES.E4],
+    accentScale: [NOTES.A4, NOTES.C5, NOTES.E5],
+    padWave: 'sine',
+    melodyWave: 'sine',
+    accentWave: 'sine',
+    padFilterFreq: 150,
+    tempoBase: 4000,
+    tempoVariance: 3000,
+    padVolume: 0.018,
+    melodyVolume: 0.012,
+    accentVolume: 0.008,
+    accentChance: 0.15
+  },
+  stone_cave: {
+    padScale: [NOTES.A2, NOTES.C3, NOTES.E3],
+    melodyScale: [NOTES.A3, NOTES.C4, NOTES.E4, NOTES.G4],
+    accentScale: [NOTES.A4, NOTES.E5, NOTES.G5],
+    padWave: 'square',
+    melodyWave: 'square',
+    accentWave: 'square',
+    padFilterFreq: 120,
+    tempoBase: 5000,
+    tempoVariance: 3000,
+    padVolume: 0.015,
+    melodyVolume: 0.01,
+    accentVolume: 0.007,
+    accentChance: 0.2
+  },
+  dungeon: {
+    padScale: [NOTES.A2, NOTES.C3, NOTES.D3],
+    melodyScale: [NOTES.A3, NOTES.C4, NOTES.D4, NOTES.E4],
+    accentScale: [NOTES.A4, NOTES.C5, NOTES.E5],
+    padWave: 'sawtooth',
+    melodyWave: 'sawtooth',
+    accentWave: 'sawtooth',
+    padFilterFreq: 80,
+    tempoBase: 6000,
+    tempoVariance: 4000,
+    padVolume: 0.018,
+    melodyVolume: 0.012,
+    accentVolume: 0.008,
+    accentChance: 0.25
+  },
+  town: {
+    padScale: [NOTES.C3, NOTES.E3, NOTES.G3, NOTES.A3],
+    melodyScale: [NOTES.C4, NOTES.E4, NOTES.G4, NOTES.A4, NOTES.C5],
+    accentScale: [NOTES.E5, NOTES.G5],
+    padWave: 'sine',
+    melodyWave: 'sine',
+    accentWave: 'triangle',
+    padFilterFreq: 250,
+    tempoBase: 5000,
+    tempoVariance: 4000,
+    padVolume: 0.015,
+    melodyVolume: 0.012,
+    accentVolume: 0.006,
+    accentChance: 0.15
+  }
+};
 
 export class AudioManager {
   constructor() {
@@ -207,27 +305,112 @@ export class AudioManager {
   }
 
   startAmbient(floorNumber) {
+    const biome = getBiome(floorNumber);
+    this.startAmbientBiome(biome);
+  }
+
+  startAmbientBiome(biomeKey) {
     if (!this.ctx) return;
     this.ensureContext();
     this.stopAmbient();
-    const osc = this.ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.value = 40 + floorNumber * 3;
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 100;
-    const gain = this.ctx.createGain();
-    gain.gain.value = 0.03 * this.volume;
-    gain.connect(this.ctx.destination);
-    osc.connect(filter);
-    filter.connect(gain);
-    osc.start();
-    this.ambientNode = { osc, gain };
+
+    const profile = BIOME_AUDIO[biomeKey] || BIOME_AUDIO.dungeon;
+
+    // Pad layer - sustained oscillator that glides between notes
+    const padOsc = this.ctx.createOscillator();
+    padOsc.type = profile.padWave;
+    padOsc.frequency.value = profile.padScale[0];
+
+    const padFilter = this.ctx.createBiquadFilter();
+    padFilter.type = 'lowpass';
+    padFilter.frequency.value = profile.padFilterFreq;
+
+    const padGain = this.ctx.createGain();
+    padGain.gain.value = profile.padVolume * this.volume;
+
+    padOsc.connect(padFilter);
+    padFilter.connect(padGain);
+    padGain.connect(this.ctx.destination);
+    padOsc.start();
+
+    // Pad note change interval (4-7 seconds)
+    const padInterval = setInterval(() => {
+      if (!this.ctx) return;
+      const note = profile.padScale[Math.floor(Math.random() * profile.padScale.length)];
+      const now = this.ctx.currentTime;
+      padOsc.frequency.linearRampToValueAtTime(note, now + 2.0);
+    }, 4000 + Math.random() * 3000);
+
+    // Melody layer - sparse one-shot notes with attack/decay
+    const playMelodyNote = () => {
+      if (!this.ctx) return;
+
+      const note = profile.melodyScale[Math.floor(Math.random() * profile.melodyScale.length)];
+      const duration = 0.8 + Math.random() * 1.2;
+      const now = this.ctx.currentTime;
+
+      const melodyOsc = this.ctx.createOscillator();
+      melodyOsc.type = profile.melodyWave;
+      melodyOsc.frequency.value = note;
+
+      const melodyGain = this.ctx.createGain();
+      melodyGain.gain.value = 0.001;
+      melodyGain.gain.linearRampToValueAtTime(profile.melodyVolume * this.volume, now + 0.15);
+      melodyGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      melodyOsc.connect(melodyGain);
+      melodyGain.connect(this.ctx.destination);
+      melodyOsc.start();
+      melodyOsc.stop(now + duration);
+
+      // Accent layer - triggered with accentChance probability
+      if (Math.random() < profile.accentChance) {
+        const accentNote = profile.accentScale[Math.floor(Math.random() * profile.accentScale.length)];
+        const accentDuration = 0.3 + Math.random() * 0.4;
+
+        const accentOsc = this.ctx.createOscillator();
+        accentOsc.type = profile.accentWave;
+        accentOsc.frequency.value = accentNote;
+
+        const accentGain = this.ctx.createGain();
+        accentGain.gain.value = 0.001;
+        accentGain.gain.linearRampToValueAtTime(profile.accentVolume * this.volume, now + 0.15);
+        accentGain.gain.exponentialRampToValueAtTime(0.001, now + accentDuration);
+
+        accentOsc.connect(accentGain);
+        accentGain.connect(this.ctx.destination);
+        accentOsc.start();
+        accentOsc.stop(now + accentDuration);
+      }
+
+      // Schedule next melody note
+      const nextDelay = profile.tempoBase + Math.random() * profile.tempoVariance;
+      const melodyTimeout = setTimeout(playMelodyNote, nextDelay);
+      if (this.ambientNode) {
+        this.ambientNode.melodyTimeout = melodyTimeout;
+      }
+    };
+
+    // Start first melody note
+    const initialTimeout = setTimeout(playMelodyNote, profile.tempoBase + Math.random() * profile.tempoVariance);
+
+    this.ambientNode = {
+      osc: padOsc,
+      gain: padGain,
+      padInterval,
+      melodyTimeout: initialTimeout
+    };
   }
 
   stopAmbient() {
     if (this.ambientNode) {
       try { this.ambientNode.osc.stop(); } catch (e) {}
+      if (this.ambientNode.padInterval) {
+        clearInterval(this.ambientNode.padInterval);
+      }
+      if (this.ambientNode.melodyTimeout) {
+        clearTimeout(this.ambientNode.melodyTimeout);
+      }
       this.ambientNode = null;
     }
   }
