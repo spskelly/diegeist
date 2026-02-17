@@ -806,15 +806,15 @@ Create the town as a separate game mode. Build the 32×32 town grid with fixed t
 **Key Implementation:** Create TownMap with terrain tile types. Seed fixed terrain. Implement town-mode movement (frame-based, no turn system). Add town rendering with terrain sprites. Add "town" state to Game class. Transition: startMenu → town. Shelter interaction → stash, skill tree, or dungeon entry. Town ambient audio profile.
 
 **Acceptance Criteria:**
-- [ ] Town grid renders with grass, water, rock, hill, and path tile types
-- [ ] Fixed terrain features are present (river, rocks, hill, clearing)
-- [ ] Player spawns at shelter and can walk freely around town
-- [ ] Movement is smooth frame-based (not turn-based) with ~120ms input delay
-- [ ] Camera follows player using existing Camera class
-- [ ] Interacting with shelter opens stash, skill tree, and dungeon entry
-- [ ] Entering dungeon from shelter transitions to existing dungeon flow
-- [ ] Completing/dying in dungeon returns player to town (not startMenu)
-- [ ] Town has its own ambient audio profile
+- [x] Town grid renders with grass, water, rock, hill, and path tile types
+- [x] Fixed terrain features are present (river, rocks, hill, clearing)
+- [x] Player spawns at shelter and can walk freely around town
+- [x] Movement is smooth frame-based (not turn-based) with ~120ms input delay
+- [x] Camera follows player using existing Camera class
+- [x] Interacting with shelter opens stash, skill tree, and dungeon entry
+- [x] Entering dungeon from shelter transitions to existing dungeon flow
+- [x] Completing/dying in dungeon returns player to town (not startMenu)
+- [x] Town has its own ambient audio profile
 - [ ] Town state persists across sessions via SaveData
 
 ### Phase 4: Building System & Placement
