@@ -16,7 +16,7 @@ describe('SaveData', () => {
     expect(save.permanentStats).toEqual({});
     expect(save.permanentPerks).toEqual([]);
     expect(save.runHistory).toEqual([]);
-    expect(save.settings).toEqual({ volume: 0.7 });
+    expect(save.settings).toEqual({ sfxVolume: 0.7, ambientVolume: 0.7 });
   });
 
   it('adds currency', () => {

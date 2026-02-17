@@ -18,6 +18,14 @@ const CHORDS = {
   G:   [N.G3, N.C4, N.D4], // Gsus4-ish voicing, avoids B
 };
 
+// Higher voicings for peaceful mood (one octave up from CHORDS)
+const CHORDS_HIGH = {
+  Am:  [N.A3, N.C4, N.E4],
+  C:   [N.C4, N.E4, N.G4],
+  F:   [N.F4, N.A4, N.C5],
+  G:   [N.G4, N.C5, N.D5],
+};
+
 // Scale notes available for stepwise melody motion, per mood
 const MOOD_GROUPS = {
   oppressive: {
@@ -48,8 +56,8 @@ const MOOD_GROUPS = {
   },
   peaceful: {
     progressions: [
-      [CHORDS.C,  CHORDS.G,  CHORDS.Am, CHORDS.F],
-      [CHORDS.F,  CHORDS.C,  CHORDS.G,  CHORDS.Am],
+      [CHORDS_HIGH.C,  CHORDS_HIGH.G,  CHORDS_HIGH.Am, CHORDS_HIGH.F],
+      [CHORDS_HIGH.F,  CHORDS_HIGH.C,  CHORDS_HIGH.G,  CHORDS_HIGH.Am],
     ],
     melodyScale: [N.C4, N.D4, N.E4, N.G4, N.A4, N.C5],
     accentScale: [N.E5, N.G5],
@@ -67,13 +75,16 @@ const BIOME_PROFILES = {
   dirt_cave:  { mood: 'mysterious',  padWave: 'sine',     melodyWave: 'sine',     filterFreq: 150, chordDuration: 7000, padVolume: 0.018, bassVolume: 0.01,  melodyVolume: 0.012, accentVolume: 0.008 },
   stone_cave: { mood: 'oppressive',  padWave: 'square',   melodyWave: 'square',   filterFreq: 120, chordDuration: 8000, padVolume: 0.015, bassVolume: 0.01,  melodyVolume: 0.01,  accentVolume: 0.007 },
   dungeon:    { mood: 'oppressive',  padWave: 'sawtooth', melodyWave: 'sawtooth', filterFreq: 80,  chordDuration: 8000, padVolume: 0.018, bassVolume: 0.012, melodyVolume: 0.012, accentVolume: 0.008 },
-  town:       { mood: 'peaceful',    padWave: 'sine',     melodyWave: 'sine',     filterFreq: 250, chordDuration: 6000, padVolume: 0.015, bassVolume: 0.008, melodyVolume: 0.012, accentVolume: 0.006 },
+  town:       { mood: 'peaceful',    padWave: 'sine',     melodyWave: 'sine',     filterFreq: 400, chordDuration: 6000, padVolume: 0.015, bassVolume: 0.008, melodyVolume: 0.012, accentVolume: 0.006 },
 };
+
+export const BIOME_KEYS = Object.keys(BIOME_PROFILES);
 
 export class AudioManager {
   constructor() {
     this.ctx = null;
-    this.volume = 0.7;
+    this.sfxVolume = 0.7;
+    this.ambientVolume = 0.7;
     this.ambientNode = null;
   }
 
@@ -91,14 +102,18 @@ export class AudioManager {
     }
   }
 
-  setVolume(v) {
-    this.volume = Math.max(0, Math.min(1, v));
+  setSfxVolume(v) {
+    this.sfxVolume = Math.max(0, Math.min(1, v));
+  }
+
+  setAmbientVolume(v) {
+    this.ambientVolume = Math.max(0, Math.min(1, v));
   }
 
   _createGain(volume) {
     if (!this.ctx) return null;
     const gain = this.ctx.createGain();
-    gain.gain.value = volume * this.volume;
+    gain.gain.value = volume * this.sfxVolume;
     gain.connect(this.ctx.destination);
     return gain;
   }
@@ -128,7 +143,7 @@ export class AudioManager {
     osc.frequency.value = freq;
     const gain = this._createGain(volume);
     if (!gain) return;
-    gain.gain.setValueAtTime(volume * this.volume, this.ctx.currentTime);
+    gain.gain.setValueAtTime(volume * this.sfxVolume, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
     osc.connect(gain);
     osc.start();
@@ -161,7 +176,7 @@ export class AudioManager {
     osc.frequency.linearRampToValueAtTime(600, now + 0.15);
     const gain = this._createGain(0.2);
     if (!gain) return;
-    gain.gain.setValueAtTime(0.2 * this.volume, now);
+    gain.gain.setValueAtTime(0.2 * this.sfxVolume, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
     osc.connect(gain);
     osc.start();
@@ -182,7 +197,7 @@ export class AudioManager {
     osc.frequency.exponentialRampToValueAtTime(50, now + 0.3);
     const gain = this._createGain(0.2);
     if (!gain) return;
-    gain.gain.setValueAtTime(0.2 * this.volume, now);
+    gain.gain.setValueAtTime(0.2 * this.sfxVolume, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
     osc.connect(gain);
     osc.start();
@@ -206,7 +221,7 @@ export class AudioManager {
       osc.frequency.value = freq;
       const gain = this._createGain(0.15);
       if (!gain) return;
-      gain.gain.setValueAtTime(0.15 * this.volume, now + i * 0.06);
+      gain.gain.setValueAtTime(0.15 * this.sfxVolume, now + i * 0.06);
       gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.06 + 0.1);
       osc.connect(gain);
       osc.start(now + i * 0.06);
@@ -224,7 +239,7 @@ export class AudioManager {
       osc.frequency.value = freq;
       const gain = this._createGain(0.2);
       if (!gain) return;
-      gain.gain.setValueAtTime(0.2 * this.volume, now + i * 0.12);
+      gain.gain.setValueAtTime(0.2 * this.sfxVolume, now + i * 0.12);
       gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.25);
       osc.connect(gain);
       osc.start(now + i * 0.12);
@@ -246,7 +261,7 @@ export class AudioManager {
     osc.frequency.exponentialRampToValueAtTime(80, now + 0.5);
     const gain = this._createGain(0.25);
     if (!gain) return;
-    gain.gain.setValueAtTime(0.25 * this.volume, now);
+    gain.gain.setValueAtTime(0.25 * this.sfxVolume, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
     osc.connect(gain);
     osc.start();
@@ -263,7 +278,7 @@ export class AudioManager {
     drone.frequency.value = 55;
     const droneGain = this._createGain(0.15);
     if (!droneGain) return;
-    droneGain.gain.setValueAtTime(0.15 * this.volume, now);
+    droneGain.gain.setValueAtTime(0.15 * this.sfxVolume, now);
     droneGain.gain.exponentialRampToValueAtTime(0.001, now + 1.0);
     drone.connect(droneGain);
     drone.start();
@@ -343,7 +358,7 @@ export class AudioManager {
     padFilter.frequency.value = profile.filterFreq;
 
     const padGain = this.ctx.createGain();
-    padGain.gain.value = profile.padVolume * this.volume;
+    padGain.gain.value = profile.padVolume * this.ambientVolume;
 
     padOscs.forEach(osc => {
       osc.connect(padFilter);
@@ -362,7 +377,7 @@ export class AudioManager {
     bassFilter.frequency.value = 100;
 
     const bassGain = this.ctx.createGain();
-    bassGain.gain.value = profile.bassVolume * this.volume;
+    bassGain.gain.value = profile.bassVolume * this.ambientVolume;
 
     bassOsc.connect(bassFilter);
     bassFilter.connect(bassGain);
@@ -407,7 +422,7 @@ export class AudioManager {
 
         const gain = this.ctx.createGain();
         gain.gain.setValueAtTime(0.001, noteTime);
-        gain.gain.linearRampToValueAtTime(profile.melodyVolume * this.volume, noteTime + 0.1);
+        gain.gain.linearRampToValueAtTime(profile.melodyVolume * this.ambientVolume, noteTime + 0.1);
         gain.gain.exponentialRampToValueAtTime(0.001, noteTime + duration);
 
         osc.connect(gain);
@@ -430,7 +445,7 @@ export class AudioManager {
 
         const accentGain = this.ctx.createGain();
         accentGain.gain.setValueAtTime(0.001, accentTime);
-        accentGain.gain.linearRampToValueAtTime(profile.accentVolume * this.volume, accentTime + 0.08);
+        accentGain.gain.linearRampToValueAtTime(profile.accentVolume * this.ambientVolume, accentTime + 0.08);
         accentGain.gain.exponentialRampToValueAtTime(0.001, accentTime + accentDur);
 
         accentOsc.connect(accentGain);
