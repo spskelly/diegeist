@@ -128,10 +128,27 @@ export const BIOME_THEMES = {
     waterChance: 0.02,
     trapChance: 0.10,
   },
+  town: {
+    name: 'Town',
+    palette: {
+      grass:    { primary: '#4a6a30', secondary: '#3d5a28', accent: '#5a7a3a' },
+      path:     { primary: '#8a7a5a', secondary: '#7a6a4a', border: '#6a5a3a' },
+      water:    { primary: '#2a5a8a', wave: '#3a6a9a', foam: '#5a8aaa' },
+      rock:     { primary: '#6a6a6a', secondary: '#5a5a5a', highlight: '#7a7a7a' },
+      hill:     { primary: '#5a7a30', secondary: '#4a6a28', contour: '#6a8a3a' },
+      shelter:  { walls: '#7a5a3a', roof: '#5a3a1a', door: '#8a6a4a' },
+    },
+  },
 };
+
+export const TOWN_SIZE = 32;
+export const TOWN_MOVE_DELAY = 120;
 
 export const TILE = {
   WALL: 0, FLOOR: 1, CORRIDOR: 2, DOOR: 3, STAIRS_DOWN: 4, WATER: 5, TRAP: 6, DOOR_OPEN: 7,
+  // Town tiles (100+ range)
+  GRASS: 100, TOWN_PATH: 101, TOWN_WATER: 102, TOWN_ROCK: 103, TOWN_HILL: 104,
+  SHELTER: 105, SHELTER_ENTRANCE: 106,
   properties: {
     0: { name: 'Wall', walkable: false, blocksLOS: true },
     1: { name: 'Floor', walkable: true, blocksLOS: false },
@@ -141,5 +158,12 @@ export const TILE = {
     5: { name: 'Water', walkable: false, blocksLOS: false },
     6: { name: 'Trap', walkable: true, blocksLOS: false },
     7: { name: 'Door (Open)', walkable: true, blocksLOS: false },
+    100: { name: 'Grass', walkable: true, blocksLOS: false },
+    101: { name: 'Path', walkable: true, blocksLOS: false },
+    102: { name: 'Water', walkable: false, blocksLOS: false },
+    103: { name: 'Rock', walkable: false, blocksLOS: true },
+    104: { name: 'Hill', walkable: true, blocksLOS: false },
+    105: { name: 'Shelter', walkable: false, blocksLOS: true },
+    106: { name: 'Shelter Entrance', walkable: true, blocksLOS: false },
   },
 };

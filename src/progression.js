@@ -44,6 +44,7 @@ export class SaveData {
     this.classLevels = { fighter: 1, archer: 1, mage: 1 };
     this.skillPoints = { fighter: 0, archer: 0, mage: 0 };
     this.skillInvestments = { fighter: {}, archer: {}, mage: {} };
+    this.townPlayerPos = null;
   }
 
   addCurrency(amount) {
@@ -129,6 +130,7 @@ export class SaveData {
       classLevels: this.classLevels,
       skillPoints: this.skillPoints,
       skillInvestments: this.skillInvestments,
+      townPlayerPos: this.townPlayerPos,
     });
   }
 
@@ -143,6 +145,7 @@ export class SaveData {
     if (!save.classLevels) save.classLevels = { fighter: 1, archer: 1, mage: 1 };
     if (!save.skillPoints) save.skillPoints = { fighter: 0, archer: 0, mage: 0 };
     if (!save.skillInvestments) save.skillInvestments = { fighter: {}, archer: {}, mage: {} };
+    if (!save.townPlayerPos) save.townPlayerPos = null;
     return save;
   }
 }

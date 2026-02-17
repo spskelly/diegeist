@@ -99,6 +99,110 @@ function makeTrapDraw(p) {
   };
 }
 
+// Town tile sprite factories
+function makeGrassDraw(p) {
+  return function(ctx) {
+    ctx.fillStyle = p.primary;
+    ctx.fillRect(0, 0, 16, 16);
+    ctx.fillStyle = p.secondary;
+    ctx.fillRect(3, 3, 2, 1);
+    ctx.fillRect(10, 7, 2, 1);
+    ctx.fillRect(6, 12, 2, 1);
+    ctx.fillRect(12, 2, 1, 2);
+    ctx.fillStyle = p.accent;
+    ctx.fillRect(7, 5, 1, 2);
+    ctx.fillRect(1, 10, 1, 2);
+  };
+}
+
+function makeTownPathDraw(p) {
+  return function(ctx) {
+    ctx.fillStyle = p.primary;
+    ctx.fillRect(0, 0, 16, 16);
+    ctx.fillStyle = p.secondary;
+    ctx.fillRect(2, 3, 3, 2);
+    ctx.fillRect(9, 10, 4, 2);
+    ctx.fillStyle = p.border;
+    ctx.fillRect(0, 0, 16, 1);
+    ctx.fillRect(0, 15, 16, 1);
+  };
+}
+
+function makeTownWaterDraw(p) {
+  return function(ctx) {
+    ctx.fillStyle = p.primary;
+    ctx.fillRect(0, 0, 16, 16);
+    ctx.fillStyle = p.wave;
+    ctx.fillRect(1, 4, 6, 1);
+    ctx.fillRect(8, 9, 6, 1);
+    ctx.fillRect(3, 13, 5, 1);
+    ctx.fillStyle = p.foam;
+    ctx.fillRect(2, 5, 2, 1);
+    ctx.fillRect(10, 10, 2, 1);
+  };
+}
+
+function makeTownRockDraw(p) {
+  return function(ctx) {
+    ctx.fillStyle = p.primary;
+    ctx.fillRect(1, 2, 14, 12);
+    ctx.fillStyle = p.secondary;
+    ctx.fillRect(3, 4, 10, 8);
+    ctx.fillStyle = p.highlight;
+    ctx.fillRect(4, 3, 5, 2);
+    ctx.fillRect(2, 6, 3, 2);
+  };
+}
+
+function makeHillDraw(p) {
+  return function(ctx) {
+    ctx.fillStyle = p.primary;
+    ctx.fillRect(0, 0, 16, 16);
+    ctx.fillStyle = p.secondary;
+    ctx.fillRect(2, 2, 2, 2);
+    ctx.fillRect(10, 6, 2, 2);
+    ctx.fillRect(5, 11, 2, 2);
+    ctx.fillStyle = p.contour;
+    ctx.fillRect(0, 8, 16, 1);
+    ctx.fillRect(4, 4, 8, 1);
+  };
+}
+
+function makeShelterDraw(p) {
+  return function(ctx) {
+    ctx.fillStyle = p.walls;
+    ctx.fillRect(1, 4, 14, 11);
+    ctx.fillStyle = p.roof;
+    ctx.fillRect(0, 0, 16, 5);
+    ctx.fillRect(1, 1, 14, 3);
+    ctx.fillStyle = p.door;
+    ctx.fillRect(6, 8, 4, 7);
+  };
+}
+
+function makeShelterEntranceDraw(grassP, shelterP) {
+  return function(ctx) {
+    ctx.fillStyle = grassP.primary;
+    ctx.fillRect(0, 0, 16, 16);
+    ctx.fillStyle = shelterP.door;
+    ctx.fillRect(5, 0, 6, 3);
+    ctx.fillStyle = '#ffcc44';
+    ctx.fillRect(7, 7, 2, 2);
+  };
+}
+
+export function buildTownTileSprites(palette) {
+  return {
+    town_grass:     { size: TILE_SIZE, draw: makeGrassDraw(palette.grass) },
+    town_path:      { size: TILE_SIZE, draw: makeTownPathDraw(palette.path) },
+    town_water:     { size: TILE_SIZE, draw: makeTownWaterDraw(palette.water) },
+    town_rock:      { size: TILE_SIZE, draw: makeTownRockDraw(palette.rock) },
+    town_hill:      { size: TILE_SIZE, draw: makeHillDraw(palette.hill) },
+    town_shelter:   { size: TILE_SIZE, draw: makeShelterDraw(palette.shelter) },
+    town_shelter_entrance: { size: TILE_SIZE, draw: makeShelterEntranceDraw(palette.grass, palette.shelter) },
+  };
+}
+
 export function buildBiomeTileSprites(palette) {
   return {
     wall:        { size: TILE_SIZE, draw: makeWallDraw(palette.wall) },
@@ -639,6 +743,13 @@ export const TILE_SPRITE_MAP = {
   5: 'water',
   6: 'trap',
   7: 'door_open',
+  100: 'town_grass',
+  101: 'town_path',
+  102: 'town_water',
+  103: 'town_rock',
+  104: 'town_hill',
+  105: 'town_shelter',
+  106: 'town_shelter_entrance',
 };
 
 export class SpriteRegistry {
@@ -659,6 +770,18 @@ export class SpriteRegistry {
 
   setBiome(biomePalette) {
     const tileSprites = buildBiomeTileSprites(biomePalette);
+    for (const [key, def] of Object.entries(tileSprites)) {
+      const canvas = document.createElement('canvas');
+      canvas.width = def.size;
+      canvas.height = def.size;
+      const ctx = canvas.getContext('2d');
+      def.draw(ctx);
+      this.cache[key] = canvas;
+    }
+  }
+
+  setTown(townPalette) {
+    const tileSprites = buildTownTileSprites(townPalette);
     for (const [key, def] of Object.entries(tileSprites)) {
       const canvas = document.createElement('canvas');
       canvas.width = def.size;

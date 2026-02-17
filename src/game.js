@@ -1,7 +1,7 @@
 import { TurnSystem } from './turn-system.js';
 import { Camera } from './camera.js';
 import { computeFOV } from './fov.js';
-import { FOV_RADIUS, PLAYER_CLASSES } from './constants.js';
+import { FOV_RADIUS, PLAYER_CLASSES, TILE, TOWN_MOVE_DELAY, BIOME_THEMES } from './constants.js';
 import { MessageLog } from './message-log.js';
 import { InputHandler } from './input.js';
 import { SpriteRegistry } from './sprites.js';
@@ -46,6 +46,9 @@ import {
 
 // game-floor.js — floor generation & transitions
 import { startFloor, handleFloorTransition } from './game-floor.js';
+
+// town.js — town map & spawn
+import { buildTownMap, getTownSpawnPos } from './town.js';
 
 // game-screens.js — all draw functions
 import {
@@ -118,6 +121,10 @@ export class Game {
     this.pauseMenuIndex = 0;
     this.skillTreeReturnState = 'pauseMenu';
     this.combatVfx = { floatingTexts: [], projectiles: [] };
+    this.townMap = null;
+    this.townPlayerPos = null;
+    this.townMoveTimer = 0;
+    this.townInteractPrompt = false;
   }
 
   init() {
@@ -153,7 +160,11 @@ export class Game {
       this.resizeCanvas();
     });
 
-    this.state = 'startMenu';
+    if (this.saveData.runHistory && this.saveData.runHistory.length > 0) {
+      this.enterTown();
+    } else {
+      this.state = 'startMenu';
+    }
     this.loop();
   }
 
@@ -166,6 +177,8 @@ export class Game {
       this.camera.resize(this.canvas.width, this.canvas.height - (this.hud?.hudHeight || 80));
       if (this.map && this.player) {
         this.camera.centerOn(this.player.position.x, this.player.position.y, this.map.width, this.map.height);
+      } else if (this.townMap && this.townPlayerPos) {
+        this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
       }
     }
   }
@@ -207,6 +220,21 @@ export class Game {
     if (notice) this.hubNotice = notice;
     this.refreshHubShop();
     if (this.audio) this.audio.uiClick();
+  }
+
+  enterTown(notice = '') {
+    this.state = 'town';
+    this.player = null;
+    this.map = null;
+    this.townMap = buildTownMap();
+    this.townPlayerPos = getTownSpawnPos(this.saveData);
+    this.townMoveTimer = 0;
+    this.townInteractPrompt = false;
+    this.sprites.setTown(BIOME_THEMES.town.palette);
+    this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
+    if (this.audio) this.audio.startAmbientBiome('town');
+    if (notice) this.hubNotice = notice;
+    this.refreshHubShop();
   }
 
   captureRunItemsForHub(victory = false) {
@@ -278,6 +306,52 @@ export class Game {
 
   // --- State machine action handlers ---
 
+  handleTownUpdate(action) {
+    const currentTile = this.townMap.getTile(this.townPlayerPos.x, this.townPlayerPos.y);
+    this.townInteractPrompt = (currentTile === TILE.SHELTER_ENTRANCE);
+
+    if (action) {
+      if ((action.type === 'inventoryConfirm' || action.type === 'wait') && this.townInteractPrompt) {
+        this.saveData.townPlayerPos = { ...this.townPlayerPos };
+        persistSaveData(this.saveData);
+        this.enterHubMenu();
+        return;
+      }
+      if (action.type === 'close') {
+        this.state = 'startMenu';
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      if (action.type === 'stats') {
+        this.skillTreeCursor = 0;
+        this.skillTreeScrollOffset = 0;
+        this.skillTreeReturnState = 'town';
+        this.state = 'skillTree';
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+    }
+
+    const now = this.getNowMs();
+    if (now - this.townMoveTimer >= TOWN_MOVE_DELAY) {
+      const dir = this.input.getHeldDirection();
+      if (dir) {
+        const nx = this.townPlayerPos.x + dir.dx;
+        const ny = this.townPlayerPos.y + dir.dy;
+        if (nx >= 0 && nx < this.townMap.width && ny >= 0 && ny < this.townMap.height) {
+          const props = TILE.properties[this.townMap.getTile(nx, ny)];
+          if (props && props.walkable) {
+            this.townPlayerPos.x = nx;
+            this.townPlayerPos.y = ny;
+            this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
+            if (this.audio) this.audio.footstep();
+            this.townMoveTimer = now;
+          }
+        }
+      }
+    }
+  }
+
   handleStartMenuAction(action) {
     if (!action) return;
     const hasSave = hasSavedRun();
@@ -296,14 +370,14 @@ export class Game {
       return;
     }
     if (action.type === 'hub') {
-      this.enterHubMenu();
+      this.enterTown();
       return;
     }
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
       if (hasSave && this.startMenuIndex === 0) {
         loadRunState(this);
       } else {
-        this.startNewRun();
+        this.enterTown();
       }
     }
   }
@@ -367,7 +441,7 @@ export class Game {
       if (this.postDeathMenuIndex === 0) {
         this.startNewRun();
       } else if (this.postDeathMenuIndex === 1) {
-        this.enterHubMenu();
+        this.enterTown();
       } else {
         this.state = 'startMenu';
       }
@@ -377,12 +451,11 @@ export class Game {
   handleVictoryAction(action) {
     if (!action) return;
     if (action.type === 'hub') {
-      this.enterHubMenu('Victory rewards available in stash.');
+      this.enterTown('Victory rewards available in stash.');
       return;
     }
     if (action.type === 'inventoryConfirm' || action.type === 'wait' || action.type === 'close') {
-      this.state = 'startMenu';
-      if (this.audio) this.audio.uiClick();
+      this.enterTown();
     }
   }
 
@@ -398,8 +471,7 @@ export class Game {
       return;
     }
     if (action.type === 'close') {
-      this.state = 'startMenu';
-      if (this.audio) this.audio.uiClick();
+      this.enterTown();
       return;
     }
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
@@ -595,7 +667,7 @@ export class Game {
       } else if (this.pauseMenuIndex === 3) {
         this.captureRunItemsForHub(false);
         this.finalizeRun('abandoned');
-        this.enterHubMenu('Run abandoned.');
+        this.enterTown('Run abandoned.');
       }
       if (this.audio) this.audio.uiClick();
     }
@@ -618,7 +690,7 @@ export class Game {
         if (this.audio) this.audio.uiClick();
       }
       const dx = action.dx || 0;
-      if (dx !== 0 && this.skillTreeReturnState === 'hubMenu') {
+      if (dx !== 0 && (this.skillTreeReturnState === 'hubMenu' || this.skillTreeReturnState === 'town')) {
         const idx = this.classOrder.indexOf(this.selectedClass);
         this.selectedClass = this.classOrder[(idx + dx + this.classOrder.length) % this.classOrder.length];
         this.skillTreeCursor = 0;
@@ -678,6 +750,10 @@ export class Game {
     }
     if (this.state === 'victory') {
       this.handleVictoryAction(action);
+      return;
+    }
+    if (this.state === 'town') {
+      this.handleTownUpdate(action);
       return;
     }
     if (this.state === 'hubMenu') {
@@ -800,6 +876,60 @@ export class Game {
     this.runSummary.floorsReached = Math.max(this.runSummary.floorsReached, this.floorNumber);
   }
 
+  // --- Town rendering ---
+
+  drawTown() {
+    this.renderer.render({ map: this.townMap, player: null });
+
+    const spriteKey = 'player_' + this.selectedClass;
+    const sprite = this.sprites.get(spriteKey);
+    if (sprite) {
+      const { sx, sy } = this.camera.tileToScreen(this.townPlayerPos.x, this.townPlayerPos.y);
+      this.ctx.drawImage(sprite, sx, sy, this.camera.tileSize, this.camera.tileSize);
+    }
+
+    if (this.townInteractPrompt) {
+      const cx = Math.floor(this.canvas.width / 2);
+      const py = this.canvas.height - 100;
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+      this.ctx.fillRect(cx - 130, py - 14, 260, 28);
+      this.ctx.fillStyle = '#ffd700';
+      this.ctx.font = '14px monospace';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('Enter / Space : Enter Shelter', cx, py + 5);
+      this.ctx.textAlign = 'left';
+    }
+
+    this.drawTownHUD();
+  }
+
+  drawTownHUD() {
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(0, 0, w, 30);
+    ctx.fillStyle = '#e0d8c0';
+    ctx.font = '14px monospace';
+    const classInfo = PLAYER_CLASSES[this.selectedClass];
+    const className = classInfo ? classInfo.name : this.selectedClass;
+    const lvl = this.saveData?.classLevels?.[this.selectedClass] || 1;
+    ctx.fillText(`${className} Lv.${lvl}`, 10, 20);
+
+    const essenceText = `Essence: ${this.saveData?.currency || 0}`;
+    ctx.fillStyle = '#ffd700';
+    ctx.fillText(essenceText, w - ctx.measureText(essenceText).width - 10, 20);
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(0, h - 28, w, 28);
+    ctx.fillStyle = '#8a9aaa';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Arrows: Move | ESC: Menu | P: Skills', w / 2, h - 10);
+    ctx.textAlign = 'left';
+  }
+
   // --- Main draw dispatcher ---
 
   draw(nowMs = this.getNowMs()) {
@@ -820,6 +950,10 @@ export class Game {
 
     if (this.state === 'victory') {
       drawVictoryScreen(this);
+      return;
+    }
+    if (this.state === 'town') {
+      this.drawTown();
       return;
     }
     if (this.state === 'hubMenu') {

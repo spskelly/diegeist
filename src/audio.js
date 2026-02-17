@@ -80,6 +80,21 @@ const BIOME_AUDIO = {
     melodyVolume: 0.012,
     accentVolume: 0.008,
     accentChance: 0.25
+  },
+  town: {
+    padScale: [NOTES.C3, NOTES.E3, NOTES.G3, NOTES.A3],
+    melodyScale: [NOTES.C4, NOTES.E4, NOTES.G4, NOTES.A4, NOTES.C5],
+    accentScale: [NOTES.E5, NOTES.G5],
+    padWave: 'sine',
+    melodyWave: 'sine',
+    accentWave: 'triangle',
+    padFilterFreq: 250,
+    tempoBase: 5000,
+    tempoVariance: 4000,
+    padVolume: 0.015,
+    melodyVolume: 0.012,
+    accentVolume: 0.006,
+    accentChance: 0.15
   }
 };
 
@@ -290,12 +305,16 @@ export class AudioManager {
   }
 
   startAmbient(floorNumber) {
+    const biome = getBiome(floorNumber);
+    this.startAmbientBiome(biome);
+  }
+
+  startAmbientBiome(biomeKey) {
     if (!this.ctx) return;
     this.ensureContext();
     this.stopAmbient();
 
-    const biome = getBiome(floorNumber);
-    const profile = BIOME_AUDIO[biome] || BIOME_AUDIO.dungeon;
+    const profile = BIOME_AUDIO[biomeKey] || BIOME_AUDIO.dungeon;
 
     // Pad layer - sustained oscillator that glides between notes
     const padOsc = this.ctx.createOscillator();

@@ -84,6 +84,8 @@ export class Renderer {
         this.drawEntity(entity, gameState.map);
       }
     }
-    this.drawPlayer(gameState.player);
+    if (gameState.player) {
+      this.drawPlayer(gameState.player);
+    }
   }
 }

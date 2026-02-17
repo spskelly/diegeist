@@ -28,6 +28,7 @@ const SOURCE_ORDER = [
   'renderer.js',
   'hud.js',
   'audio.js',
+  'town.js',
   'game-utils.js',
   'game-save.js',
   'game-actions.js',

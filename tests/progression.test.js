@@ -285,3 +285,24 @@ describe('SaveData skill tree fields', () => {
     expect(save.skillInvestments).toEqual({ fighter: {}, archer: {}, mage: {} });
   });
 });
+
+describe('SaveData townPlayerPos', () => {
+  it('initializes townPlayerPos as null', () => {
+    const save = new SaveData();
+    expect(save.townPlayerPos).toBe(null);
+  });
+
+  it('serializes and deserializes townPlayerPos', () => {
+    const save = new SaveData();
+    save.townPlayerPos = { x: 10, y: 14 };
+    const json = save.serialize();
+    const restored = SaveData.deserialize(json);
+    expect(restored.townPlayerPos).toEqual({ x: 10, y: 14 });
+  });
+
+  it('backward-compatible: old saves without townPlayerPos get null', () => {
+    const oldJson = JSON.stringify({ currency: 50, stash: [] });
+    const save = SaveData.deserialize(oldJson);
+    expect(save.townPlayerPos).toBe(null);
+  });
+});
