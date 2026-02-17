@@ -192,6 +192,8 @@ export class Game {
 
   enterHubMenu(notice = '') {
     this.state = 'hubMenu';
+    this.player = null;
+    this.map = null;
     this.hubMenuIndex = 0;
     this.hubStashPane = 'stash';
     this.hubStashCursor = 0;
