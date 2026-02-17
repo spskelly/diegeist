@@ -286,99 +286,103 @@ export class AudioManager {
     this.ensureContext();
     this.stopAmbient();
 
-    const profile = BIOME_AUDIO[biomeKey] || BIOME_AUDIO.dungeon;
+    const profile = BIOME_PROFILES[biomeKey] || BIOME_PROFILES.dungeon;
+    const mood = MOOD_GROUPS[profile.mood];
 
-    // Pad layer - sustained oscillator that glides between notes
-    const padOsc = this.ctx.createOscillator();
-    padOsc.type = profile.padWave;
-    padOsc.frequency.value = profile.padScale[0];
+    // Pick a random progression from this mood
+    const progression = mood.progressions[Math.floor(Math.random() * mood.progressions.length)];
+    let chordIndex = 0;
+    let currentChord = progression[0];
+
+    // --- Pad layer: 3 oscillators playing chord tones ---
+    const padOscs = currentChord.map(freq => {
+      const osc = this.ctx.createOscillator();
+      osc.type = profile.padWave;
+      osc.frequency.value = freq;
+      return osc;
+    });
 
     const padFilter = this.ctx.createBiquadFilter();
     padFilter.type = 'lowpass';
-    padFilter.frequency.value = profile.padFilterFreq;
+    padFilter.frequency.value = profile.filterFreq;
 
     const padGain = this.ctx.createGain();
     padGain.gain.value = profile.padVolume * this.volume;
 
-    padOsc.connect(padFilter);
+    padOscs.forEach(osc => {
+      osc.connect(padFilter);
+      osc.start();
+    });
     padFilter.connect(padGain);
     padGain.connect(this.ctx.destination);
-    padOsc.start();
 
-    // Pad note change interval (4-7 seconds)
-    const padInterval = setInterval(() => {
-      if (!this.ctx) return;
-      const note = profile.padScale[Math.floor(Math.random() * profile.padScale.length)];
+    // --- Bass layer: single osc one octave below chord root ---
+    const bassOsc = this.ctx.createOscillator();
+    bassOsc.type = 'sine';
+    bassOsc.frequency.value = currentChord[0] / 2;
+
+    const bassFilter = this.ctx.createBiquadFilter();
+    bassFilter.type = 'lowpass';
+    bassFilter.frequency.value = 100;
+
+    const bassGain = this.ctx.createGain();
+    bassGain.gain.value = profile.bassVolume * this.volume;
+
+    bassOsc.connect(bassFilter);
+    bassFilter.connect(bassGain);
+    bassGain.connect(this.ctx.destination);
+    bassOsc.start();
+
+    // --- Chord progression timer ---
+    const advanceChord = () => {
+      chordIndex = (chordIndex + 1) % progression.length;
+      currentChord = progression[chordIndex];
       const now = this.ctx.currentTime;
-      padOsc.frequency.linearRampToValueAtTime(note, now + 2.0);
-    }, 4000 + Math.random() * 3000);
+      const glide = 2.0;
 
-    // Melody layer - sparse one-shot notes with attack/decay
-    const playMelodyNote = () => {
-      if (!this.ctx) return;
+      // Glide pad oscillators to new chord tones
+      padOscs.forEach((osc, i) => {
+        const target = currentChord[i % currentChord.length];
+        osc.frequency.linearRampToValueAtTime(target, now + glide);
+      });
 
-      const note = profile.melodyScale[Math.floor(Math.random() * profile.melodyScale.length)];
-      const duration = 0.8 + Math.random() * 1.2;
-      const now = this.ctx.currentTime;
-
-      const melodyOsc = this.ctx.createOscillator();
-      melodyOsc.type = profile.melodyWave;
-      melodyOsc.frequency.value = note;
-
-      const melodyGain = this.ctx.createGain();
-      melodyGain.gain.value = 0.001;
-      melodyGain.gain.linearRampToValueAtTime(profile.melodyVolume * this.volume, now + 0.15);
-      melodyGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
-      melodyOsc.connect(melodyGain);
-      melodyGain.connect(this.ctx.destination);
-      melodyOsc.start();
-      melodyOsc.stop(now + duration);
-
-      // Accent layer - triggered with accentChance probability
-      if (Math.random() < profile.accentChance) {
-        const accentNote = profile.accentScale[Math.floor(Math.random() * profile.accentScale.length)];
-        const accentDuration = 0.3 + Math.random() * 0.4;
-
-        const accentOsc = this.ctx.createOscillator();
-        accentOsc.type = profile.accentWave;
-        accentOsc.frequency.value = accentNote;
-
-        const accentGain = this.ctx.createGain();
-        accentGain.gain.value = 0.001;
-        accentGain.gain.linearRampToValueAtTime(profile.accentVolume * this.volume, now + 0.15);
-        accentGain.gain.exponentialRampToValueAtTime(0.001, now + accentDuration);
-
-        accentOsc.connect(accentGain);
-        accentGain.connect(this.ctx.destination);
-        accentOsc.start();
-        accentOsc.stop(now + accentDuration);
-      }
-
-      // Schedule next melody note
-      const nextDelay = profile.tempoBase + Math.random() * profile.tempoVariance;
-      const melodyTimeout = setTimeout(playMelodyNote, nextDelay);
-      if (this.ambientNode) {
-        this.ambientNode.melodyTimeout = melodyTimeout;
-      }
+      // Glide bass to new root
+      bassOsc.frequency.linearRampToValueAtTime(currentChord[0] / 2, now + glide);
     };
 
-    // Start first melody note
-    const initialTimeout = setTimeout(playMelodyNote, profile.tempoBase + Math.random() * profile.tempoVariance);
+    const chordInterval = setInterval(advanceChord, profile.chordDuration);
 
+    // --- Melody phrase scheduling (Task 3) ---
+
+    // --- Store references for cleanup ---
     this.ambientNode = {
-      osc: padOsc,
-      gain: padGain,
-      padInterval,
-      melodyTimeout: initialTimeout
+      padOscs,
+      bassOsc,
+      padGain,
+      bassGain,
+      chordInterval,
+      melodyTimeout: null,
+      getCurrentChord: () => currentChord,
+      profile,
+      mood,
     };
   }
 
   stopAmbient() {
     if (this.ambientNode) {
-      try { this.ambientNode.osc.stop(); } catch (e) {}
-      if (this.ambientNode.padInterval) {
-        clearInterval(this.ambientNode.padInterval);
+      // Stop pad oscillators
+      if (this.ambientNode.padOscs) {
+        this.ambientNode.padOscs.forEach(osc => {
+          try { osc.stop(); } catch (e) {}
+        });
+      }
+      // Stop bass
+      if (this.ambientNode.bassOsc) {
+        try { this.ambientNode.bassOsc.stop(); } catch (e) {}
+      }
+      // Clear timers
+      if (this.ambientNode.chordInterval) {
+        clearInterval(this.ambientNode.chordInterval);
       }
       if (this.ambientNode.melodyTimeout) {
         clearTimeout(this.ambientNode.melodyTimeout);
