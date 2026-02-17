@@ -275,7 +275,7 @@ export class HUD {
     ctx.fillStyle = '#7f8a94';
     ctx.font = `${Math.round(11 * s)}px monospace`;
     const line1 = 'Move: Arrows  Attack: WASD  Wait: Space/.  Pickup: G';
-    const line2 = 'Skills: Q/E/R  Belt: 1/2/3  Inventory: I/Tab  Stats: P  Descend stairs: >';
+    const line2 = 'Skills: Q/E/R  Belt: 1/2/3  Inventory: I/Tab  Stats: P  Map: M  Stairs: >';
     ctx.fillText(line1, Math.round(12 * s), y + this.hudHeight - Math.round(28 * s));
     ctx.fillText(line2, Math.round(12 * s), y + this.hudHeight - Math.round(10 * s));
   }

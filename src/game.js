@@ -57,6 +57,7 @@ export class Game {
     this.runFinalized = false;
     this.inventoryOpen = false;
     this.statsOpen = false;
+    this.mapOpen = false;
     this.inventorySection = 'equipment';
     this.inventoryCursorByTab = { inventory: 0, equipment: 0 };
     this.regenCounter = 0;
@@ -521,6 +522,18 @@ export class Game {
         e.type === 'enemy' && e.isAlive() && e.position.x === x && e.position.y === y
       );
       if (enemy) return enemy;
+    }
+    return null;
+  }
+
+  findRangedTrap(dx, dy, maxRange = 6) {
+    const px = this.player.position.x;
+    const py = this.player.position.y;
+    for (let step = 1; step <= maxRange; step++) {
+      const x = px + dx * step;
+      const y = py + dy * step;
+      if (this.map.blocksLOS(x, y)) return null;
+      if (this.map.getTile(x, y) === TILE.TRAP) return { x, y, distance: step };
     }
     return null;
   }
@@ -1345,6 +1358,7 @@ export class Game {
     this.runFinalized = false;
     this.inventoryOpen = false;
     this.statsOpen = false;
+    this.mapOpen = false;
     this.inventorySection = 'equipment';
     this.inventoryCursorByTab = { inventory: 0, equipment: 0 };
     this.deathSplashFrames = 0;
@@ -1911,6 +1925,7 @@ export class Game {
     this.runFinalized = false;
     this.inventoryOpen = false;
     this.statsOpen = false;
+    this.mapOpen = false;
     this.clearCombatVfx();
 
     // Restore message log
@@ -2233,6 +2248,15 @@ export class Game {
     }
 
     return lines;
+  }
+
+  toggleMapOverlay() {
+    this.mapOpen = !this.mapOpen;
+    if (this.mapOpen) {
+      this.inventoryOpen = false;
+      this.statsOpen = false;
+    }
+    if (this.audio) this.audio.uiClick();
   }
 
   toggleStatsOverlay() {
@@ -2652,6 +2676,35 @@ export class Game {
         damageType = attackType;
         enemy = this.findRangedTarget(action.dx, action.dy);
         if (!enemy) {
+          // Check for trap along the ranged line
+          const trap = this.findRangedTrap(action.dx, action.dy);
+          if (trap) {
+            const spriteKey = damageType === 'ranged' ? 'arrow_projectile' : 'arcbolt_projectile';
+            const dur = damageType === 'ranged' ? 170 : 210;
+            this.addProjectile(this.player.position.x, this.player.position.y, trap.x, trap.y, spriteKey, dur);
+            this.map.setTile(trap.x, trap.y, TILE.FLOOR);
+            if (trap.distance <= 1) {
+              // Adjacent: 50% damage like melee disarm
+              const fullDamage = 2 + this.floorNumber;
+              const damage = Math.max(1, Math.floor(fullDamage * 0.5));
+              this.player.takeDamage(damage);
+              this.messageLog.add(`You disarm the trap, taking ${damage} damage.`, this.turnCount);
+              if (this.audio) this.audio.playerHurt();
+              if (!this.player.isAlive()) {
+                this.messageLog.add('You have been slain by a trap!', this.turnCount);
+                this.finalizeRun('a trap');
+                this.captureRunItemsForHub(false);
+                this.deathSplashFrames = 0;
+                this.state = 'deathSplash';
+                if (this.audio) this.audio.stopAmbient();
+              }
+            } else {
+              // At range: safe disarm, no damage
+              this.messageLog.add('You disarm the trap from a distance!', this.turnCount);
+              if (this.audio) this.audio.uiClick();
+            }
+            return true;
+          }
           const missMsg = damageType === 'ranged'
             ? 'Your shot hits nothing.'
             : 'Your bolt fizzles into the darkness.';
@@ -2948,6 +3001,12 @@ export class Game {
     if (this.state !== 'playing') return;
     if (!action) return;
 
+    if (this.mapOpen) {
+      if (action.type === 'map' || action.type === 'close') {
+        this.toggleMapOverlay();
+      }
+      return;
+    }
     if (this.inventoryOpen) {
       this.handleInventoryOverlayAction(action);
       return;
@@ -2959,6 +3018,10 @@ export class Game {
       return;
     }
 
+    if (action.type === 'map') {
+      this.toggleMapOverlay();
+      return;
+    }
     if (action.type === 'inventory' || action.type === 'inventoryTab') {
       this.toggleInventoryOverlay();
       return;
@@ -3286,6 +3349,94 @@ export class Game {
     ctx.fillStyle = '#94a0ad';
     ctx.font = `${Math.round(12 * uiScale)}px monospace`;
     ctx.fillText('P or ESC: close', x + Math.round(16 * uiScale), y + panelH - Math.round(18 * uiScale));
+  }
+
+  drawMapOverlay() {
+    if (!this.map || !this.player) return;
+    const ctx = this.ctx;
+    const map = this.map;
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+
+    // Dim background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
+    ctx.fillRect(0, 0, cw, ch);
+
+    // Compute pixel size per tile to fit map in the available space
+    const pad = 40;
+    const maxW = cw - pad * 2;
+    const maxH = ch - pad * 2 - 30; // room for title + hint
+    const tilePixel = Math.max(1, Math.min(Math.floor(maxW / map.width), Math.floor(maxH / map.height)));
+    const mapPixelW = map.width * tilePixel;
+    const mapPixelH = map.height * tilePixel;
+    const ox = Math.floor((cw - mapPixelW) / 2);
+    const oy = Math.floor((ch - mapPixelH) / 2) + 10;
+
+    // Title
+    const uiScale = Math.max(1, Math.min(1.5, Math.min(cw, ch) / 900));
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+    ctx.fillText('Dungeon Map', ox, oy - 8);
+
+    // Draw tiles
+    for (let ty = 0; ty < map.height; ty++) {
+      for (let tx = 0; tx < map.width; tx++) {
+        const px = ox + tx * tilePixel;
+        const py = oy + ty * tilePixel;
+
+        if (!map.isExplored(tx, ty)) {
+          // Unexplored = dark
+          continue;
+        }
+
+        const tile = map.getTile(tx, ty);
+        const visible = map.isVisible(tx, ty);
+
+        // Color based on tile type
+        switch (tile) {
+          case TILE.WALL:       ctx.fillStyle = visible ? '#555568' : '#2a2a36'; break;
+          case TILE.FLOOR:      ctx.fillStyle = visible ? '#6a7a6a' : '#3a4a3a'; break;
+          case TILE.CORRIDOR:   ctx.fillStyle = visible ? '#5a6a60' : '#333d38'; break;
+          case TILE.DOOR:       ctx.fillStyle = visible ? '#aa8030' : '#6a5020'; break;
+          case TILE.DOOR_OPEN:  ctx.fillStyle = visible ? '#7a6830' : '#4a4020'; break;
+          case TILE.STAIRS_DOWN:ctx.fillStyle = visible ? '#eeeebb' : '#8a8a60'; break;
+          case TILE.WATER:      ctx.fillStyle = visible ? '#3060aa' : '#1a3060'; break;
+          case TILE.TRAP:       ctx.fillStyle = visible ? '#aa4040' : '#603030'; break;
+          default:              ctx.fillStyle = visible ? '#444' : '#222'; break;
+        }
+        ctx.fillRect(px, py, tilePixel, tilePixel);
+      }
+    }
+
+    // Draw entities (enemies) in explored+visible tiles
+    for (const entity of map.entities) {
+      if (entity.type !== 'enemy' || !entity.isAlive()) continue;
+      if (!map.isVisible(entity.position.x, entity.position.y)) continue;
+      const px = ox + entity.position.x * tilePixel;
+      const py = oy + entity.position.y * tilePixel;
+      ctx.fillStyle = entity.isBoss ? '#ff3030' : '#ff6060';
+      ctx.fillRect(px, py, tilePixel, tilePixel);
+    }
+
+    // Draw ground items in visible tiles
+    for (const item of map.items) {
+      if (!map.isVisible(item.position.x, item.position.y)) continue;
+      const px = ox + item.position.x * tilePixel;
+      const py = oy + item.position.y * tilePixel;
+      ctx.fillStyle = '#ffdd44';
+      ctx.fillRect(px, py, tilePixel, tilePixel);
+    }
+
+    // Draw player
+    const ppx = ox + this.player.position.x * tilePixel;
+    const ppy = oy + this.player.position.y * tilePixel;
+    ctx.fillStyle = '#44ff44';
+    ctx.fillRect(ppx, ppy, tilePixel, tilePixel);
+
+    // Hint
+    ctx.fillStyle = '#7f8a94';
+    ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+    ctx.fillText('M or ESC: close', ox, oy + mapPixelH + Math.round(16 * uiScale));
   }
 
   drawStartMenu() {
@@ -3977,6 +4128,7 @@ export class Game {
       this.drawPauseMenu();
       return;
     }
+    if (this.mapOpen) this.drawMapOverlay();
     if (this.inventoryOpen) this.drawInventoryOverlay();
     if (this.statsOpen) this.drawStatsOverlay();
   }

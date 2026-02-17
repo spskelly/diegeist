@@ -27,6 +27,7 @@ const KEY_MAP = {
   u:          { type: 'inventoryUnequip' },
   p:          { type: 'stats' },
   h:          { type: 'hub' },
+  m:          { type: 'map' },
 };
 
 export function mapKeyToAction(key) {
