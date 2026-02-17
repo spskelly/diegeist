@@ -9,7 +9,7 @@ import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
 import { tickCooldowns } from './skills.js';
 import { HubShop, loadSaveData, persistSaveData, ACHIEVEMENTS } from './progression.js';
-import { AudioManager } from './audio.js';
+import { AudioManager, BIOME_KEYS } from './audio.js';
 import { resolvePassiveEffects, canInvestSkill, investSkill } from './skill-tree.js';
 
 // game-utils.js — shared helpers
@@ -62,6 +62,7 @@ import {
   drawHubStash,
   drawHubAchievements,
   drawPauseMenu,
+  drawSettingsMenu,
   drawSkillTree,
   drawInventoryOverlay,
   drawStatsOverlay,
@@ -119,6 +120,10 @@ export class Game {
     this.pendingStashLoadoutItem = null;
     this.hubShop = new HubShop();
     this.pauseMenuIndex = 0;
+    this.settingsMenuIndex = 0;
+    this.settingsPreviewBiome = null;
+    this._currentAmbientBiome = null;
+    this._settingsSavedAmbientBiome = null;
     this.skillTreeReturnState = 'pauseMenu';
     this.combatVfx = { floatingTexts: [], projectiles: [] };
     this.townMap = null;
@@ -145,7 +150,10 @@ export class Game {
 
     this.audio = new AudioManager();
     this.audio.init();
-    this.audio.setVolume(this.saveData.settings?.volume ?? 0.7);
+    const sfxVol = this.saveData.settings?.sfxVolume ?? this.saveData.settings?.volume ?? 0.7;
+    const ambVol = this.saveData.settings?.ambientVolume ?? this.saveData.settings?.volume ?? 0.7;
+    this.audio.setSfxVolume(sfxVol);
+    this.audio.setAmbientVolume(ambVol);
     if (!Array.isArray(this.saveData.pendingRunPurchases)) this.saveData.pendingRunPurchases = [];
     this.refreshHubShop();
 
@@ -233,6 +241,7 @@ export class Game {
     this.sprites.setTown(BIOME_THEMES.town.palette);
     this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
     if (this.audio) this.audio.startAmbientBiome('town');
+    this._currentAmbientBiome = 'town';
     if (notice) this.hubNotice = notice;
     this.refreshHubShop();
   }
@@ -639,7 +648,7 @@ export class Game {
 
   handlePauseMenuAction(action) {
     if (!action) return;
-    const options = ['Resume', 'Skill Tree', 'Save & Quit', 'Abandon Run'];
+    const options = ['Resume', 'Skill Tree', 'Settings', 'Save & Quit', 'Abandon Run'];
     if (action.type === 'close') {
       this.state = 'playing';
       if (this.audio) this.audio.uiClick();
@@ -662,15 +671,89 @@ export class Game {
         this.skillTreeReturnState = 'pauseMenu';
         this.state = 'skillTree';
       } else if (this.pauseMenuIndex === 2) {
+        this.settingsMenuIndex = 0;
+        this.settingsPreviewBiome = null;
+        this.state = 'settings';
+      } else if (this.pauseMenuIndex === 3) {
         saveRunState(this);
         this.state = 'startMenu';
-      } else if (this.pauseMenuIndex === 3) {
+      } else if (this.pauseMenuIndex === 4) {
         this.captureRunItemsForHub(false);
         this.finalizeRun('abandoned');
         this.enterTown('Run abandoned.');
       }
       if (this.audio) this.audio.uiClick();
     }
+  }
+
+  handleSettingsAction(action) {
+    if (!action) return;
+    const rowCount = 4; // SFX Vol, Ambient Vol, Preview Music, Back
+
+    if (action.type === 'close') {
+      this._exitSettings();
+      return;
+    }
+
+    if (isDirectionalAction(action)) {
+      if (action.dy !== 0) {
+        this.settingsMenuIndex = (this.settingsMenuIndex + action.dy + rowCount) % rowCount;
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      if (action.dx !== 0) {
+        if (this.settingsMenuIndex === 0) {
+          // SFX volume
+          const v = Math.round(Math.max(0, Math.min(1, this.audio.sfxVolume + action.dx * 0.05)) * 100) / 100;
+          this.audio.setSfxVolume(v);
+          this.saveData.settings.sfxVolume = this.audio.sfxVolume;
+          persistSaveData(this.saveData);
+          if (this.audio) this.audio.uiClick();
+        } else if (this.settingsMenuIndex === 1) {
+          // Ambient volume
+          const v = Math.round(Math.max(0, Math.min(1, this.audio.ambientVolume + action.dx * 0.05)) * 100) / 100;
+          this.audio.setAmbientVolume(v);
+          this.saveData.settings.ambientVolume = this.audio.ambientVolume;
+          if (this.settingsPreviewBiome) {
+            this.audio.startAmbientBiome(this.settingsPreviewBiome);
+          }
+          persistSaveData(this.saveData);
+        } else if (this.settingsMenuIndex === 2) {
+          // Cycle through biome keys
+          const keys = BIOME_KEYS;
+          const curIdx = this.settingsPreviewBiome ? keys.indexOf(this.settingsPreviewBiome) : -1;
+          const nextIdx = (curIdx + action.dx + keys.length) % keys.length;
+          this.settingsPreviewBiome = keys[nextIdx];
+          if (this.audio) this.audio.uiClick();
+        }
+        return;
+      }
+    }
+
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      if (this.settingsMenuIndex === 2 && this.settingsPreviewBiome) {
+        // Play preview
+        if (!this._settingsSavedAmbientBiome && this._currentAmbientBiome) {
+          this._settingsSavedAmbientBiome = this._currentAmbientBiome;
+        }
+        this.audio.startAmbientBiome(this.settingsPreviewBiome);
+      } else if (this.settingsMenuIndex === 3) {
+        this._exitSettings();
+      }
+      if (this.audio) this.audio.uiClick();
+    }
+  }
+
+  _exitSettings() {
+    if (this._settingsSavedAmbientBiome) {
+      this.audio.startAmbientBiome(this._settingsSavedAmbientBiome);
+      this._settingsSavedAmbientBiome = null;
+    } else if (this.settingsPreviewBiome) {
+      this.audio.stopAmbient();
+    }
+    this.settingsPreviewBiome = null;
+    this.state = 'pauseMenu';
+    if (this.audio) this.audio.uiClick();
   }
 
   handleSkillTreeAction(action) {
@@ -770,6 +853,10 @@ export class Game {
     }
     if (this.state === 'hubAchievements') {
       this.handleHubAchievementsAction(action);
+      return;
+    }
+    if (this.state === 'settings') {
+      this.handleSettingsAction(action);
       return;
     }
     if (this.state === 'pauseMenu') {
@@ -1007,6 +1094,10 @@ export class Game {
       return;
     }
 
+    if (this.state === 'settings') {
+      drawSettingsMenu(this);
+      return;
+    }
     if (this.state === 'pauseMenu') {
       drawPauseMenu(this);
       return;
