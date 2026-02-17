@@ -23,6 +23,7 @@ import {
   wrapTextLines,
 } from './game-utils.js';
 import { hasSavedRun } from './game-save.js';
+import { BIOME_KEYS } from './audio.js';
 
 export function drawInventoryItemIcon(game, ctx, item, x, y, size) {
   if (!item) return;
@@ -1315,6 +1316,98 @@ export function drawPauseMenu(game) {
     ctx.fillStyle = selected ? '#ffffff' : '#a0aab5';
     ctx.fillText(options[i], px + Math.round(20 * uiScale), startY + i * lineH);
   }
+}
+
+export function drawSettingsMenu(game) {
+  const ctx = game.ctx;
+  const w = game.canvas.width;
+  const h = game.canvas.height;
+  const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+
+  // Dark overlay
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+  ctx.fillRect(0, 0, w, h);
+
+  // Panel
+  const panelW = Math.round(380 * uiScale);
+  const panelH = Math.round(260 * uiScale);
+  const px = Math.floor((w - panelW) / 2);
+  const py = Math.floor((h - panelH) / 2);
+
+  ctx.fillStyle = '#171d28';
+  ctx.fillRect(px, py, panelW, panelH);
+  ctx.strokeStyle = '#4f6075';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(px, py, panelW, panelH);
+
+  // Title
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#e8eef5';
+  ctx.font = `bold ${Math.round(20 * uiScale)}px monospace`;
+  ctx.fillText('Settings', px + Math.round(20 * uiScale), py + Math.round(32 * uiScale));
+
+  // Rows
+  const lineH = Math.round(36 * uiScale);
+  const startY = py + Math.round(75 * uiScale);
+  ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+
+  const rows = [
+    { label: 'SFX Volume', type: 'volume', value: game.audio ? game.audio.sfxVolume : 0.7 },
+    { label: 'Ambient Volume', type: 'volume', value: game.audio ? game.audio.ambientVolume : 0.7 },
+    { label: 'Preview Music', type: 'biome' },
+    { label: 'Back', type: 'action' },
+  ];
+
+  const labelX = px + Math.round(20 * uiScale);
+  const barX = px + Math.round(200 * uiScale);
+  const barW = Math.round(120 * uiScale);
+  const barH = Math.round(10 * uiScale);
+
+  for (let i = 0; i < rows.length; i++) {
+    const selected = i === game.settingsMenuIndex;
+    const rowY = startY + i * lineH;
+
+    // Selection highlight
+    if (selected) {
+      ctx.fillStyle = '#2b3a4d';
+      ctx.fillRect(px + Math.round(8 * uiScale), rowY - Math.round(14 * uiScale),
+                    panelW - Math.round(16 * uiScale), Math.round(28 * uiScale));
+    }
+
+    // Label
+    ctx.fillStyle = selected ? '#ffffff' : '#a0aab5';
+    ctx.fillText(rows[i].label, labelX, rowY);
+
+    if (rows[i].type === 'volume') {
+      // Volume bar background
+      const barY = rowY - Math.round(4 * uiScale);
+      ctx.fillStyle = '#2a2a3a';
+      ctx.fillRect(barX, barY, barW, barH);
+      // Filled portion
+      ctx.fillStyle = selected ? '#5fcf80' : '#3a7a50';
+      ctx.fillRect(barX, barY, Math.round(barW * rows[i].value), barH);
+      // Border
+      ctx.strokeStyle = '#4f6075';
+      ctx.strokeRect(barX, barY, barW, barH);
+      // Percentage
+      ctx.fillStyle = selected ? '#ffffff' : '#a0aab5';
+      ctx.fillText(`${Math.round(rows[i].value * 100)}%`, barX + barW + Math.round(10 * uiScale), rowY);
+    }
+
+    if (rows[i].type === 'biome') {
+      const biomeLabel = game.settingsPreviewBiome
+        ? game.settingsPreviewBiome.replace(/_/g, ' ')
+        : '< select >';
+      ctx.fillStyle = selected ? '#ffd760' : '#8a9aaa';
+      ctx.fillText('\u25C0 ' + biomeLabel + ' \u25B6', barX, rowY);
+    }
+  }
+
+  // Footer hint
+  ctx.fillStyle = '#4a5a6a';
+  ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+  ctx.fillText('\u2190\u2192 adjust   Enter: play   Esc: back',
+               px + Math.round(20 * uiScale), py + panelH - Math.round(18 * uiScale));
 }
 
 export function drawSkillTree(game) {
