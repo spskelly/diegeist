@@ -14,7 +14,7 @@ npx serve dist       # serve locally for PWA testing
 
 ## Architecture
 
-Diegeist is a roguelite dungeon crawler. All game code lives in `src/` as ES modules, but the build concatenates them into a single HTML file (`dist/diegeist.html`) with no runtime dependencies.
+Diegeist is a roguelite dungeon crawler. All game code lives in `src/` as ES modules, but the build concatenates them into a single HTML file (`dist/index.html`) with no runtime dependencies.
 
 ### Build system
 
@@ -24,7 +24,7 @@ Diegeist is a roguelite dungeon crawler. All game code lives in `src/` as ES mod
 
 ### Module dependency order
 
-`constants` → `resources` → `skill-tree` → `game-map` → `entity` → `player` → `turn-system` → `camera` → `fov` → `pathfinding` → `combat` → `ai` → `dungeon-gen` → `items` → `inventory` → `skills` → `progression` → `message-log` → `input` → `sprites` → `renderer` → `hud` → `audio` → `game`
+`constants` → `resources` → `skill-tree` → `game-map` → `entity` → `player` → `turn-system` → `camera` → `fov` → `pathfinding` → `combat` → `ai` → `dungeon-gen` → `items` → `inventory` → `skills` → `progression` → `message-log` → `input` → `sprites` → `renderer` → `hud` → `audio` → `town` → `game-utils` → `game-save` → `game-actions` → `game-floor` → `game-screens` → `game`
 
 `game.js` is the main orchestrator. It imports everything else and runs a state machine (`init`, `startMenu`, `playing`, `pauseMenu`, `skillTree`, `deathSplash`, `deathSaveChoice`, `postDeathMenu`, `victory`, `hubMenu`, `hubShop`, `hubStash`, `hubAchievements`).
 

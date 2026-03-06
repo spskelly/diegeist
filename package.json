@@ -1,8 +1,15 @@
 {
   "name": "diegeist",
   "version": "0.1.0",
+  "description": "Tile-based roguelite dungeon crawler built in vanilla JavaScript. Outputs a single HTML file that runs as an installable PWA.",
   "private": true,
   "type": "module",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/spskelly/diegeist.git"
+  },
+  "homepage": "https://spskelly.github.io/diegeist",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",

@@ -35,9 +35,9 @@ Playable game with v1 core loop complete and v2 Phases 1–2 (resources, skill t
 
 ## Play
 
-Hosted on GitHub Pages — just open it in a browser. No install, no build, no server required.
+[**Play Diegeist**](https://spskelly.github.io/diegeist) — hosted on GitHub Pages. No install, no build, no server required.
 
-When served over HTTPS the game is installable as a desktop app via your browser's install prompt.
+When served over HTTPS the game is installable as a desktop/mobile app via your browser's install prompt.
 
 ## Development
 
@@ -94,17 +94,16 @@ npx serve dist
 ## Project Structure
 
 ```
-src/               24 modules — the game source
-tests/             20 test files (Vitest)
+src/               30 modules — the game source
+tests/             21 test files (Vitest)
 template.html      HTML shell with PWA meta tags and SW registration
 build.js           concatenates src/ into a single HTML file + PWA assets
 dist/              build output (gitignored)
-  diegeist.html    the complete game
+  index.html       the complete game
   sw.js            cache-first service worker (versioned per build)
   manifest.json    web app manifest
   icon.svg         placeholder app icon
-diegeist-spec.md   full target specification
-docs/plans/        implementation roadmaps
+docs/              specs and implementation roadmaps
 ```
 
 ## Build System
@@ -112,3 +111,7 @@ docs/plans/        implementation roadmaps
 `build.js` reads every module in `src/` in dependency order, strips ES module `import`/`export` syntax, and injects the combined code into `template.html`. It also emits `sw.js`, `manifest.json`, and `icon.svg` into `dist/`. The service worker cache key includes a `Date.now()` stamp so each build invalidates the previous cache.
 
 No bundler, no framework, no external assets at runtime.
+
+## License
+
+[GPL-3.0](LICENSE)

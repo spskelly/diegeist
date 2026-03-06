@@ -56,8 +56,8 @@ function build() {
   const output = template.replace('// {{GAME_CODE}}', combinedCode);
   const dist = join(__dirname, 'dist');
   mkdirSync(dist, { recursive: true });
-  writeFileSync(join(dist, 'diegeist.html'), output);
-  console.log('Built dist/diegeist.html (' + Math.round(output.length / 1024) + ' KB)');
+  writeFileSync(join(dist, 'index.html'), output);
+  console.log('Built dist/index.html (' + Math.round(output.length / 1024) + ' KB)');
 
   // PWA: icon — a die face on black
   const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
@@ -75,7 +75,7 @@ function build() {
   const manifest = {
     name: 'Diegeist',
     short_name: 'Diegeist',
-    start_url: './diegeist.html',
+    start_url: './',
     scope: './',
     display: 'fullscreen',
     background_color: '#000000',
@@ -89,7 +89,7 @@ function build() {
   // PWA: service worker — version keyed to build time so updates bust the cache
   const cacheVersion = `diegeist-${Date.now()}`;
   const sw = `const CACHE = '${cacheVersion}';
-const ASSETS = ['./diegeist.html', './manifest.json'];
+const ASSETS = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
