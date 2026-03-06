@@ -1,317 +1,656 @@
 // src/audio.js
+// ═══════════════════════════════════════════════════════════════════
+// diegeist audio — snes-style tracker music + sfx
+// ═══════════════════════════════════════════════════════════════════
 import { getBiome } from './constants.js';
+
 
 // ─── note frequencies ───────────────────────────────────────────────
 const N = {
-  A2: 110.00, B2: 123.47, C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61,
-  G3: 196.00, A3: 220.00, B3: 246.94, C4: 261.63, D4: 293.66, E4: 329.63,
-  F4: 349.23, G4: 392.00, A4: 440.00, B4: 493.88, C5: 523.25, D5: 587.33,
-  E5: 659.25, G5: 784.00, A5: 880.00
+  // octave 2
+  E2:  82.41,  A2: 110.00, Bb2: 116.54, B2: 123.47,
+  // octave 3
+  C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.00,
+  A3: 220.00, Bb3: 233.08, B3: 246.94,
+  // octave 4
+  C4: 261.63, D4: 293.66, Eb4: 311.13, E4: 329.63,
+  F4: 349.23, G4: 392.00, A4: 440.00, Bb4: 466.16, B4: 493.88,
+  // octave 5
+  C5: 523.25, D5: 587.33, E5: 659.25, G5: 784.00,
 };
 
-// ─── chord voicings ─────────────────────────────────────────────────
-// low voicings for darker moods
-const CH = {
-  Am:   [N.A2, N.C3, N.E3],
-  C:    [N.C3, N.E3, N.G3],
-  Dm:   [N.D3, N.F3, N.A3],
-  Em:   [N.E3, N.G3, N.B3],
-  F:    [N.F3, N.A3, N.C4],
-  G:    [N.G3, N.B3, N.D4],
-  // higher voicings for brighter moods
-  Am_h: [N.A3, N.C4, N.E4],
-  C_h:  [N.C4, N.E4, N.G4],
-  Dm_h: [N.D4, N.F4, N.A4],
-  F_h:  [N.F4, N.A4, N.C5],
-  G_h:  [N.G4, N.B4, N.D5],
-};
 
-// ─── mood definitions ───────────────────────────────────────────────
-// each mood defines harmonic, melodic, and phrasing behavior
-const MOODS = {
-  oppressive: {
-    progressions: [
-      [CH.Am, CH.Dm, CH.Em, CH.Am],
-      [CH.Am, CH.F,  CH.Dm, CH.Em],
-      [CH.Dm, CH.Am, CH.Em, CH.Dm],
-    ],
-    melodyScale: [N.A3, N.C4, N.D4, N.E4, N.G4],
-    accentScale: [N.A4, N.C5, N.E5],
-    phraseLength: [2, 3],
-    noteSpacing: [400, 600],
-    phrasePause: [7000, 12000],
-    directionBias: -0.3,       // tends downward
-    accentChance: 0.15,
-    restChance: 0.2,           // chance to insert a silent beat in a phrase
-  },
-  mysterious: {
-    progressions: [
-      [CH.Am, CH.C,  CH.G,  CH.Em],
-      [CH.C,  CH.Am, CH.F,  CH.G],
-      [CH.Em, CH.C,  CH.Am, CH.F],
-    ],
-    melodyScale: [N.A3, N.C4, N.D4, N.E4, N.G4, N.A4],
-    accentScale: [N.A4, N.C5, N.E5, N.G5],
-    phraseLength: [2, 5],
-    noteSpacing: [250, 450],
-    phrasePause: [5000, 9000],
-    directionBias: 0,
-    accentChance: 0.25,
-    restChance: 0.15,
-  },
-  peaceful: {
-    progressions: [
-      [CH.C_h, CH.G_h, CH.Am_h, CH.F_h],
-      [CH.F_h, CH.C_h, CH.G_h,  CH.Am_h],
-      [CH.C_h, CH.Am_h, CH.F_h, CH.G_h],
-    ],
-    melodyScale: [N.C4, N.D4, N.E4, N.G4, N.A4, N.C5],
-    accentScale: [N.E5, N.G5, N.A5],
-    phraseLength: [3, 5],
-    noteSpacing: [200, 350],
-    phrasePause: [4000, 7000],
-    directionBias: 0.2,        // tends upward
-    accentChance: 0.2,
-    restChance: 0.1,
-  },
-  eldritch: {
-    progressions: [
-      [CH.Em, CH.Dm, CH.Am, CH.Em],
-      [CH.Dm, CH.Em, CH.Dm, CH.Am],
-    ],
-    melodyScale: [N.E3, N.G3, N.A3, N.C4, N.D4],
-    accentScale: [N.E4, N.G4, N.A4],
-    phraseLength: [1, 3],
-    noteSpacing: [500, 800],
-    phrasePause: [8000, 14000],
-    directionBias: -0.4,
-    accentChance: 0.1,
-    restChance: 0.3,           // lots of silence
-  },
-};
-
-// ─── texture types ──────────────────────────────────────────────────
-// these define the procedural environmental sound layer
-// each texture type configures how filtered noise bursts are generated
-const TEXTURES = {
-  // water drips: short, bright, resonant pings at random intervals
-  drips: {
-    burstDuration: [0.02, 0.08],   // seconds
-    burstInterval: [800, 3000],     // ms between bursts
-    filterType: 'bandpass',
-    filterFreq: [1200, 3500],       // randomized per burst
-    filterQ: [8, 20],
-    volume: [0.01, 0.03],
-    toneChance: 0.6,                // chance to add a tonal ping alongside noise
-    toneFreqs: [2000, 2800, 3500],
-    toneDuration: [0.05, 0.15],
-    toneVolume: 0.015,
-  },
-  // rumble: low, rolling, distant thuds and creaks
-  rumble: {
-    burstDuration: [0.1, 0.4],
-    burstInterval: [3000, 8000],
-    filterType: 'lowpass',
-    filterFreq: [60, 150],
-    filterQ: [1, 3],
-    volume: [0.02, 0.05],
-    toneChance: 0.3,
-    toneFreqs: [40, 55, 70],
-    toneDuration: [0.3, 0.8],
-    toneVolume: 0.02,
-  },
-  // rustle: mid-frequency swishing, organic movement
-  rustle: {
-    burstDuration: [0.05, 0.2],
-    burstInterval: [600, 2500],
-    filterType: 'bandpass',
-    filterFreq: [400, 2000],
-    filterQ: [1, 4],
-    volume: [0.008, 0.02],
-    toneChance: 0.2,
-    toneFreqs: [800, 1200, 1600],
-    toneDuration: [0.03, 0.08],
-    toneVolume: 0.008,
-  },
-  // wind: long, filtered noise sweeps
-  wind: {
-    burstDuration: [0.3, 1.0],
-    burstInterval: [2000, 5000],
-    filterType: 'bandpass',
-    filterFreq: [200, 800],
-    filterQ: [0.5, 2],
-    volume: [0.005, 0.015],
-    toneChance: 0,
-    toneFreqs: [],
-    toneDuration: [0, 0],
-    toneVolume: 0,
-  },
-};
-
-// ─── biome profiles ─────────────────────────────────────────────────
-// each biome combines a mood, texture, timbre settings, and reverb character
-const BIOME_PROFILES = {
-  cave: {
-    mood: 'mysterious',
-    texture: 'drips',
-    // pad: detuned oscillator pairs, wave type, filter settings
-    padWave: 'triangle',
-    padDetune: 6,              // cents of detuning between paired oscs
-    padFilterBase: 250,        // base lowpass cutoff for pad
-    padFilterLFODepth: 120,    // how much the lfo sweeps the filter (hz)
-    padFilterLFORate: 0.07,    // lfo speed in hz (slow = organic)
-    padVolume: 0.018,
-    // bass
-    bassVolume: 0.012,
-    bassFilterFreq: 120,
-    // melody: wave type, vibrato, note shape
-    melodyWave: 'triangle',
-    melodyVolume: 0.014,
-    melodyVibRate: 4,          // vibrato speed hz
-    melodyVibDepth: 3,         // vibrato depth cents
-    melodyAttack: 0.12,        // note fade-in seconds
-    // accent
-    accentVolume: 0.009,
-    accentWave: 'sine',
-    // reverb
-    reverbDuration: 3.0,       // impulse response length in seconds
-    reverbDecay: 1.8,          // exponential decay rate
-    reverbWet: 0.35,           // wet/dry mix (0 = dry, 1 = fully wet)
-    // chord timing
-    chordDuration: 7000,       // ms per chord
-    chordGlide: 2.5,           // seconds to glide between chords
-    // stereo spread for melody notes
-    stereoPanRange: 0.6,       // -0.6 to +0.6
-  },
-  dungeon: {
-    mood: 'oppressive',
-    texture: 'rumble',
-    padWave: 'sawtooth',
-    padDetune: 4,
-    padFilterBase: 100,
-    padFilterLFODepth: 40,
-    padFilterLFORate: 0.04,
-    padVolume: 0.015,
-    bassVolume: 0.014,
-    bassFilterFreq: 80,
-    melodyWave: 'square',
-    melodyVolume: 0.01,
-    melodyVibRate: 0,
-    melodyVibDepth: 0,
-    melodyAttack: 0.2,
-    accentVolume: 0.007,
-    accentWave: 'sawtooth',
-    reverbDuration: 2.0,
-    reverbDecay: 2.5,
-    reverbWet: 0.25,
-    chordDuration: 8000,
-    chordGlide: 3.0,
-    stereoPanRange: 0.4,
-  },
-  wilds: {
-    mood: 'mysterious',
-    texture: 'rustle',
-    padWave: 'triangle',
-    padDetune: 8,
-    padFilterBase: 350,
-    padFilterLFODepth: 200,
-    padFilterLFORate: 0.1,
-    padVolume: 0.016,
-    bassVolume: 0.008,
-    bassFilterFreq: 140,
-    melodyWave: 'triangle',
-    melodyVolume: 0.015,
-    melodyVibRate: 5,
-    melodyVibDepth: 6,
-    melodyAttack: 0.08,
-    accentVolume: 0.01,
-    accentWave: 'sine',
-    reverbDuration: 1.5,
-    reverbDecay: 1.2,
-    reverbWet: 0.2,
-    chordDuration: 6500,
-    chordGlide: 2.0,
-    stereoPanRange: 0.8,
-  },
-  town: {
-    mood: 'peaceful',
-    texture: 'wind',
-    padWave: 'sine',
-    padDetune: 3,
-    padFilterBase: 500,
-    padFilterLFODepth: 150,
-    padFilterLFORate: 0.06,
-    padVolume: 0.014,
-    bassVolume: 0.006,
-    bassFilterFreq: 160,
-    melodyWave: 'sine',
-    melodyVolume: 0.013,
-    melodyVibRate: 5,
-    melodyVibDepth: 4,
-    melodyAttack: 0.06,
-    accentVolume: 0.008,
-    accentWave: 'sine',
-    reverbDuration: 1.8,
-    reverbDecay: 1.5,
-    reverbWet: 0.3,
-    chordDuration: 6000,
-    chordGlide: 1.8,
-    stereoPanRange: 0.7,
-  },
-  eldritch: {
-    mood: 'eldritch',
-    texture: 'rumble',
-    padWave: 'sawtooth',
-    padDetune: 10,
-    padFilterBase: 80,
-    padFilterLFODepth: 30,
-    padFilterLFORate: 0.03,
-    padVolume: 0.012,
-    bassVolume: 0.016,
-    bassFilterFreq: 60,
-    melodyWave: 'square',
-    melodyVolume: 0.008,
-    melodyVibRate: 2,
-    melodyVibDepth: 8,
-    melodyAttack: 0.3,
-    accentVolume: 0.006,
-    accentWave: 'sawtooth',
-    reverbDuration: 4.0,
-    reverbDecay: 1.5,
-    reverbWet: 0.45,
-    chordDuration: 10000,
-    chordGlide: 4.0,
-    stereoPanRange: 0.3,
-  },
-};
-
-export const BIOME_KEYS = Object.keys(BIOME_PROFILES);
-
-
-// ─── utility ────────────────────────────────────────────────────────
-// random float in [min, max]
-function rand(min, max) { return min + Math.random() * (max - min); }
-// random element from array
+// ─── pattern helpers ────────────────────────────────────────────────
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// creates a 32-step pattern from sparse note definitions.
+// each note: [step, freq, durationSteps, velocity(0-1, optional)]
+// unoccupied steps are null (silence).
+function pat(...notes) {
+  const p = new Array(32).fill(null);
+  for (const n of notes) {
+    const [step, freq, dur, vel] = n;
+    p[step] = { f: freq, d: dur, v: vel ?? 1.0 };
+  }
+  return p;
+}
+
+// creates a 32-step arp pattern from chord blocks.
+// each block: [startStep, [chordTones...], durationSteps]
+// rapidly cycles through chord tones at 16th-note speed.
+function arp(...blocks) {
+  const p = new Array(32).fill(null);
+  for (const [start, tones, dur] of blocks) {
+    for (let i = 0; i < dur; i++) {
+      p[start + i] = { f: tones[i % tones.length], d: 1, v: 0.7 };
+    }
+  }
+  return p;
+}
+
+// creates a 32-step noise/percussion pattern.
+// each hit: [step, durationSteps, filterFreq, velocity(optional)]
+// low filterFreq (< 1000) → kick, high → hat.
+function perc(...hits) {
+  const p = new Array(32).fill(null);
+  for (const h of hits) {
+    const [step, dur, ff, vel] = h;
+    p[step] = { d: dur, ff: ff, v: vel ?? 1.0 };
+  }
+  return p;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// composed patterns — 32 steps = 2 bars at 16th-note resolution
+// quarter = 4 steps, eighth = 2, half = 8, whole = 16
+// ═══════════════════════════════════════════════════════════════════
+
+
+// ─── town (c major, 110 bpm) ───────────────────────────────────────
+// feel: warm, welcoming, lilting. shop-browsing music.
+
+const TOWN_LEAD = [
+  // "the greeting" — ascending, optimistic
+  pat(
+    [0,  N.E4, 2],  [2,  N.G4, 2],  [4,  N.A4, 4],
+    [8,  N.G4, 2],  [10, N.E4, 2],  [12, N.D4, 4],
+    [16, N.C4, 4],  [20, N.D4, 2],  [22, N.E4, 2],
+    [24, N.G4, 4],  [28, N.E4, 4],
+  ),
+  // "playful" — bouncy eighth-note rhythm
+  pat(
+    [0,  N.G4, 2],  [2,  N.A4, 2],  [4,  N.G4, 2],  [6,  N.E4, 2],
+    [8,  N.D4, 2],  [10, N.E4, 2],  [12, N.G4, 4],
+    [16, N.A4, 4],  [20, N.G4, 2],  [22, N.E4, 2],
+    [24, N.D4, 2],  [26, N.C4, 2],  [28, N.D4, 4],
+  ),
+  // "resolve" — starts high, descends to rest on tonic
+  pat(
+    [0,  N.C5, 4],  [4,  N.A4, 2],  [6,  N.G4, 2],
+    [8,  N.E4, 4],  [14, N.D4, 2],
+    [16, N.E4, 2],  [18, N.G4, 2],  [20, N.E4, 4],
+    [24, N.C4, 8],
+  ),
+  // "echo phrase" — sparse, lets the delay fill space
+  pat(
+    [0,  N.E4, 3],  [6,  N.G4, 3],
+    [12, N.A4, 3],
+    [20, N.G4, 3],  [26, N.E4, 6],
+  ),
+];
+
+const TOWN_BASS = [
+  // I-IV-V-I, half-note roots
+  pat(
+    [0,  N.C3, 7],  [8,  N.F3, 7],
+    [16, N.G3, 7],  [24, N.C3, 7],
+  ),
+  // I-vi-IV-V, adds a touch of minor color
+  pat(
+    [0,  N.C3, 7],  [8,  N.A2, 7],
+    [16, N.F3, 7],  [24, N.G3, 7],
+  ),
+  // walking bass — more animated, quarter-note motion
+  pat(
+    [0,  N.C3, 3],  [4,  N.E3, 3],  [8,  N.F3, 3],  [12, N.A3, 3],
+    [16, N.G3, 3],  [20, N.E3, 3],  [24, N.D3, 3],  [28, N.C3, 3],
+  ),
+];
+
+const TOWN_ARP = [
+  // C-F-G-C — matches bass pattern a
+  arp(
+    [0,  [N.C4, N.E4, N.G4], 8],
+    [8,  [N.F4, N.A4, N.C5], 8],
+    [16, [N.G4, N.B4, N.D5], 8],
+    [24, [N.C4, N.E4, N.G4], 8],
+  ),
+  // C-Am-F-G — matches bass pattern b
+  arp(
+    [0,  [N.C4, N.E4, N.G4], 8],
+    [8,  [N.A3, N.C4, N.E4], 8],
+    [16, [N.F4, N.A4, N.C5], 8],
+    [24, [N.G4, N.B4, N.D5], 8],
+  ),
+  // sparse half-speed arp — breathing room
+  arp(
+    [0,  [N.C4, N.E4], 4],
+    [8,  [N.F4, N.A4], 4],
+    [16, [N.G4, N.B4], 4],
+    [24, [N.C4, N.E4], 4],
+  ),
+];
+
+
+// ─── jungle (e minor, 95 bpm) ──────────────────────────────────────
+// feel: alive, rhythmic, syncopated. tribal undertone.
+
+const JNG_LEAD = [
+  // "canopy" — syncopated, bouncy, starts on upbeats
+  pat(
+    [0,  N.E4, 2],  [3,  N.G4, 2],  [6,  N.A4, 2],
+    [8,  N.B4, 4],  [14, N.A4, 2],
+    [16, N.G4, 2],  [19, N.E4, 2],  [22, N.D4, 2],
+    [24, N.E4, 4],  [30, N.G4, 2],
+  ),
+  // "river" — flowing stepwise, descends then rises
+  pat(
+    [0,  N.B4, 3],  [4,  N.A4, 2],  [6,  N.G4, 2],
+    [8,  N.E4, 2],  [10, N.D4, 2],  [12, N.E4, 4],
+    [16, N.G4, 2],  [18, N.A4, 2],  [20, N.B4, 4],
+    [24, N.A4, 2],  [28, N.G4, 4],
+  ),
+  // "call" — short motif with space for echo to ring
+  pat(
+    [0,  N.E4, 2],  [2,  N.G4, 2],  [4,  N.B4, 4],
+    [12, N.A4, 2],  [14, N.G4, 2],  [16, N.E4, 6],
+    [24, N.G4, 3],  [28, N.A4, 4],
+  ),
+  // "bird call" — high register, sparse, echoing
+  pat(
+    [2,  N.B4, 2],  [6,  N.E5, 3],
+    [16, N.D5, 2],  [20, N.B4, 4],
+  ),
+];
+
+const JNG_BASS = [
+  // Em-Am-Bm-Em — solid foundation
+  pat(
+    [0,  N.E2, 7],  [8,  N.A2, 7],
+    [16, N.B2, 7],  [24, N.E2, 7],
+  ),
+  // walking bass — keeps momentum going
+  pat(
+    [0,  N.E2, 3],  [4,  N.G3, 3],  [8,  N.A2, 3],  [12, N.B2, 3],
+    [16, N.A2, 3],  [20, N.G3, 3],  [24, N.E2, 3],  [28, N.D3, 3],
+  ),
+  // Em-G-Am-Em — softer harmonic motion
+  pat(
+    [0,  N.E2, 7],  [8,  N.G3, 7],
+    [16, N.A2, 7],  [24, N.E2, 7],
+  ),
+];
+
+const JNG_PERC = [
+  // syncopated kick with busy hats — tribal energy
+  perc(
+    [0,  2, 100],       [6,  1, 5000, 0.35],
+    [8,  2, 100],       [12, 1, 5000, 0.3],  [14, 1, 5000, 0.3],
+    [16, 2, 100],       [22, 1, 5000, 0.35],
+    [24, 2, 100],       [28, 1, 5000, 0.3],  [30, 1, 5000, 0.3],
+  ),
+  // offbeat emphasis — push-pull feel
+  perc(
+    [2,  2, 100, 0.8],  [6,  1, 5000, 0.3],
+    [10, 2, 100],        [14, 1, 5000, 0.3],
+    [18, 2, 100, 0.8],  [22, 1, 5000, 0.3],
+    [26, 2, 100],        [30, 1, 5000, 0.3],
+  ),
+  // sparse — breathing room between busy patterns
+  perc(
+    [0,  2, 100],       [12, 1, 5000, 0.4],
+    [16, 2, 100],       [28, 1, 5000, 0.4],
+  ),
+];
+
+
+// ─── cave (a minor, 60 bpm) ────────────────────────────────────────
+// feel: underground, still, dripping water. melody barely exists.
+// the echo does most of the work here — long delay, high feedback.
+
+const CAVE_LEAD = [
+  // "echo" — one phrase, vast space around it
+  pat(
+    [0,  N.E4, 6],
+    [20, N.A3, 8],
+  ),
+  // "whisper" — mid-register, offset timing
+  pat(
+    [8,  N.C4, 6],
+    [24, N.D4, 6],
+  ),
+  // "sigh" — single long tone, the echo does the rest
+  pat(
+    [12, N.E4, 10],
+  ),
+  // silence — lead drops out completely, just bass and drips
+  pat(),
+];
+
+const CAVE_BASS = [
+  // root drone — barely changes, sets the floor
+  pat(
+    [0,  N.A2, 15],
+    [16, N.A2, 15],
+  ),
+  // root to fifth — minimal motion
+  pat(
+    [0,  N.A2, 15],
+    [16, N.E2, 15],
+  ),
+  // root to minor third — gentle harmonic shift
+  pat(
+    [0,  N.A2, 15],
+    [16, N.C3, 15],
+  ),
+];
+
+const CAVE_DRIP = [
+  // three drips — irregular spacing, varying velocity
+  pat(
+    [3,  N.C5, 1, 0.5],
+    [11, N.E5, 1, 0.4],
+    [22, N.G5, 1, 0.6],
+  ),
+  // two drips — wider spacing
+  pat(
+    [7,  N.E5, 1, 0.5],
+    [19, N.C5, 1, 0.4],
+  ),
+  // single drip — maximum emptiness
+  pat(
+    [15, N.G5, 1, 0.3],
+  ),
+  // no drips — pure silence on this channel
+  pat(),
+];
+
+
+// ─── dungeon (a minor, 80 bpm) ─────────────────────────────────────
+// feel: oppressive, rhythmic, dangerous. percussion drives tension.
+
+const DNG_LEAD = [
+  // "creeping" — sparse, mostly low register
+  pat(
+    [0,  N.A3, 4],
+    [8,  N.C4, 3],
+    [20, N.B3, 2],  [24, N.A3, 6],
+  ),
+  // "descending dread" — starts mid, sinks down
+  pat(
+    [4,  N.E4, 6],
+    [16, N.D4, 4],
+    [24, N.C4, 3],  [28, N.A3, 4],
+  ),
+  // "almost silence" — two notes, maximum tension through absence
+  pat(
+    [12, N.E4, 4],
+    [28, N.A3, 3],
+  ),
+  // "question" — rising phrase, unresolved, leaves you uneasy
+  pat(
+    [2,  N.A3, 2],  [6,  N.C4, 2],
+    [10, N.D4, 3],
+    [18, N.E4, 6],
+  ),
+];
+
+const DNG_BASS = [
+  // oppressive drone on root — relentless
+  pat(
+    [0,  N.A2, 14],
+    [16, N.A2, 14],
+  ),
+  // root and fifth alternating — breathing, but barely
+  pat(
+    [0,  N.A2, 7],  [8,  N.E2, 7],
+    [16, N.A2, 7],  [24, N.E2, 7],
+  ),
+  // iv-V tension — builds toward something
+  pat(
+    [0,  N.A2, 7],  [8,  N.A2, 7],
+    [16, N.D3, 7],  [24, N.E3, 7],
+  ),
+];
+
+const DNG_PERC = [
+  // steady quarter-note kick, offbeat hats
+  perc(
+    [0,  2, 100],  [8,  2, 100],  [16, 2, 100],  [24, 2, 100],
+    [4,  1, 5000, 0.4],  [12, 1, 5000, 0.4],
+    [20, 1, 5000, 0.4],  [28, 1, 5000, 0.4],
+  ),
+  // sparse — kick on 1 and 3, ghost hats
+  perc(
+    [0,  3, 100],       [16, 3, 100],
+    [12, 1, 5000, 0.3], [28, 1, 5000, 0.3],
+  ),
+  // hats only — lightest, most restrained
+  perc(
+    [4,  1, 6000, 0.25], [12, 1, 6000, 0.25],
+    [20, 1, 6000, 0.25], [28, 1, 6000, 0.25],
+  ),
+];
+
+
+// ─── eldritch (chromatic, 70 bpm) ──────────────────────────────────
+// feel: wrong. tritones, minor 2nds, stuttering rhythm.
+// no percussion — the absence of steady pulse is part of the unease.
+
+const ELD_LEAD = [
+  // "the watching" — tritone tension, E against Bb
+  pat(
+    [0,  N.E3, 4],
+    [12, N.Bb3, 6],
+    [24, N.A3, 6],
+  ),
+  // "crawling" — minor 2nd friction, E against F
+  pat(
+    [4,  N.A3, 3],   [8,  N.Bb3, 5],
+    [20, N.E4, 4],   [26, N.F4, 4],
+  ),
+  // "the void stares back" — single dissonant note, alone
+  pat(
+    [14, N.Bb4, 8],
+  ),
+  // silence — sometimes nothing is the scariest sound
+  pat(),
+  // "signal" — stuttering repetition, uncomfortable rhythm
+  pat(
+    [0,  N.E3, 1],  [2,  N.E3, 1],  [5,  N.E3, 1],
+    [16, N.Bb3, 4],
+  ),
+];
+
+const ELD_BASS = [
+  // tritone oscillation — E and Bb, the devil's interval
+  pat(
+    [0,  N.E2, 7],   [8,  N.Bb2, 7],
+    [16, N.E2, 7],   [24, N.Bb2, 7],
+  ),
+  // semitone creep — A sliding to Bb, skin-crawling
+  pat(
+    [0,  N.A2, 7],   [8,  N.Bb2, 7],
+    [16, N.A2, 7],   [24, N.E2, 7],
+  ),
+  // static drone on E — the floor falls away, only the root remains
+  pat(
+    [0,  N.E2, 15],
+    [16, N.E2, 15],
+  ),
+];
+
+const ELD_TEXTURE = [
+  // dissonant high pings — like something tapping on the other side
+  pat(
+    [6,  N.Bb4, 2, 0.4],
+    [18, N.E5, 2, 0.3],
+    [28, N.F4, 2, 0.5],
+  ),
+  // cluster — two notes a semitone apart, nearly simultaneous
+  pat(
+    [0,  N.E4, 1, 0.3],  [1,  N.F4, 1, 0.3],
+    [16, N.Bb4, 3, 0.4],
+  ),
+  // single alien ping
+  pat(
+    [10, N.Eb4, 2, 0.35],
+  ),
+  // silence — texture drops out, just bass and lead (or neither)
+  pat(),
+];
+
+
+// ═══════════════════════════════════════════════════════════════════
+// track definitions
+// ═══════════════════════════════════════════════════════════════════
+
+const TRACKS = {
+  town: {
+    bpm: 110,
+    echo: { delay: 0.18, feedback: 0.25, wet: 0.3, filterFreq: 3500 },
+    channels: [
+      {
+        name: 'lead',
+        wave: 'pulse25',
+        patterns: TOWN_LEAD,
+        volume: 0.055,
+        echoSend: 0.6,
+        envelope: { a: 0.008, d: 0.06, s: 0.7, r: 0.08 },
+      },
+      {
+        name: 'arp',
+        wave: 'pulse12',
+        patterns: TOWN_ARP,
+        volume: 0.022,
+        echoSend: 0.3,
+        envelope: { a: 0.003, d: 0.02, s: 0.6, r: 0.015 },
+      },
+      {
+        name: 'bass',
+        wave: 'triangle',
+        patterns: TOWN_BASS,
+        volume: 0.065,
+        echoSend: 0.0,
+        envelope: { a: 0.005, d: 0.08, s: 0.8, r: 0.1 },
+      },
+    ],
+  },
+
+  jungle: {
+    bpm: 95,
+    // warm echo, medium length — sounds like it's bouncing off trees
+    echo: { delay: 0.22, feedback: 0.28, wet: 0.25, filterFreq: 2800 },
+    channels: [
+      {
+        name: 'lead',
+        wave: 'pulse25',
+        patterns: JNG_LEAD,
+        volume: 0.045,
+        echoSend: 0.5,
+        // snappier envelope than town — more rhythmic, percussive feel
+        envelope: { a: 0.005, d: 0.04, s: 0.65, r: 0.06 },
+      },
+      {
+        name: 'bass',
+        wave: 'triangle',
+        patterns: JNG_BASS,
+        volume: 0.06,
+        echoSend: 0.0,
+        envelope: { a: 0.008, d: 0.1, s: 0.8, r: 0.1 },
+      },
+      {
+        name: 'perc',
+        wave: 'noise',
+        patterns: JNG_PERC,
+        volume: 0.035,
+        echoSend: 0.1,
+        envelope: { a: 0.003, d: 0.04, s: 0.3, r: 0.03 },
+      },
+    ],
+  },
+
+  cave: {
+    bpm: 60,
+    // very long delay, high feedback, dark filter — vast underground space.
+    // the echo practically becomes its own instrument here.
+    echo: { delay: 0.4, feedback: 0.4, wet: 0.4, filterFreq: 1200 },
+    channels: [
+      {
+        name: 'lead',
+        wave: 'sine',          // sine for pure, haunting tones
+        patterns: CAVE_LEAD,
+        volume: 0.035,
+        echoSend: 0.8,         // almost everything goes to echo
+        // slow attack, long release — notes breathe in and fade out
+        envelope: { a: 0.05, d: 0.15, s: 0.6, r: 0.2 },
+      },
+      {
+        name: 'bass',
+        wave: 'triangle',
+        patterns: CAVE_BASS,
+        volume: 0.045,
+        echoSend: 0.05,        // bass stays grounded
+        envelope: { a: 0.02, d: 0.2, s: 0.85, r: 0.15 },
+      },
+      {
+        name: 'drip',
+        wave: 'sine',          // sine pings — water dripping from stalactites
+        patterns: CAVE_DRIP,
+        volume: 0.03,
+        echoSend: 0.9,         // drips are almost entirely echo
+        // extremely short envelope — tiny pluck, then the reverb takes over
+        envelope: { a: 0.002, d: 0.01, s: 0.3, r: 0.02 },
+      },
+    ],
+  },
+
+  dungeon: {
+    bpm: 80,
+    // long delay, dark filter — stone corridors
+    echo: { delay: 0.28, feedback: 0.35, wet: 0.25, filterFreq: 1800 },
+    channels: [
+      {
+        name: 'lead',
+        wave: 'pulse25',
+        patterns: DNG_LEAD,
+        volume: 0.04,
+        echoSend: 0.7,
+        envelope: { a: 0.015, d: 0.1, s: 0.6, r: 0.15 },
+      },
+      {
+        name: 'bass',
+        wave: 'triangle',
+        patterns: DNG_BASS,
+        volume: 0.06,
+        echoSend: 0.05,
+        envelope: { a: 0.01, d: 0.15, s: 0.85, r: 0.12 },
+      },
+      {
+        name: 'perc',
+        wave: 'noise',
+        patterns: DNG_PERC,
+        volume: 0.04,
+        echoSend: 0.15,
+        envelope: { a: 0.003, d: 0.05, s: 0.3, r: 0.04 },
+      },
+    ],
+  },
+
+  eldritch: {
+    bpm: 70,
+    // long, dark, lots of feedback — sounds pile up and smear together.
+    // the 1000hz filter makes repeats muddy and indistinct. intentional.
+    echo: { delay: 0.35, feedback: 0.4, wet: 0.3, filterFreq: 1000 },
+    channels: [
+      {
+        name: 'lead',
+        wave: 'pulse25',
+        patterns: ELD_LEAD,
+        volume: 0.035,
+        echoSend: 0.7,
+        // slow attack gives notes a creeping-in quality
+        envelope: { a: 0.02, d: 0.12, s: 0.5, r: 0.2 },
+      },
+      {
+        name: 'bass',
+        wave: 'triangle',
+        patterns: ELD_BASS,
+        volume: 0.055,
+        echoSend: 0.1,
+        envelope: { a: 0.015, d: 0.2, s: 0.8, r: 0.15 },
+      },
+      {
+        name: 'texture',
+        wave: 'pulse12',      // thin, buzzy — alien/wrong timbre
+        patterns: ELD_TEXTURE,
+        volume: 0.02,
+        echoSend: 0.6,
+        envelope: { a: 0.01, d: 0.03, s: 0.4, r: 0.05 },
+      },
+    ],
+  },
+};
+
+
+// ─── biome → track mapping ──────────────────────────────────────────
+const BIOME_TRACK_MAP = {
+  town:       'town',
+  jungle:     'jungle',
+  dirt_cave:  'cave',
+  stone_cave: 'cave',
+  cave:       'cave',
+  dungeon:    'dungeon',
+  wilds:      'jungle',
+  eldritch:   'eldritch',
+};
+
+export const BIOME_KEYS = Object.keys(TRACKS);
 
 
 // ═══════════════════════════════════════════════════════════════════
 // audio manager
 // ═══════════════════════════════════════════════════════════════════
+
 export class AudioManager {
   constructor() {
     this.ctx = null;
     this.sfxVolume = 0.7;
     this.ambientVolume = 0.7;
-    this.ambientNode = null;
+    this._seq = null;
+    // custom pulse waveforms (built on init)
+    this.pulseWave25 = null;
+    this.pulseWave12 = null;
   }
 
   init() {
     try {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      this._buildWaveforms();
     } catch (e) {
       console.warn('web audio api not available');
     }
+  }
+
+
+  // ─── custom waveforms ───────────────────────────────────────────
+  // the snes spc700 used 4-bit brr samples, but its most iconic sounds
+  // were pulse waves at various duty cycles. web audio only gives us a
+  // 50% square natively, so we build 25% and 12.5% from fourier series.
+  _buildWaveforms() {
+    if (!this.ctx) return;
+    const h = 64;
+
+    // 25% pulse — the classic chiptune lead: hollow, slightly nasal
+    const real25 = new Float32Array(h);
+    const imag25 = new Float32Array(h);
+    for (let i = 1; i < h; i++) {
+      imag25[i] = (2 / (i * Math.PI)) * Math.sin(i * Math.PI * 0.25);
+    }
+    this.pulseWave25 = this.ctx.createPeriodicWave(real25, imag25, {
+      disableNormalization: false,
+    });
+
+    // 12.5% pulse — thinner, buzzier, good for arps and texture
+    const real12 = new Float32Array(h);
+    const imag12 = new Float32Array(h);
+    for (let i = 1; i < h; i++) {
+      imag12[i] = (2 / (i * Math.PI)) * Math.sin(i * Math.PI * 0.125);
+    }
+    this.pulseWave12 = this.ctx.createPeriodicWave(real12, imag12, {
+      disableNormalization: false,
+    });
   }
 
   ensureContext() {
@@ -326,16 +665,14 @@ export class AudioManager {
 
   setAmbientVolume(v) {
     this.ambientVolume = Math.max(0, Math.min(1, v));
-    // live-update ambient gain if playing
-    if (this.ambientNode) {
-      const p = this.ambientNode.profile;
-      if (this.ambientNode.padGain)  this.ambientNode.padGain.gain.value  = p.padVolume  * v;
-      if (this.ambientNode.bassGain) this.ambientNode.bassGain.gain.value = p.bassVolume * v;
+    if (this._seq && this._seq.masterGain && this.ctx) {
+      this._seq.masterGain.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
     }
   }
 
 
   // ─── sfx utilities ──────────────────────────────────────────────
+
   _createGain(volume) {
     if (!this.ctx) return null;
     const gain = this.ctx.createGain();
@@ -350,9 +687,7 @@ export class AudioManager {
     const bufferSize = this.ctx.sampleRate * duration;
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
     const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * volume;
-    }
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * volume;
     const source = this.ctx.createBufferSource();
     source.buffer = buffer;
     const gain = this._createGain(volume);
@@ -378,6 +713,7 @@ export class AudioManager {
 
 
   // ─── sound effects ──────────────────────────────────────────────
+
   footstep()     { this._noise(0.05, 0.1); }
 
   meleeHit() {
@@ -508,170 +844,175 @@ export class AudioManager {
 
 
   // ═══════════════════════════════════════════════════════════════
-  // ambient system
+  // ambient music — snes-style pattern sequencer
   // ═══════════════════════════════════════════════════════════════
 
-  // ─── reverb: generate a stereo impulse response procedurally ──
-  _createReverb(duration, decay) {
-    const length = Math.floor(this.ctx.sampleRate * duration);
-    const impulse = this.ctx.createBuffer(2, length, this.ctx.sampleRate);
+  // ─── echo bus ─────────────────────────────────────────────────
+  // recreates the spc700 echo: delay with filtered feedback loop.
+  // each repeat passes through a lowpass, getting progressively
+  // darker — this is the defining warmth of snes audio.
+  _buildEcho(config) {
+    const delay = this.ctx.createDelay(1.0);
+    delay.delayTime.value = config.delay;
 
-    for (let ch = 0; ch < 2; ch++) {
-      const data = impulse.getChannelData(ch);
-      for (let i = 0; i < length; i++) {
-        // exponential decay envelope with random noise
-        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = config.filterFreq;
+
+    const feedback = this.ctx.createGain();
+    feedback.gain.value = config.feedback;
+
+    const wet = this.ctx.createGain();
+    wet.gain.value = config.wet * this.ambientVolume;
+
+    // routing: send → delay → filter → feedback → delay (loop)
+    //                                → wet → destination
+    delay.connect(filter);
+    filter.connect(feedback);
+    feedback.connect(delay);
+    filter.connect(wet);
+    wet.connect(this.ctx.destination);
+
+    const send = this.ctx.createGain();
+    send.gain.value = 1.0;
+    send.connect(delay);
+
+    return { send, wet, delay, filter, feedback };
+  }
+
+
+  // ─── schedule a tonal note ────────────────────────────────────
+  _scheduleNote(channel, note, time, stepDur, dryBus, echoBus) {
+    const dur = note.d * stepDur;
+    const vol = channel.volume * note.v * this.ambientVolume;
+    const env = channel.envelope;
+
+    const osc = this.ctx.createOscillator();
+
+    // apply waveform
+    if (channel.wave === 'pulse25' && this.pulseWave25) {
+      osc.setPeriodicWave(this.pulseWave25);
+    } else if (channel.wave === 'pulse12' && this.pulseWave12) {
+      osc.setPeriodicWave(this.pulseWave12);
+    } else {
+      osc.type = channel.wave;
+    }
+    osc.frequency.value = note.f;
+
+    // adsr gain envelope
+    const gain = this.ctx.createGain();
+    const attack  = Math.min(env.a, dur * 0.25);
+    const release = Math.min(env.r, dur * 0.4);
+    const sustainStart = time + attack;
+    const releaseStart = time + dur - release;
+
+    gain.gain.setValueAtTime(0.001, time);
+    gain.gain.linearRampToValueAtTime(vol, time + attack);
+    if (sustainStart < releaseStart) {
+      gain.gain.setTargetAtTime(vol * env.s, sustainStart, env.d);
+    }
+    if (releaseStart > sustainStart) {
+      gain.gain.setValueAtTime(vol * env.s, releaseStart);
+    }
+    gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+
+    osc.connect(gain);
+    gain.connect(dryBus);
+
+    // echo send
+    if (channel.echoSend > 0 && echoBus) {
+      const sendGain = this.ctx.createGain();
+      sendGain.gain.value = channel.echoSend;
+      gain.connect(sendGain);
+      sendGain.connect(echoBus);
+    }
+
+    osc.start(time);
+    osc.stop(time + dur + 0.02);
+  }
+
+
+  // ─── schedule a noise percussion hit ──────────────────────────
+  _scheduleNoise(channel, hit, time, stepDur, dryBus, echoBus) {
+    const dur = hit.d * stepDur;
+    const vol = channel.volume * hit.v * this.ambientVolume;
+
+    // noise buffer with baked-in envelope curve
+    const bufLen = Math.max(1, Math.floor(this.ctx.sampleRate * dur));
+    const buffer = this.ctx.createBuffer(1, bufLen, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) {
+      const pos = i / bufLen;
+      const envCurve = pos < 0.05 ? (pos / 0.05) : Math.pow(1 - pos, 2);
+      data[i] = (Math.random() * 2 - 1) * envCurve;
+    }
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+
+    // filter: lowpass for kicks, highpass for hats
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = hit.ff >= 1000 ? 'highpass' : 'lowpass';
+    filter.frequency.value = hit.ff;
+    filter.Q.value = hit.ff >= 1000 ? 1 : 3;
+
+    const gain = this.ctx.createGain();
+    gain.gain.value = vol;
+
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(dryBus);
+
+    if (channel.echoSend > 0 && echoBus) {
+      const sendGain = this.ctx.createGain();
+      sendGain.gain.value = channel.echoSend;
+      gain.connect(sendGain);
+      sendGain.connect(echoBus);
+    }
+
+    src.start(time);
+  }
+
+
+  // ─── sequencer: schedule one 2-bar round ──────────────────────
+  // each channel independently picks a random pattern from its pool,
+  // creating variety through combinatorics without losing musicality.
+  _scheduleRound(startTime) {
+    if (!this._seq || !this._seq.running) return;
+
+    const track = this._seq.track;
+    const stepDur = 60 / track.bpm / 4;  // one 16th note
+    const roundDur = 32 * stepDur;        // 2 bars
+
+    for (const channel of track.channels) {
+      const pattern = pick(channel.patterns);
+
+      for (let step = 0; step < 32; step++) {
+        const note = pattern[step];
+        if (!note) continue;
+
+        const noteTime = startTime + step * stepDur;
+
+        if (channel.wave === 'noise') {
+          this._scheduleNoise(channel, note, noteTime, stepDur,
+            this._seq.masterGain, this._seq.echo.send);
+        } else {
+          this._scheduleNote(channel, note, noteTime, stepDur,
+            this._seq.masterGain, this._seq.echo.send);
+        }
       }
     }
 
-    const convolver = this.ctx.createConvolver();
-    convolver.buffer = impulse;
-    return convolver;
-  }
-
-  // ─── phrase generation ────────────────────────────────────────
-  // builds a short melodic phrase that relates to the current chord
-  _generatePhrase(mood, currentChord) {
-    const [minLen, maxLen] = mood.phraseLength;
-    const length = minLen + Math.floor(Math.random() * (maxLen - minLen + 1));
-    const scale = mood.melodyScale;
-
-    // find chord tones that exist in the melody scale (or octave equivalents)
-    const chordTonesInScale = currentChord
-      .flatMap(f => scale.filter(s => {
-        const ratio = s / f;
-        return Math.abs(ratio - 1) < 0.01 || Math.abs(ratio - 2) < 0.01 || Math.abs(ratio - 0.5) < 0.01;
-      }))
-      .filter((v, i, a) => a.indexOf(v) === i); // deduplicate
-
-    const startPool = chordTonesInScale.length > 0 ? chordTonesInScale : scale;
-    const startNote = pick(startPool);
-
-    const phrase = [startNote];
-    let idx = scale.indexOf(startNote);
-    if (idx === -1) idx = Math.floor(scale.length / 2);
-
-    for (let i = 1; i < length; i++) {
-      // rest: insert null to create rhythmic gaps
-      if (Math.random() < (mood.restChance || 0)) {
-        phrase.push(null);
-        continue;
-      }
-
-      if (Math.random() < 0.25) {
-        // leap to a chord tone
-        const target = pick(chordTonesInScale.length > 0 ? chordTonesInScale : scale);
-        idx = scale.indexOf(target);
-        if (idx === -1) idx = Math.floor(scale.length / 2);
-        phrase.push(target);
-      } else {
-        // stepwise motion with direction bias
-        const direction = (Math.random() + mood.directionBias > 0.5) ? 1 : -1;
-        idx = Math.max(0, Math.min(scale.length - 1, idx + direction));
-        phrase.push(scale[idx]);
-      }
-    }
-
-    return phrase;
-  }
-
-  // ─── texture layer: procedural environmental sounds ───────────
-  // schedules recurring filtered noise bursts + optional tonal pings
-  _startTexture(profile, reverbSend) {
-    const texDef = TEXTURES[profile.texture];
-    if (!texDef) return null;
-
-    let running = true;
-    let timeout = null;
-
-    const playBurst = () => {
-      if (!running || !this.ctx) return;
-
-      const now = this.ctx.currentTime;
-      const duration = rand(...texDef.burstDuration);
-      const vol = rand(...texDef.volume) * this.ambientVolume;
-
-      // noise burst
-      const bufLen = Math.floor(this.ctx.sampleRate * duration);
-      const buf = this.ctx.createBuffer(1, bufLen, this.ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < bufLen; i++) {
-        // apply a fade-in/fade-out envelope to avoid clicks
-        const env = Math.sin(Math.PI * i / bufLen);
-        data[i] = (Math.random() * 2 - 1) * env;
-      }
-
-      const src = this.ctx.createBufferSource();
-      src.buffer = buf;
-
-      // filter
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = texDef.filterType;
-      filter.frequency.value = rand(...texDef.filterFreq);
-      filter.Q.value = rand(...texDef.filterQ);
-
-      // gain
-      const gain = this.ctx.createGain();
-      gain.gain.value = vol;
-
-      // stereo placement
-      const pan = this.ctx.createStereoPanner();
-      pan.pan.value = rand(-0.8, 0.8);
-
-      // connect: src → filter → gain → pan → [destination + reverb send]
-      src.connect(filter);
-      filter.connect(gain);
-      gain.connect(pan);
-      pan.connect(this.ctx.destination);
-      if (reverbSend) {
-        pan.connect(reverbSend);
-      }
-
-      src.start(now);
-
-      // optional tonal ping (e.g. drip resonance)
-      if (texDef.toneChance > 0 && Math.random() < texDef.toneChance && texDef.toneFreqs.length > 0) {
-        const tFreq = pick(texDef.toneFreqs);
-        const tDur = rand(...texDef.toneDuration);
-        const osc = this.ctx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.value = tFreq;
-
-        const tGain = this.ctx.createGain();
-        tGain.gain.setValueAtTime(0.001, now);
-        tGain.gain.linearRampToValueAtTime(texDef.toneVolume * this.ambientVolume, now + 0.005);
-        tGain.gain.exponentialRampToValueAtTime(0.001, now + tDur);
-
-        const tPan = this.ctx.createStereoPanner();
-        tPan.pan.value = pan.pan.value + rand(-0.1, 0.1); // slightly offset from noise
-
-        osc.connect(tGain);
-        tGain.connect(tPan);
-        tPan.connect(this.ctx.destination);
-        if (reverbSend) tPan.connect(reverbSend);
-
-        osc.start(now);
-        osc.stop(now + tDur);
-      }
-
-      // schedule next burst
-      const nextDelay = rand(...texDef.burstInterval);
-      timeout = setTimeout(playBurst, nextDelay);
-    };
-
-    // start after a short random delay
-    timeout = setTimeout(playBurst, rand(500, 2000));
-
-    return {
-      stop() {
-        running = false;
-        if (timeout) clearTimeout(timeout);
-      }
-    };
+    // schedule next round 80ms before this one ends (seamless transition)
+    const msUntilNext = (startTime + roundDur - this.ctx.currentTime) * 1000 - 80;
+    this._seq.timeout = setTimeout(() => {
+      this._scheduleRound(startTime + roundDur);
+    }, Math.max(0, msUntilNext));
   }
 
 
-  // ─── start ambient ────────────────────────────────────────────
+  // ─── public api ───────────────────────────────────────────────
+
   startAmbient(floorNumber) {
     const biome = getBiome(floorNumber);
     this.startAmbientBiome(biome);
@@ -682,264 +1023,63 @@ export class AudioManager {
     this.ensureContext();
     this.stopAmbient();
 
-    const profile = BIOME_PROFILES[biomeKey] || BIOME_PROFILES.dungeon;
-    const mood = MOODS[profile.mood];
+    const trackKey = BIOME_TRACK_MAP[biomeKey] || 'dungeon';
+    const track = TRACKS[trackKey];
+    if (!track) return;
 
-    // pick a random chord progression
-    const progression = pick(mood.progressions);
-    let chordIndex = 0;
-    let currentChord = progression[0];
+    // master gain for volume control + clean fade-outs
+    const masterGain = this.ctx.createGain();
+    masterGain.gain.value = this.ambientVolume;
+    masterGain.connect(this.ctx.destination);
 
-    // ── reverb bus ──
-    const reverb = this._createReverb(profile.reverbDuration, profile.reverbDecay);
-    const reverbGain = this.ctx.createGain();
-    reverbGain.gain.value = profile.reverbWet * this.ambientVolume;
-    reverb.connect(reverbGain);
-    reverbGain.connect(this.ctx.destination);
+    const echo = this._buildEcho(track.echo);
 
-    // ── pad layer: detuned oscillator pairs through lfo-modulated filter ──
-    const padOscs = [];
-    currentChord.forEach(freq => {
-      // two oscillators per chord tone, slightly detuned for chorus
-      const oscA = this.ctx.createOscillator();
-      oscA.type = profile.padWave;
-      oscA.frequency.value = freq;
-      oscA.detune.value = -profile.padDetune;
-
-      const oscB = this.ctx.createOscillator();
-      oscB.type = profile.padWave;
-      oscB.frequency.value = freq;
-      oscB.detune.value = profile.padDetune;
-
-      padOscs.push({ a: oscA, b: oscB, baseFreq: freq });
-    });
-
-    // pad filter with lfo modulation
-    const padFilter = this.ctx.createBiquadFilter();
-    padFilter.type = 'lowpass';
-    padFilter.frequency.value = profile.padFilterBase;
-    padFilter.Q.value = 1.5;
-
-    // lfo → pad filter cutoff for organic movement
-    const padLFO = this.ctx.createOscillator();
-    padLFO.type = 'sine';
-    padLFO.frequency.value = profile.padFilterLFORate;
-    const padLFOGain = this.ctx.createGain();
-    padLFOGain.gain.value = profile.padFilterLFODepth;
-    padLFO.connect(padLFOGain);
-    padLFOGain.connect(padFilter.frequency);
-    padLFO.start();
-
-    // pad gain
-    const padGain = this.ctx.createGain();
-    padGain.gain.value = profile.padVolume * this.ambientVolume;
-
-    // connect pad: oscs → filter → gain → [destination + reverb]
-    padOscs.forEach(({ a, b }) => {
-      a.connect(padFilter);
-      b.connect(padFilter);
-      a.start();
-      b.start();
-    });
-    padFilter.connect(padGain);
-    padGain.connect(this.ctx.destination);
-    padGain.connect(reverb);
-
-    // ── bass layer ──
-    const bassOsc = this.ctx.createOscillator();
-    bassOsc.type = 'sine';
-    bassOsc.frequency.value = currentChord[0] / 2;
-
-    const bassFilter = this.ctx.createBiquadFilter();
-    bassFilter.type = 'lowpass';
-    bassFilter.frequency.value = profile.bassFilterFreq;
-
-    const bassGain = this.ctx.createGain();
-    bassGain.gain.value = profile.bassVolume * this.ambientVolume;
-
-    bassOsc.connect(bassFilter);
-    bassFilter.connect(bassGain);
-    bassGain.connect(this.ctx.destination);
-    bassOsc.start();
-
-    // ── chord progression timer ──
-    const advanceChord = () => {
-      chordIndex = (chordIndex + 1) % progression.length;
-      currentChord = progression[chordIndex];
-      const now = this.ctx.currentTime;
-      const glide = profile.chordGlide;
-
-      // glide pad oscillators to new chord tones
-      padOscs.forEach((pair, i) => {
-        const target = currentChord[i % currentChord.length];
-        pair.a.frequency.linearRampToValueAtTime(target, now + glide);
-        pair.b.frequency.linearRampToValueAtTime(target, now + glide);
-        pair.baseFreq = target;
-      });
-
-      // glide bass
-      bassOsc.frequency.linearRampToValueAtTime(currentChord[0] / 2, now + glide);
-    };
-    const chordInterval = setInterval(advanceChord, profile.chordDuration);
-
-    // ── texture layer ──
-    const textureHandle = this._startTexture(profile, reverb);
-
-    // ── melody layer ──
-    let melodyTimeout = null;
-
-    const playPhrase = () => {
-      if (!this.ctx || !this.ambientNode) return;
-
-      const chord = this.ambientNode.getCurrentChord();
-      const phrase = this._generatePhrase(mood, chord);
-      const [minSpacing, maxSpacing] = mood.noteSpacing;
-      const now = this.ctx.currentTime;
-
-      phrase.forEach((freq, i) => {
-        if (freq === null) return; // rest
-
-        const noteTime = now + i * rand(minSpacing, maxSpacing) / 1000;
-        const duration = rand(0.5, 1.2);
-        const attack = profile.melodyAttack;
-
-        // oscillator
-        const osc = this.ctx.createOscillator();
-        osc.type = profile.melodyWave;
-        osc.frequency.value = freq;
-
-        // optional vibrato
-        if (profile.melodyVibRate > 0 && profile.melodyVibDepth > 0) {
-          const vibLFO = this.ctx.createOscillator();
-          vibLFO.type = 'sine';
-          vibLFO.frequency.value = profile.melodyVibRate;
-          const vibGain = this.ctx.createGain();
-          vibGain.gain.value = profile.melodyVibDepth;
-          vibLFO.connect(vibGain);
-          vibGain.connect(osc.detune);
-          vibLFO.start(noteTime);
-          vibLFO.stop(noteTime + duration);
-        }
-
-        // gain envelope: soft attack → sustain → decay
-        const gain = this.ctx.createGain();
-        gain.gain.setValueAtTime(0.001, noteTime);
-        gain.gain.linearRampToValueAtTime(
-          profile.melodyVolume * this.ambientVolume,
-          noteTime + attack
-        );
-        gain.gain.setValueAtTime(
-          profile.melodyVolume * this.ambientVolume,
-          noteTime + attack + 0.05
-        );
-        gain.gain.exponentialRampToValueAtTime(0.001, noteTime + duration);
-
-        // stereo pan: random position within the biome's spread
-        const pan = this.ctx.createStereoPanner();
-        pan.pan.value = rand(-profile.stereoPanRange, profile.stereoPanRange);
-
-        // connect: osc → gain → pan → [destination + reverb]
-        osc.connect(gain);
-        gain.connect(pan);
-        pan.connect(this.ctx.destination);
-        pan.connect(reverb);
-
-        osc.start(noteTime);
-        osc.stop(noteTime + duration);
-      });
-
-      // accent: high-register chord-tone ping after the phrase
-      if (Math.random() < mood.accentChance) {
-        const accentDelay = phrase.length * maxSpacing / 1000 + rand(0.1, 0.4);
-        const accentTime = now + accentDelay;
-        const accentFreq = pick(mood.accentScale);
-        const accentDur = rand(0.4, 0.8);
-
-        const osc = this.ctx.createOscillator();
-        osc.type = profile.accentWave;
-        osc.frequency.value = accentFreq;
-
-        const gain = this.ctx.createGain();
-        gain.gain.setValueAtTime(0.001, accentTime);
-        gain.gain.linearRampToValueAtTime(
-          profile.accentVolume * this.ambientVolume,
-          accentTime + 0.06
-        );
-        gain.gain.exponentialRampToValueAtTime(0.001, accentTime + accentDur);
-
-        const pan = this.ctx.createStereoPanner();
-        pan.pan.value = rand(-profile.stereoPanRange, profile.stereoPanRange);
-
-        osc.connect(gain);
-        gain.connect(pan);
-        pan.connect(this.ctx.destination);
-        pan.connect(reverb); // accents go heavy through reverb
-
-        osc.start(accentTime);
-        osc.stop(accentTime + accentDur);
-      }
-
-      // schedule next phrase
-      const [minPause, maxPause] = mood.phrasePause;
-      melodyTimeout = setTimeout(playPhrase, rand(minPause, maxPause));
+    this._seq = {
+      running: true,
+      track,
+      masterGain,
+      echo,
+      timeout: null,
     };
 
-    // start first phrase after a delay
-    melodyTimeout = setTimeout(playPhrase, rand(2000, 4000));
-
-    // ── store references for cleanup and live access ──
-    this.ambientNode = {
-      padOscs,
-      padFilter,
-      padLFO,
-      padLFOGain,
-      padGain,
-      bassOsc,
-      bassGain,
-      reverb,
-      reverbGain,
-      chordInterval,
-      melodyTimeout,
-      textureHandle,
-      getCurrentChord: () => currentChord,
-      profile,
-      mood,
-    };
+    this._scheduleRound(this.ctx.currentTime + 0.1);
   }
 
-
-  // ─── stop ambient ─────────────────────────────────────────────
   stopAmbient() {
-    if (!this.ambientNode) return;
-    const a = this.ambientNode;
+    if (!this._seq) return;
 
-    // stop pad oscillators (detuned pairs)
-    if (a.padOscs) {
-      a.padOscs.forEach(({ a: oscA, b: oscB }) => {
-        try { oscA.stop(); } catch (e) {}
-        try { oscB.stop(); } catch (e) {}
-      });
+    this._seq.running = false;
+    if (this._seq.timeout) clearTimeout(this._seq.timeout);
+
+    // 300ms fade-out to avoid clicks
+    if (this._seq.masterGain && this.ctx) {
+      const now = this.ctx.currentTime;
+      this._seq.masterGain.gain.setValueAtTime(
+        this._seq.masterGain.gain.value, now
+      );
+      this._seq.masterGain.gain.linearRampToValueAtTime(0, now + 0.3);
+
+      if (this._seq.echo?.wet) {
+        this._seq.echo.wet.gain.setValueAtTime(
+          this._seq.echo.wet.gain.value, now
+        );
+        this._seq.echo.wet.gain.linearRampToValueAtTime(0, now + 0.3);
+      }
+
+      // disconnect after fade
+      const ref = this._seq;
+      setTimeout(() => {
+        try {
+          ref.masterGain.disconnect();
+          ref.echo.send.disconnect();
+          ref.echo.wet.disconnect();
+          ref.echo.delay.disconnect();
+          ref.echo.filter.disconnect();
+          ref.echo.feedback.disconnect();
+        } catch (e) { /* already collected */ }
+      }, 350);
     }
 
-    // stop pad lfo
-    if (a.padLFO) {
-      try { a.padLFO.stop(); } catch (e) {}
-    }
-
-    // stop bass
-    if (a.bassOsc) {
-      try { a.bassOsc.stop(); } catch (e) {}
-    }
-
-    // clear chord timer
-    if (a.chordInterval) clearInterval(a.chordInterval);
-
-    // clear melody timer
-    if (a.melodyTimeout) clearTimeout(a.melodyTimeout);
-
-    // stop texture layer
-    if (a.textureHandle) a.textureHandle.stop();
-
-    this.ambientNode = null;
+    this._seq = null;
   }
 }
