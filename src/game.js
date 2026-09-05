@@ -11,12 +11,15 @@ import { tickCooldowns, updateActiveSkills } from './skills.js';
 import { HubShop, loadSaveData, persistSaveData, ACHIEVEMENTS } from './progression.js';
 import { AudioManager, BIOME_KEYS } from './audio.js';
 import { resolvePassiveEffects, canInvestSkill, investSkill, createTreeActiveSkills } from './skill-tree.js';
+import { clearRegions, findRegion, registerRegion, drawButton } from './ui.js';
+import { findPath } from './pathfinding.js';
 
 // game-utils.js — shared helpers
 import {
   isDirectionalAction,
   cloneItem,
   getEntityStatsWithEquipment,
+  getPlayerAttackType,
   getNaturalRegenInterval,
   getRegenAmount,
   recalcPlayerMaxHp,
@@ -50,7 +53,7 @@ import {
 import { startFloor, handleFloorTransition } from './game-floor.js';
 
 // town.js — town map & spawn
-import { buildTownMap, getTownSpawnPos } from './town.js';
+import { buildTownMap, getTownSpawnPos, SHELTER_ENTRANCE_POS } from './town.js';
 
 // game-screens.js — all draw functions
 import {
@@ -75,6 +78,8 @@ import { getXPForNextLevel, XP_TABLE } from './skill-tree.js';
 
 // height of the status bars drawn above and below the town view
 export const TOWN_BAR_HEIGHT = 30;
+// milliseconds between automatic steps when travelling to a tapped tile
+export const TRAVEL_STEP_MS = 70;
 
 export class Game {
   constructor(canvas) {
@@ -135,6 +140,11 @@ export class Game {
     this.townPlayerPos = null;
     this.townMoveTimer = 0;
     this.townInteractPrompt = false;
+    // tap targets registered by the draw functions each frame
+    this.ui = { regions: [] };
+    // tap-to-travel state for the dungeon and the town
+    this.travel = null;
+    this.townTravel = null;
   }
 
   init() {
@@ -168,6 +178,9 @@ export class Game {
     this.camera = new Camera(this.canvas.width, this.canvas.height - this.hud.hudHeight, this.getCameraZoom());
     this.renderer = new Renderer(this.canvas, this.sprites, this.camera);
     this.input.start();
+    this.input.attachPointer(this.canvas);
+    // browsers keep audio suspended until the first user gesture
+    this.input.onInput = () => { if (this.audio) this.audio.ensureContext(); };
 
     window.addEventListener('resize', () => {
       this.resizeCanvas();
@@ -334,6 +347,9 @@ export class Game {
     const currentTile = this.townMap.getTile(this.townPlayerPos.x, this.townPlayerPos.y);
     this.townInteractPrompt = (currentTile === TILE.SHELTER_ENTRANCE);
 
+    if (action && action.type !== 'townTravel') this.townTravel = null;
+    if (action && action.type === 'townTravel') action = null;
+
     if (action) {
       if ((action.type === 'inventoryConfirm' || action.type === 'wait') && this.townInteractPrompt) {
         this.saveData.townPlayerPos = { ...this.townPlayerPos };
@@ -358,7 +374,19 @@ export class Game {
 
     const now = this.getNowMs();
     if (now - this.townMoveTimer >= TOWN_MOVE_DELAY) {
-      const dir = this.input.getHeldDirection();
+      let dir = this.input.getHeldDirection();
+      if (dir) this.townTravel = null;
+      else if (this.townTravel) {
+        const next = this.townTravel.path.shift();
+        if (next) {
+          dir = { dx: next.x - this.townPlayerPos.x, dy: next.y - this.townPlayerPos.y };
+        }
+        if (this.townTravel.path.length === 0) {
+          const enter = this.townTravel.enterOnArrive;
+          this.townTravel = null;
+          if (enter) this.townTravel = { path: [], enterPending: true };
+        }
+      }
       if (dir) {
         const nx = this.townPlayerPos.x + dir.dx;
         const ny = this.townPlayerPos.y + dir.dy;
@@ -373,7 +401,170 @@ export class Game {
           }
         }
       }
+      // a tap on the shelter walks to the door and steps inside
+      if (this.townTravel?.enterPending) {
+        this.townTravel = null;
+        const tile = this.townMap.getTile(this.townPlayerPos.x, this.townPlayerPos.y);
+        if (tile === TILE.SHELTER_ENTRANCE) {
+          this.saveData.townPlayerPos = { ...this.townPlayerPos };
+          persistSaveData(this.saveData);
+          this.enterHubMenu();
+        }
+      }
     }
+  }
+
+  // --- pointer input: taps and swipes become ordinary actions ---
+
+  translatePointerAction(gesture) {
+    const overlayOpen = this.inventoryOpen || this.statsOpen || this.mapOpen;
+    if (gesture.type === 'tap') {
+      const region = findRegion(this.ui.regions, gesture.x, gesture.y);
+      if (region) {
+        return typeof region.action === 'function' ? region.action(this) : region.action;
+      }
+      if (this.state === 'playing' && !overlayOpen) return this.handleMapTap(gesture.x, gesture.y);
+      if (this.state === 'town') return this.handleTownTap(gesture.x, gesture.y);
+      if (this.state === 'deathSplash' || this.state === 'victory') return { type: 'inventoryConfirm' };
+      return null;
+    }
+    // swipe: one step (or attack) in the dungeon, one step in town, cursor movement in menus
+    const { dx, dy } = gesture;
+    if (this.state === 'playing' && !overlayOpen && this.player) {
+      const nx = this.player.position.x + dx;
+      const ny = this.player.position.y + dy;
+      const enemy = this.map.entities.find(e => e.type === 'enemy' && e.isAlive() && e.position.x === nx && e.position.y === ny);
+      if (enemy) return { type: 'attack', dx, dy };
+      return { type: 'move', dx, dy };
+    }
+    if (this.state === 'town' && this.townMap) {
+      const nx = this.townPlayerPos.x + dx;
+      const ny = this.townPlayerPos.y + dy;
+      const props = TILE.properties[this.townMap.getTile(nx, ny)];
+      if (props && props.walkable) this.townTravel = { path: [{ x: nx, y: ny }] };
+      return { type: 'townTravel' };
+    }
+    return { type: 'move', dx, dy };
+  }
+
+  // attack action if the enemy is in reach for the equipped weapon type, else null
+  getAttackActionToward(enemy) {
+    const px = this.player.position.x;
+    const py = this.player.position.y;
+    const dx = enemy.position.x - px;
+    const dy = enemy.position.y - py;
+    const attackType = getPlayerAttackType(this.player);
+    if (Math.abs(dx) + Math.abs(dy) === 1) return { type: 'attack', dx, dy };
+    if (attackType === 'melee') return null;
+    if (dx !== 0 && dy !== 0) return null;
+    const dist = Math.abs(dx) + Math.abs(dy);
+    if (dist > 6) return null;
+    const sx = Math.sign(dx);
+    const sy = Math.sign(dy);
+    for (let step = 1; step < dist; step++) {
+      if (this.map.blocksLOS(px + sx * step, py + sy * step)) return null;
+      const blocker = this.map.entities.find(e => e.type === 'enemy' && e.isAlive() && e.position.x === px + sx * step && e.position.y === py + sy * step);
+      if (blocker) return null;
+    }
+    return { type: 'attack', dx: sx, dy: sy };
+  }
+
+  handleMapTap(sx, sy) {
+    if (!this.map || !this.player) return null;
+    if (sy >= this.canvas.height - this.hud.hudHeight) return null;
+    const { x, y } = this.camera.screenToTile(sx, sy);
+    if (!this.map.inBounds(x, y)) return null;
+    const p = this.player.position;
+    if (x === p.x && y === p.y) {
+      if (this.map.items.some(i => i.position.x === x && i.position.y === y)) return { type: 'pickup' };
+      if (this.map.getTile(x, y) === TILE.STAIRS_DOWN) return { type: 'descend' };
+      return { type: 'wait' };
+    }
+    const enemy = this.map.entities.find(e => e.type === 'enemy' && e.isAlive() && e.position.x === x && e.position.y === y && this.map.isVisible(x, y));
+    if (enemy) {
+      const attack = this.getAttackActionToward(enemy);
+      if (attack) return attack;
+      return this.startTravel(x, y, 'engage', enemy.id);
+    }
+    if (!this.map.isExplored(x, y)) return null;
+    return this.startTravel(x, y, 'explore', null);
+  }
+
+  // plans a path to the tapped tile and takes the first step. closed doors are
+  // walked through (moving into one opens it); unexplored tiles are off limits.
+  startTravel(tx, ty, mode, targetId) {
+    const map = this.map;
+    const passable = (x, y) => map.isExplored(x, y) && (map.isWalkable(x, y) || map.getTile(x, y) === TILE.DOOR);
+    if (mode === 'explore' && !passable(tx, ty)) return null;
+    const blocked = map.entities
+      .filter(e => e.type === 'enemy' && e.isAlive() && e.id !== targetId)
+      .map(e => e.position);
+    const path = findPath(map, this.player.position.x, this.player.position.y, tx, ty, blocked, passable);
+    if (!path || path.length === 0) {
+      this.messageLog.add('No path there.', this.turnCount);
+      return null;
+    }
+    if (mode === 'engage') path.pop(); // stop before the enemy's tile
+    const seenEnemies = new Set(map.entities.filter(e => e.type === 'enemy' && e.isAlive() && map.isVisible(e.position.x, e.position.y)).map(e => e.id));
+    this.travel = { path, mode, targetId, lastStepMs: 0, startHp: this.player.hp, seenEnemies };
+    return this.stepTravel();
+  }
+
+  // one step of an in-progress travel, or null when it is time to stop
+  stepTravel() {
+    const t = this.travel;
+    if (!t || this.state !== 'playing') { this.travel = null; return null; }
+    const now = this.getNowMs();
+    if (now - t.lastStepMs < TRAVEL_STEP_MS) return null;
+    if (this.player.hp < t.startHp) { this.travel = null; return null; }
+    const visible = this.map.entities.filter(e => e.type === 'enemy' && e.isAlive() && this.map.isVisible(e.position.x, e.position.y));
+    if (t.mode === 'explore' && visible.some(e => !t.seenEnemies.has(e.id))) {
+      this.travel = null;
+      this.messageLog.add('You stop: an enemy is in sight.', this.turnCount);
+      return null;
+    }
+    if (t.mode === 'engage') {
+      const enemy = this.map.entities.find(e => e.id === t.targetId && e.isAlive());
+      if (!enemy) { this.travel = null; return null; }
+      const attack = this.getAttackActionToward(enemy);
+      if (attack) { this.travel = null; return attack; }
+    }
+    const next = t.path.shift();
+    if (!next) { this.travel = null; return null; }
+    const dx = next.x - this.player.position.x;
+    const dy = next.y - this.player.position.y;
+    if (Math.abs(dx) + Math.abs(dy) !== 1) { this.travel = null; return null; }
+    if (this.map.entities.some(e => e.type === 'enemy' && e.isAlive() && e.position.x === next.x && e.position.y === next.y)) {
+      this.travel = null;
+      return null;
+    }
+    t.lastStepMs = now;
+    if (t.path.length === 0 && t.mode === 'explore') this.travel = null;
+    return { type: 'move', dx, dy };
+  }
+
+  handleTownTap(sx, sy) {
+    if (!this.townMap) return null;
+    if (sy < TOWN_BAR_HEIGHT || sy > this.canvas.height - TOWN_BAR_HEIGHT) return null;
+    const { x, y } = this.camera.screenToTile(sx, sy);
+    if (!this.townMap.inBounds(x, y)) return null;
+    const tile = this.townMap.getTile(x, y);
+    let target = { x, y };
+    let enterOnArrive = false;
+    if (tile === TILE.SHELTER || tile === TILE.SHELTER_ENTRANCE) {
+      target = { ...SHELTER_ENTRANCE_POS };
+      enterOnArrive = true;
+    } else if (!TILE.properties[tile]?.walkable) {
+      return null;
+    }
+    if (target.x === this.townPlayerPos.x && target.y === this.townPlayerPos.y) {
+      return enterOnArrive ? { type: 'inventoryConfirm' } : null;
+    }
+    const passable = (tx, ty) => !!TILE.properties[this.townMap.getTile(tx, ty)]?.walkable;
+    const path = findPath(this.townMap, this.townPlayerPos.x, this.townPlayerPos.y, target.x, target.y, [], passable);
+    if (!path || path.length === 0) return null;
+    this.townTravel = { path, enterOnArrive };
+    return { type: 'townTravel' };
   }
 
   handleStartMenuAction(action) {
@@ -835,7 +1026,16 @@ export class Game {
   // --- Main update loop ---
 
   update() {
-    const action = this.input.consume();
+    let action = this.input.consume();
+    if (action && (action.type === 'tap' || action.type === 'swipe')) {
+      action = this.translatePointerAction(action);
+    } else if (action) {
+      // any explicit input cancels an automatic walk
+      this.travel = null;
+    }
+    if (!action && this.state === 'playing' && this.travel && !this.inventoryOpen && !this.statsOpen && !this.mapOpen) {
+      action = this.stepTravel();
+    }
 
     if (this.state === 'startMenu') {
       this.handleStartMenuAction(action);
@@ -1012,6 +1212,7 @@ export class Game {
       this.ctx.textAlign = 'center';
       this.ctx.fillText('Enter / Space : Enter Shelter', cx, py + 5);
       this.ctx.textAlign = 'left';
+      registerRegion(this, cx - 130, py - 14, 260, 28, { type: 'inventoryConfirm' });
     }
 
     this.drawTownHUD();
@@ -1040,13 +1241,18 @@ export class Game {
     ctx.fillStyle = '#8a9aaa';
     ctx.font = '12px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('Arrows: Move | ESC: Menu | P: Skills', w / 2, h - 11);
+    if (w >= 560) ctx.fillText('Arrows / tap: Move   Tap shelter: Enter', w / 2, h - 11);
     ctx.textAlign = 'left';
+    // tappable buttons in the bottom bar
+    const btnH = TOWN_BAR_HEIGHT - 8;
+    drawButton(this, 8, h - TOWN_BAR_HEIGHT + 4, 70, btnH, 'Skills', { type: 'stats' }, { fontSize: 11 });
+    drawButton(this, w - 78, h - TOWN_BAR_HEIGHT + 4, 70, btnH, 'Menu', { type: 'close' }, { fontSize: 11 });
   }
 
   // --- Main draw dispatcher ---
 
   draw(nowMs = this.getNowMs()) {
+    clearRegions(this);
     if (this.state === 'startMenu') {
       drawStartMenu(this);
       return;
@@ -1114,7 +1320,7 @@ export class Game {
       xpData = { level: lvl, progress: prog };
     }
 
-    this.hud.draw(this.player, this.messageLog, getEntityStatsWithEquipment(this.player), this.runMaterials, xpData);
+    this.hud.draw(this.player, this.messageLog, getEntityStatsWithEquipment(this.player), this.runMaterials, xpData, this);
 
     if (this.state === 'deathSplash') {
       drawDeathSplash(this);

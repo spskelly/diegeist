@@ -1,7 +1,8 @@
 // src/pathfinding.js
 // A* pathfinding on the tile grid (4-directional movement)
 
-export function findPath(map, startX, startY, goalX, goalY, blockedPositions = []) {
+export function findPath(map, startX, startY, goalX, goalY, blockedPositions = [], passable = null) {
+  const canPass = passable || ((x, y) => map.isWalkable(x, y));
   if (startX === goalX && startY === goalY) return [];
 
   const blockedSet = new Set(blockedPositions.map(p => `${p.x},${p.y}`));
@@ -51,7 +52,7 @@ export function findPath(map, startX, startY, goalX, goalY, blockedPositions = [
     for (const neighbor of neighbors) {
       const nKey = key(neighbor.x, neighbor.y);
       if (closedSet.has(nKey)) continue;
-      if (!map.isWalkable(neighbor.x, neighbor.y)) continue;
+      if (!canPass(neighbor.x, neighbor.y)) continue;
       if (blockedSet.has(nKey) && !(neighbor.x === goalX && neighbor.y === goalY)) continue;
 
       const tentG = gScore.get(currentKey) + 1;

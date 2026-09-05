@@ -24,6 +24,7 @@ const SOURCE_ORDER = [
   'progression.js',
   'message-log.js',
   'input.js',
+  'ui.js',
   'sprites.js',
   'renderer.js',
   'hud.js',

@@ -31,8 +31,27 @@ const KEY_MAP = {
   m:          { type: 'map' },
 };
 
+// a drag longer than this (in css pixels) is a swipe; anything shorter is a tap
+export const SWIPE_MIN_DISTANCE = 24;
+// presses held longer than this are ignored as taps (scrolling attempts, hesitation)
+export const TAP_MAX_MS = 700;
+
 export function mapKeyToAction(key) {
   return KEY_MAP[key] || null;
+}
+
+// turns a pointer press/release pair into a tap or a four-way swipe.
+// returns null when the gesture should be ignored.
+export function classifyPointerGesture(start, end, elapsedMs = 0) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist >= SWIPE_MIN_DISTANCE) {
+    if (Math.abs(dx) >= Math.abs(dy)) return { type: 'swipe', dx: Math.sign(dx), dy: 0 };
+    return { type: 'swipe', dx: 0, dy: Math.sign(dy) };
+  }
+  if (elapsedMs > TAP_MAX_MS) return null;
+  return { type: 'tap', x: end.x, y: end.y };
 }
 
 export class InputHandler {
@@ -40,6 +59,10 @@ export class InputHandler {
     this.pendingAction = null;
     this.listening = false;
     this.heldKeys = new Set();
+    this.pointerStart = null;
+    this.hasTouch = false;
+    // called on every key press or pointer press; the game uses it to resume audio
+    this.onInput = null;
   }
 
   start() {
@@ -47,6 +70,7 @@ export class InputHandler {
     this._handler = (e) => {
       if (!this.listening) return;
       this.heldKeys.add(e.key);
+      if (this.onInput) this.onInput();
       const action = mapKeyToAction(e.key);
       if (action) {
         e.preventDefault();
@@ -60,10 +84,54 @@ export class InputHandler {
     document.addEventListener('keyup', this._upHandler);
   }
 
+  // pointer events cover mouse, pen and touch. coordinates are converted to
+  // canvas pixels so hit regions and the camera can use them directly.
+  attachPointer(canvas) {
+    this.canvas = canvas;
+    const toCanvas = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+      const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+      return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+    };
+    this._pointerDown = (e) => {
+      if (!this.listening) return;
+      if (e.pointerType === 'touch') this.hasTouch = true;
+      if (e.button !== undefined && e.button !== 0 && e.pointerType === 'mouse') return;
+      this.pointerStart = { ...toCanvas(e), t: performance.now(), id: e.pointerId };
+      if (this.onInput) this.onInput();
+      e.preventDefault();
+    };
+    this._pointerUp = (e) => {
+      if (!this.listening || !this.pointerStart) return;
+      if (this.pointerStart.id !== undefined && e.pointerId !== undefined && e.pointerId !== this.pointerStart.id) return;
+      const gesture = classifyPointerGesture(this.pointerStart, toCanvas(e), performance.now() - this.pointerStart.t);
+      this.pointerStart = null;
+      if (gesture) this.pendingAction = gesture;
+      e.preventDefault();
+    };
+    this._pointerCancel = () => { this.pointerStart = null; };
+    this._contextMenu = (e) => e.preventDefault();
+    this._touchMove = (e) => e.preventDefault();
+    canvas.addEventListener('pointerdown', this._pointerDown);
+    canvas.addEventListener('pointerup', this._pointerUp);
+    canvas.addEventListener('pointercancel', this._pointerCancel);
+    canvas.addEventListener('contextmenu', this._contextMenu);
+    // stop the page from scrolling or zooming while dragging on the canvas
+    canvas.addEventListener('touchmove', this._touchMove, { passive: false });
+  }
+
   stop() {
     this.listening = false;
     if (this._handler) document.removeEventListener('keydown', this._handler);
     if (this._upHandler) document.removeEventListener('keyup', this._upHandler);
+    if (this.canvas) {
+      this.canvas.removeEventListener('pointerdown', this._pointerDown);
+      this.canvas.removeEventListener('pointerup', this._pointerUp);
+      this.canvas.removeEventListener('pointercancel', this._pointerCancel);
+      this.canvas.removeEventListener('contextmenu', this._contextMenu);
+      this.canvas.removeEventListener('touchmove', this._touchMove);
+    }
     this.heldKeys.clear();
   }
 

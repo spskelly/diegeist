@@ -26,6 +26,7 @@ import {
 } from './game-utils.js';
 import { hasSavedRun } from './game-save.js';
 import { BIOME_KEYS } from './audio.js';
+import { registerRegion, drawButton, rowSelectAction, rowConfirmAction } from './ui.js';
 
 export function drawInventoryItemIcon(game, ctx, item, x, y, size) {
   if (!item) return;
@@ -348,6 +349,13 @@ export function drawInventoryOverlay(game) {
     }
 
     const row = eqRows[i];
+    registerRegion(game, x + Math.round(14 * uiScale), rowY - Math.round(13 * uiScale), listW - Math.round(20 * uiScale), eqLineH, (g) => {
+      if (g.inventorySection === 'equipment' && g.inventoryCursorByTab.equipment === i) return { type: 'inventoryConfirm' };
+      g.inventorySection = 'equipment';
+      g.inventoryCursorByTab.equipment = i;
+      if (g.audio) g.audio.uiClick();
+      return null;
+    });
     const baseX = x + Math.round(20 * uiScale);
     const label = `${formatSlotName(row.slot)}: `;
     ctx.fillStyle = selected ? '#ffffff' : '#c3cbd4';
@@ -412,6 +420,13 @@ export function drawInventoryOverlay(game) {
 
     ctx.fillStyle = '#1d242d';
     ctx.fillRect(cellX, cellY, cellSize, cellSize);
+    registerRegion(game, cellX, cellY, cellSize, cellSize, (g) => {
+      if (g.inventorySection === 'items' && g.inventoryCursorByTab.inventory === slotIndex) return item ? { type: 'inventoryConfirm' } : null;
+      g.inventorySection = 'items';
+      g.inventoryCursorByTab.inventory = slotIndex;
+      if (g.audio) g.audio.uiClick();
+      return null;
+    });
     ctx.strokeStyle = selected ? '#f4f7fa' : '#495664';
     ctx.lineWidth = selected ? Math.max(2, Math.floor(uiScale * 2)) : 1;
     ctx.strokeRect(cellX, cellY, cellSize, cellSize);
@@ -465,6 +480,41 @@ export function drawInventoryOverlay(game) {
       ctx.fillStyle = isTitle ? '#ffffff' : '#b8c0ca';
     }
     ctx.fillText(line, detailX, y + Math.round(72 * uiScale) + i * detailLineH);
+  }
+
+  // --- Action buttons (inspect column) ---
+  const btnH = Math.round(24 * uiScale);
+  const btnGap = Math.round(6 * uiScale);
+  const btnRowY = y + panelH - Math.round(96 * uiScale);
+  const colW = x + panelW - detailX - Math.round(16 * uiScale);
+  const isEquipmentSel = game.inventorySection === 'equipment';
+  const selItem = inspectTarget.item;
+  const primaryLabel = isEquipmentSel ? 'Unequip' : (selItem?.slot ? 'Equip' : 'Use/Equip');
+  const actions = [
+    [primaryLabel, { type: 'inventoryConfirm' }, { dim: !selItem }],
+    ['Drop', { type: 'inventoryDrop' }, { dim: !selItem }],
+    ['Belt', { type: 'inventoryBelt' }, { dim: !(selItem && selItem.type === 'consumable') }],
+    ['Close', { type: 'close' }, {}],
+  ];
+  // narrow columns (phones) get two rows of two buttons
+  const perRow = colW < Math.round(260 * uiScale) ? 2 : 4;
+  const bw = Math.floor((colW - btnGap * (perRow - 1)) / perRow);
+  const firstRowY = perRow === 2 ? btnRowY - btnH - btnGap : btnRowY;
+  actions.forEach(([label, action, opts], i) => {
+    const col = i % perRow;
+    const row = Math.floor(i / perRow);
+    drawButton(game, detailX + col * (bw + btnGap), firstRowY + row * (btnH + btnGap), bw, btnH, label, action, opts);
+  });
+  if (isEquipmentSel && selItem?.skill) {
+    const slotRowY = firstRowY - btnH - btnGap * 2;
+    ctx.fillStyle = '#94a0ad';
+    ctx.font = `${Math.round(10 * uiScale)}px monospace`;
+    ctx.fillText('Bind to slot:', detailX, slotRowY - Math.round(4 * uiScale));
+    const sw = Math.floor((colW - btnGap * (SKILL_SLOT_COUNT - 1)) / SKILL_SLOT_COUNT);
+    for (let si = 0; si < SKILL_SLOT_COUNT; si++) {
+      const active = game.player.skillSlotBindings?.[si] === eqRows[game.inventoryCursorByTab.equipment || 0]?.slot;
+      drawButton(game, detailX + si * (sw + btnGap), slotRowY, sw, btnH, SKILL_SLOT_KEYS[si], { type: 'skill', slot: si }, { active });
+    }
   }
 
   // --- Control hints ---
@@ -557,6 +607,8 @@ export function drawStatsOverlay(game) {
   ctx.fillStyle = '#94a0ad';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
   ctx.fillText('P or ESC: close', x + Math.round(16 * uiScale), y + panelH - Math.round(18 * uiScale));
+  registerRegion(game, 0, 0, game.canvas.width, game.canvas.height, { type: 'close' });
+  drawButton(game, x + panelW - Math.round(76 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(60 * uiScale), Math.round(24 * uiScale), 'Close', { type: 'close' });
 }
 
 export function drawMapOverlay(game) {
@@ -644,7 +696,8 @@ export function drawMapOverlay(game) {
   // Hint
   ctx.fillStyle = '#7f8a94';
   ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-  ctx.fillText('M or ESC: close', ox, oy + mapPixelH + Math.round(16 * uiScale));
+  ctx.fillText('M or ESC: close (or tap anywhere)', ox, oy + mapPixelH + Math.round(16 * uiScale));
+  registerRegion(game, 0, 0, cw, ch, { type: 'close' });
 }
 
 export function drawStartMenu(game) {
@@ -665,7 +718,7 @@ export function drawStartMenu(game) {
   ctx.fillRect(0, 0, w, h);
 
   const panelW = Math.min(Math.round(720 * uiScale), w - 50);
-  const panelH = Math.min(Math.round(460 * uiScale), h - 50);
+  const panelH = Math.min(panelW < Math.round(560 * uiScale) ? Math.round(600 * uiScale) : Math.round(460 * uiScale), h - 50);
   const x = Math.floor((w - panelW) / 2);
   const y = Math.floor((h - panelH) / 2);
 
@@ -680,7 +733,7 @@ export function drawStartMenu(game) {
 
   ctx.fillStyle = '#8ca2b8';
   ctx.font = `${Math.round(14 * uiScale)}px monospace`;
-  ctx.fillText('Select class with arrows, then press Enter to begin.', x + Math.round(26 * uiScale), y + Math.round(98 * uiScale));
+  ctx.fillText(panelW < Math.round(560 * uiScale) ? 'Pick a class, then Start Run.' : 'Select class with arrows, then press Enter to begin.', x + Math.round(26 * uiScale), y + Math.round(98 * uiScale));
 
   const hasSave = hasSavedRun();
   const baseY = y + Math.round(146 * uiScale);
@@ -690,6 +743,7 @@ export function drawStartMenu(game) {
   // Continue Run option (if saved run exists)
   if (hasSave) {
     const selected = game.startMenuIndex === 0;
+    registerRegion(game, x + Math.round(24 * uiScale), baseY - Math.round(19 * uiScale), Math.round(250 * uiScale), rowH, rowSelectAction('startMenuIndex', 0));
     if (selected) {
       ctx.fillStyle = '#2a3648';
       ctx.fillRect(x + Math.round(24 * uiScale), baseY - Math.round(19 * uiScale), Math.round(250 * uiScale), Math.round(24 * uiScale));
@@ -704,6 +758,8 @@ export function drawStartMenu(game) {
     const key = game.classOrder[i];
     const menuIdx = i + rowIndex;
     const selected = menuIdx === game.startMenuIndex;
+    registerRegion(game, x + Math.round(24 * uiScale), baseY - Math.round(19 * uiScale) + menuIdx * rowH, Math.round(250 * uiScale), rowH,
+      rowSelectAction('startMenuIndex', menuIdx, { type: 'inventoryConfirm' }, (g) => { g.selectedClass = key; }));
     if (selected) {
       ctx.fillStyle = '#2a3648';
       ctx.fillRect(x + Math.round(24 * uiScale), baseY - Math.round(19 * uiScale) + menuIdx * rowH, Math.round(250 * uiScale), Math.round(24 * uiScale));
@@ -713,8 +769,9 @@ export function drawStartMenu(game) {
     ctx.fillText(getClassLabel(key), x + Math.round(34 * uiScale), baseY + menuIdx * rowH);
   }
 
-  const statX = x + Math.round(320 * uiScale);
-  const statY = y + Math.round(132 * uiScale);
+  const stacked = panelW < Math.round(560 * uiScale);
+  const statX = stacked ? x + Math.round(26 * uiScale) : x + Math.round(320 * uiScale);
+  const statY = stacked ? baseY + (game.classOrder.length + rowIndex) * rowH + Math.round(4 * uiScale) : y + Math.round(132 * uiScale);
   ctx.fillStyle = '#d4dfeb';
   ctx.font = `${Math.round(16 * uiScale)}px monospace`;
   ctx.fillText(`${classDef.name}`, statX, statY);
@@ -745,6 +802,10 @@ export function drawStartMenu(game) {
   ctx.fillStyle = '#7f94ab';
   ctx.fillText('Enter/Z: Start Run', x + Math.round(26 * uiScale), y + panelH - Math.round(22 * uiScale));
   ctx.fillText('H: Hub Menu', x + Math.round(210 * uiScale), y + panelH - Math.round(22 * uiScale));
+  const sbW = Math.round(120 * uiScale);
+  const sbH = Math.round(30 * uiScale);
+  drawButton(game, x + panelW - sbW * 2 - Math.round(36 * uiScale), y + panelH - sbH - Math.round(16 * uiScale), sbW, sbH, 'Hub', { type: 'hub' });
+  drawButton(game, x + panelW - sbW - Math.round(24 * uiScale), y + panelH - sbH - Math.round(16 * uiScale), sbW, sbH, hasSave && game.startMenuIndex === 0 ? 'Continue' : 'Start Run', { type: 'inventoryConfirm' }, { active: true });
 }
 
 export function drawDeathSplash(game) {
@@ -768,8 +829,9 @@ export function drawDeathSplash(game) {
   ctx.fillText(`Killed by: ${cause}`, Math.round(w * 0.5 - 100 * uiScale), Math.round(h * 0.45) + Math.round(40 * uiScale));
   if (game.deathSplashFrames >= 25) {
     ctx.fillStyle = '#f2f6fb';
-    ctx.fillText('Press Enter to continue', Math.round(w * 0.5 - 120 * uiScale), Math.round(h * 0.45) + Math.round(78 * uiScale));
+    ctx.fillText('Press Enter or tap to continue', Math.round(w * 0.5 - 140 * uiScale), Math.round(h * 0.45) + Math.round(78 * uiScale));
   }
+  registerRegion(game, 0, 0, w, h, { type: 'inventoryConfirm' });
 }
 
 export function drawDeathSaveChoice(game) {
@@ -804,6 +866,7 @@ export function drawDeathSaveChoice(game) {
   const options = ['Keep 1 item (materials halved)', 'Keep all materials (lose all items)'];
   for (let i = 0; i < options.length; i++) {
     const selected = i === game.deathSaveIndex;
+    registerRegion(game, x + Math.round(18 * uiScale), y + Math.round(96 * uiScale) + i * Math.round(36 * uiScale), panelW - Math.round(36 * uiScale), Math.round(32 * uiScale), rowConfirmAction('deathSaveIndex', i));
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(x + Math.round(18 * uiScale), y + Math.round(96 * uiScale) + i * Math.round(36 * uiScale), panelW - Math.round(36 * uiScale), Math.round(28 * uiScale));
@@ -869,6 +932,7 @@ export function drawPostDeathMenu(game) {
   const options = ['Retry', 'Hub', 'Main Menu'];
   for (let i = 0; i < options.length; i++) {
     const selected = i === game.postDeathMenuIndex;
+    registerRegion(game, x + Math.round(18 * uiScale), y + Math.round(186 * uiScale) + matOffset + i * Math.round(36 * uiScale), Math.round(170 * uiScale), Math.round(34 * uiScale), rowConfirmAction('postDeathMenuIndex', i));
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(x + Math.round(18 * uiScale), y + Math.round(186 * uiScale) + matOffset + i * Math.round(36 * uiScale), Math.round(170 * uiScale), Math.round(26 * uiScale));
@@ -939,6 +1003,9 @@ export function drawVictoryScreen(game) {
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
   ctx.fillText('Press Enter to return to town', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
   ctx.fillText('Press H to open the Hub', x + Math.round(20 * uiScale), y + panelH - Math.round(36 * uiScale));
+  registerRegion(game, 0, 0, w, h, { type: 'inventoryConfirm' });
+  drawButton(game, x + panelW - Math.round(200 * uiScale), y + panelH - Math.round(44 * uiScale), Math.round(80 * uiScale), Math.round(26 * uiScale), 'Hub', { type: 'hub' });
+  drawButton(game, x + panelW - Math.round(108 * uiScale), y + panelH - Math.round(44 * uiScale), Math.round(88 * uiScale), Math.round(26 * uiScale), 'Town', { type: 'inventoryConfirm' }, { active: true });
 }
 
 export function drawHubMenu(game) {
@@ -990,6 +1057,7 @@ export function drawHubMenu(game) {
   const optionY = y + Math.round(140 * uiScale);
   for (let i = 0; i < options.length; i++) {
     const selected = i === game.hubMenuIndex;
+    registerRegion(game, x + Math.round(20 * uiScale), optionY - Math.round(20 * uiScale) + i * Math.round(38 * uiScale), Math.round(280 * uiScale), Math.round(36 * uiScale), rowConfirmAction('hubMenuIndex', i));
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(x + Math.round(20 * uiScale), optionY - Math.round(20 * uiScale) + i * Math.round(38 * uiScale), Math.round(280 * uiScale), Math.round(28 * uiScale));
@@ -1064,6 +1132,7 @@ export function drawHubShop(game) {
     const row = i - shopSv.startIdx;
     const item = game.hubShop.items[i];
     const selected = i === game.hubShopCursor;
+    registerRegion(game, x + Math.round(18 * uiScale), startY - Math.round(18 * uiScale) + row * lineH, panelW - Math.round(36 * uiScale), lineH, rowSelectAction('hubShopCursor', i));
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(x + Math.round(18 * uiScale), startY - Math.round(18 * uiScale) + row * lineH, panelW - Math.round(36 * uiScale), Math.round(24 * uiScale));
@@ -1090,6 +1159,8 @@ export function drawHubShop(game) {
   ctx.fillStyle = '#7d8e9f';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
   ctx.fillText('Up/Down: Select  Enter/Z: Buy  ESC: Back', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
+  drawButton(game, x + panelW - Math.round(150 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(64 * uiScale), Math.round(24 * uiScale), 'Buy', { type: 'inventoryConfirm' }, { active: true });
+  drawButton(game, x + panelW - Math.round(78 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(64 * uiScale), Math.round(24 * uiScale), 'Back', { type: 'close' });
 }
 
 export function drawHubStash(game) {
@@ -1145,6 +1216,13 @@ export function drawHubStash(game) {
   for (let i = stashSv.startIdx; i < stashSv.endIdx; i++) {
     const row = i - stashSv.startIdx;
     const selected = game.hubStashPane === 'stash' && i === game.hubStashCursor;
+    registerRegion(game, leftX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + row * lineH, paneW - Math.round(12 * uiScale), lineH, (g) => {
+      if (g.hubStashPane === 'stash' && g.hubStashCursor === i) return { type: 'inventoryConfirm' };
+      g.hubStashPane = 'stash';
+      g.hubStashCursor = i;
+      if (g.audio) g.audio.uiClick();
+      return null;
+    });
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(leftX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + row * lineH, paneW - Math.round(12 * uiScale), Math.round(20 * uiScale));
@@ -1161,6 +1239,13 @@ export function drawHubStash(game) {
   for (let i = runSv.startIdx; i < runSv.endIdx; i++) {
     const row = i - runSv.startIdx;
     const selected = game.hubStashPane === 'run' && i === game.hubRunItemsCursor;
+    registerRegion(game, rightX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + row * lineH, paneW - Math.round(12 * uiScale), lineH, (g) => {
+      if (g.hubStashPane === 'run' && g.hubRunItemsCursor === i) return { type: 'inventoryConfirm' };
+      g.hubStashPane = 'run';
+      g.hubRunItemsCursor = i;
+      if (g.audio) g.audio.uiClick();
+      return null;
+    });
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(rightX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + row * lineH, paneW - Math.round(12 * uiScale), Math.round(20 * uiScale));
@@ -1208,6 +1293,11 @@ export function drawHubStash(game) {
     controls = 'Arrows: navigate  Enter/Z: move  X: sell item  ESC: Back';
   }
   ctx.fillText(controls, x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
+  const sbw = Math.round(72 * uiScale);
+  const sby = y + panelH - Math.round(38 * uiScale);
+  drawButton(game, x + panelW - sbw * 3 - Math.round(36 * uiScale), sby, sbw, Math.round(24 * uiScale), 'Move', { type: 'inventoryConfirm' }, { active: true });
+  drawButton(game, x + panelW - sbw * 2 - Math.round(28 * uiScale), sby, sbw, Math.round(24 * uiScale), game.pendingStashLoadoutItem ? 'Unqueue' : 'Sell', { type: 'inventoryDrop' });
+  drawButton(game, x + panelW - sbw - Math.round(20 * uiScale), sby, sbw, Math.round(24 * uiScale), 'Back', { type: 'close' });
 }
 
 export function drawHubAchievements(game) {
@@ -1249,6 +1339,7 @@ export function drawHubAchievements(game) {
     const ach = ACHIEVEMENTS[i];
     const record = game.saveData.achievements[ach.id] || { progress: 0, unlocked: false };
     const selected = i === game.hubAchievementsCursor;
+    registerRegion(game, x + Math.round(16 * uiScale), startY - Math.round(17 * uiScale) + row * lineH, listW - Math.round(28 * uiScale), lineH, (g) => { g.hubAchievementsCursor = i; return null; });
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(x + Math.round(16 * uiScale), startY - Math.round(17 * uiScale) + row * lineH, listW - Math.round(28 * uiScale), Math.round(22 * uiScale));
@@ -1284,6 +1375,7 @@ export function drawHubAchievements(game) {
   ctx.fillStyle = '#7d8e9f';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
   ctx.fillText('Up/Down: Select  ESC: Back', x + Math.round(20 * uiScale), y + panelH - Math.round(14 * uiScale));
+  drawButton(game, x + panelW - Math.round(78 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(64 * uiScale), Math.round(24 * uiScale), 'Back', { type: 'close' });
 }
 
 export function drawPauseMenu(game) {
@@ -1296,10 +1388,10 @@ export function drawPauseMenu(game) {
   ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
   ctx.fillRect(0, 0, w, h);
 
-  const panelW = Math.round(300 * uiScale);
+  const panelW = Math.min(Math.round(300 * uiScale), w - 24);
   const panelH = Math.round(240 * uiScale);
   const px = Math.floor((w - panelW) / 2);
-  const py = Math.floor((h - panelH) / 2);
+  const py = Math.floor((h - panelH) / 2) - Math.round(24 * uiScale);
 
   ctx.fillStyle = '#171d28';
   ctx.fillRect(px, py, panelW, panelH);
@@ -1317,6 +1409,7 @@ export function drawPauseMenu(game) {
 
   for (let i = 0; i < options.length; i++) {
     const selected = i === game.pauseMenuIndex;
+    registerRegion(game, px + Math.round(10 * uiScale), startY + i * lineH - Math.round(16 * uiScale), panelW - Math.round(20 * uiScale), lineH, rowConfirmAction('pauseMenuIndex', i));
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(px + Math.round(10 * uiScale), startY + i * lineH - Math.round(16 * uiScale), panelW - Math.round(20 * uiScale), Math.round(22 * uiScale));
@@ -1324,6 +1417,27 @@ export function drawPauseMenu(game) {
     ctx.fillStyle = selected ? '#ffffff' : '#a0aab5';
     ctx.fillText(options[i], px + Math.round(20 * uiScale), startY + i * lineH);
   }
+
+  // keyboard reference lives here now that the hud shows buttons instead
+  const helpY = py + panelH + Math.round(14 * uiScale);
+  const helpLines = w < 640 ? [
+    'Move: Arrows / tap a tile',
+    'Attack: WASD / tap an enemy',
+    'Wait: Space  Pick up: G  Stairs: >',
+    'Skills: Q/E/R/F  Belt: 1/2/3',
+    'Bag: I  Stats: P  Map: M  Menu: Esc',
+  ] : [
+    'Move: Arrows / tap a tile   Attack: WASD / tap an enemy',
+    'Wait: Space   Pick up: G   Stairs: >   Skills: Q/E/R/F   Belt: 1/2/3',
+    'Inventory: I   Stats: P   Map: M   Menu: Esc',
+  ];
+  ctx.fillStyle = '#6f7d8a';
+  ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+  ctx.textAlign = 'center';
+  for (let i = 0; i < helpLines.length; i++) {
+    ctx.fillText(helpLines[i], Math.floor(w / 2), helpY + i * Math.round(16 * uiScale));
+  }
+  ctx.textAlign = 'left';
 }
 
 export function drawSettingsMenu(game) {
@@ -1374,6 +1488,18 @@ export function drawSettingsMenu(game) {
   for (let i = 0; i < rows.length; i++) {
     const selected = i === game.settingsMenuIndex;
     const rowY = startY + i * lineH;
+    const rowTop = rowY - Math.round(14 * uiScale);
+    if (rows[i].type === 'action') {
+      registerRegion(game, px + Math.round(8 * uiScale), rowTop, panelW - Math.round(16 * uiScale), lineH, { type: 'close' });
+    } else {
+      // left half of the control nudges left, right half nudges right
+      const mid = barX + barW / 2;
+      registerRegion(game, px + Math.round(8 * uiScale), rowTop, mid - px - Math.round(8 * uiScale), lineH, (g) => { g.settingsMenuIndex = i; return { type: 'move', dx: -1, dy: 0 }; });
+      registerRegion(game, mid, rowTop, px + panelW - mid - Math.round(8 * uiScale), lineH, (g) => { g.settingsMenuIndex = i; return { type: 'move', dx: 1, dy: 0 }; });
+      if (rows[i].type === 'biome') {
+        registerRegion(game, barX, rowTop, barW, lineH, (g) => { g.settingsMenuIndex = i; return { type: 'inventoryConfirm' }; });
+      }
+    }
 
     // Selection highlight
     if (selected) {
@@ -1452,8 +1578,14 @@ export function drawSkillTree(game) {
   const fromHub = game.skillTreeReturnState === 'hubMenu';
   ctx.fillStyle = '#e8eef5';
   ctx.font = `bold ${Math.round(18 * uiScale)}px monospace`;
-  const headerText = fromHub ? `< ${className} Skill Tree >` : `${className} Skill Tree`;
+  const canSwitchClass = fromHub || game.skillTreeReturnState === 'town';
+  const headerText = canSwitchClass ? `< ${className} Skill Tree >` : `${className} Skill Tree`;
   ctx.fillText(headerText, x + Math.round(20 * uiScale), y + Math.round(30 * uiScale));
+  if (canSwitchClass) {
+    const headerW = ctx.measureText(headerText).width;
+    registerRegion(game, x + Math.round(10 * uiScale), y + Math.round(10 * uiScale), Math.round(40 * uiScale), Math.round(30 * uiScale), { type: 'move', dx: -1, dy: 0 });
+    registerRegion(game, x + Math.round(20 * uiScale) + headerW - Math.round(30 * uiScale), y + Math.round(10 * uiScale), Math.round(40 * uiScale), Math.round(30 * uiScale), { type: 'move', dx: 1, dy: 0 });
+  }
 
   // Level and XP
   ctx.fillStyle = '#afc0d2';
@@ -1481,7 +1613,7 @@ export function drawSkillTree(game) {
   // Skill nodes — build flat display rows (branch headers + nodes)
   const nodeStartY = y + Math.round(74 * uiScale);
   const lineH = Math.round(24 * uiScale);
-  const detailY = y + panelH - Math.round(92 * uiScale);
+  const detailY = y + panelH - Math.round(112 * uiScale);
   const listAreaH = detailY - nodeStartY - Math.round(8 * uiScale);
   const maxVisible = Math.max(1, Math.floor(listAreaH / lineH));
 
@@ -1521,6 +1653,7 @@ export function drawSkillTree(game) {
       const canInv = canInvestSkill(classKey, node.id, investments) && available > 0;
       const isMaxed = rank >= node.maxRank;
 
+      registerRegion(game, x + Math.round(10 * uiScale), rowY - Math.round(14 * uiScale), panelW - Math.round(20 * uiScale), lineH, rowSelectAction('skillTreeCursor', nodeIdx));
       if (nodeIdx === game.skillTreeCursor) {
         ctx.fillStyle = '#1f2d42';
         ctx.fillRect(x + Math.round(10 * uiScale), rowY - Math.round(14 * uiScale), panelW - Math.round(20 * uiScale), Math.round(20 * uiScale));
@@ -1585,8 +1718,11 @@ export function drawSkillTree(game) {
   // Controls
   ctx.fillStyle = '#7d8e9f';
   ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-  const controlsText = fromHub
+  const controlsText = canSwitchClass
     ? 'L/R: Class  Up/Down: Select  Enter: Invest  ESC: Close'
     : 'Up/Down: Select  Enter/Space: Invest  ESC: Close';
-  ctx.fillText(controlsText, x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
+  if (panelW >= Math.round(560 * uiScale)) ctx.fillText(controlsText, x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
+  const tbY = y + panelH - Math.round(30 * uiScale);
+  drawButton(game, x + panelW - Math.round(156 * uiScale), tbY, Math.round(70 * uiScale), Math.round(22 * uiScale), 'Invest', { type: 'inventoryConfirm' }, { active: available > 0 });
+  drawButton(game, x + panelW - Math.round(78 * uiScale), tbY, Math.round(64 * uiScale), Math.round(22 * uiScale), 'Close', { type: 'close' });
 }
