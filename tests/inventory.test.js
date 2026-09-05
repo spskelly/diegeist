@@ -186,8 +186,8 @@ describe('belt', () => {
 
   it('replaces occupied belt slot and returns previous item to inventory', () => {
     const p = makePlayer();
-    const first = generateConsumable(1);
-    const second = generateConsumable(1);
+    const first = { ...generateConsumable(1), name: 'Bomb', effect: 'aoe_damage' };
+    const second = { ...generateConsumable(1), name: 'Speed Potion', effect: 'speed_boost' };
     addToInventory(p, first);
     addToInventory(p, second);
 
@@ -238,5 +238,59 @@ describe('belt', () => {
     const p = makePlayer();
     const used = useBeltSlot(p, 0);
     expect(used).toBeNull();
+  });
+});
+
+describe('consumable stacking', () => {
+  function potion(id) {
+    return { id, name: 'Minor Health Potion', type: 'consumable', effect: 'heal', rarity: 'common', stackable: true };
+  }
+
+  it('merges identical consumables into one inventory stack', () => {
+    const p = makePlayer();
+    addToInventory(p, potion('a'));
+    addToInventory(p, potion('b'));
+    expect(p.inventory).toHaveLength(1);
+    expect(p.inventory[0].count).toBe(2);
+  });
+
+  it('merges into an existing belt stack before the bag', () => {
+    const p = makePlayer();
+    addToInventory(p, potion('a'));
+    assignToBelt(p, 'a', 0);
+    addToInventory(p, potion('b'));
+    expect(p.inventory).toHaveLength(0);
+    expect(p.belt[0].count).toBe(2);
+  });
+
+  it('does not merge different consumables', () => {
+    const p = makePlayer();
+    addToInventory(p, potion('a'));
+    addToInventory(p, { id: 'c', name: 'Bomb', type: 'consumable', effect: 'aoe_damage', rarity: 'uncommon', stackable: true });
+    expect(p.inventory).toHaveLength(2);
+  });
+
+  it('using a stacked belt item decrements the stack and keeps it on the belt', () => {
+    const p = makePlayer();
+    addToInventory(p, potion('a'));
+    addToInventory(p, potion('b'));
+    assignToBelt(p, 'a', 1);
+    const used = useBeltSlot(p, 1);
+    expect(used.count).toBe(1);
+    expect(p.belt[1]).not.toBeNull();
+    expect(p.belt[1].count).toBe(1);
+    const last = useBeltSlot(p, 1);
+    expect(last.id).toBe('a');
+    expect(p.belt[1]).toBeNull();
+  });
+
+  it('does not count a stack against the 12-slot limit more than once', () => {
+    const p = makePlayer();
+    for (let i = 0; i < 12; i++) addToInventory(p, generateItem({ floorLevel: 1 }));
+    expect(addToInventory(p, potion('x'))).toBe(false);
+    p.inventory.pop();
+    expect(addToInventory(p, potion('x'))).toBe(true);
+    expect(addToInventory(p, potion('y'))).toBe(true);
+    expect(p.inventory).toHaveLength(12);
   });
 });

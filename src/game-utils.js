@@ -223,14 +223,21 @@ export function clearCombatVfx(game) {
   game.combatVfx.projectiles.length = 0;
 }
 
-export function addFloatingText(game, tileX, tileY, text, color = '#ffffff', durationMs = 680) {
+export function addFloatingText(game, tileX, tileY, text, color = '#ffffff', durationMs = 900) {
+  // texts that land on the same tile while earlier ones are still alive are
+  // stacked upward instead of drawn on top of each other
+  const now = getNowMs();
+  const stackIndex = game.combatVfx.floatingTexts.filter(v =>
+    v.tileX === tileX && v.tileY === tileY && now - v.startMs < v.durationMs
+  ).length;
   game.combatVfx.floatingTexts.push({
     tileX,
     tileY,
     text,
     color,
-    startMs: getNowMs(),
+    startMs: now,
     durationMs,
+    stackIndex,
   });
 }
 

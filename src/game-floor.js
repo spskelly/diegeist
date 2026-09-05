@@ -16,6 +16,7 @@ import {
   syncMilestoneAchievements,
   awardXP,
   getEnemyXP,
+  clearCombatVfx,
 } from './game-utils.js';
 import { applyStarterLoadout, applyPendingHubLoadout } from './game-save.js';
 
@@ -402,7 +403,9 @@ export function startFloor(game) {
   game._currentAmbientBiome = getBiome(game.floorNumber);
 
   computeFOV(game.map, game.player.position.x, game.player.position.y, FOV_RADIUS);
-  game.camera.centerOn(game.player.position.x, game.player.position.y, game.map.width, game.map.height);
+  // the camera viewport differs between town and dungeon; make sure it is dungeon-sized now
+  if (game.syncCameraViewport) game.syncCameraViewport();
+  else game.camera.centerOn(game.player.position.x, game.player.position.y, game.map.width, game.map.height);
 }
 
 export function handleFloorTransition(game) {
@@ -463,6 +466,8 @@ export function handleFloorTransition(game) {
 
   // Clear old entities from turn system
   game.turnSystem = new TurnSystem();
+  // floating text and projectiles are in tile coordinates of the old floor; drop them
+  clearCombatVfx(game);
 
   startFloor(game);
   if (game.audio) game.audio.stairsDescend();

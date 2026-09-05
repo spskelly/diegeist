@@ -281,7 +281,8 @@ export function drawCombatVfx(game, nowMs) {
     const rise = t * cam.tileSize * 0.9;
     const { sx, sy } = cam.tileToScreen(vfx.tileX, vfx.tileY);
     const textX = sx + cam.tileSize / 2;
-    const textY = sy + cam.tileSize * 0.2 - rise;
+    // stacked texts on the same tile start one line higher each
+    const textY = sy + cam.tileSize * 0.2 - rise - (vfx.stackIndex || 0) * (fontSize + 2);
     ctx.globalAlpha = alpha;
     ctx.fillStyle = '#000000';
     ctx.fillText(vfx.text, textX + 1, textY + 1);
@@ -429,6 +430,11 @@ export function drawInventoryOverlay(game) {
       ctx.font = `${Math.max(8, Math.round(9 * uiScale))}px monospace`;
       const label = truncateLabel(item.name, 12);
       ctx.fillText(label, cellX + Math.round(4 * uiScale), cellY + cellSize - Math.round(6 * uiScale));
+      if ((item.count || 1) > 1) {
+        const countLabel = `x${item.count}`;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(countLabel, cellX + cellSize - ctx.measureText(countLabel).width - Math.round(4 * uiScale), cellY + Math.round(12 * uiScale));
+      }
     } else {
       ctx.fillStyle = '#6f7b89';
       ctx.font = `${Math.max(8, Math.round(9 * uiScale))}px monospace`;
@@ -787,13 +793,13 @@ export function drawDeathSaveChoice(game) {
 
   ctx.fillStyle = '#7a8a9a';
   ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-  ctx.fillText('Without a save, items are lost and materials are halved.', x + Math.round(20 * uiScale), y + Math.round(56 * uiScale));
+  ctx.fillText('Death halves your material haul. Choose what to protect:', x + Math.round(20 * uiScale), y + Math.round(56 * uiScale));
 
   ctx.fillStyle = '#afc0d2';
   ctx.font = `${Math.round(13 * uiScale)}px monospace`;
   ctx.fillText('Choose one to keep:', x + Math.round(20 * uiScale), y + Math.round(76 * uiScale));
 
-  const options = ['Keep 1 item (lose all materials)', 'Keep all materials (lose all items)'];
+  const options = ['Keep 1 item (materials halved)', 'Keep all materials (lose all items)'];
   for (let i = 0; i < options.length; i++) {
     const selected = i === game.deathSaveIndex;
     if (selected) {
@@ -929,8 +935,8 @@ export function drawVictoryScreen(game) {
 
   ctx.fillStyle = '#86c99b';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-  ctx.fillText('Press Enter to return to main menu', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
-  ctx.fillText('Press H to open Hub', x + Math.round(20 * uiScale), y + panelH - Math.round(36 * uiScale));
+  ctx.fillText('Press Enter to return to town', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
+  ctx.fillText('Press H to open the Hub', x + Math.round(20 * uiScale), y + panelH - Math.round(36 * uiScale));
 }
 
 export function drawHubMenu(game) {

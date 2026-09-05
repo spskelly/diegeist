@@ -25,17 +25,33 @@ export class Camera {
     this.offsetY = Math.floor((canvasHeight - this.viewportHeight * this.tileSize) / 2);
   }
 
+  // keeps the target in the middle of the viewport. when the map is smaller than
+  // the viewport on an axis, the whole map is centered on that axis instead so a
+  // small level never sits in a corner. negative offsets are fine: the renderer
+  // skips tiles that fall outside the map.
   centerOn(targetX, targetY, mapWidth, mapHeight) {
     const halfW = Math.floor(this.viewportWidth / 2);
     const halfH = Math.floor(this.viewportHeight / 2);
-    this.x = Math.max(0, Math.min(targetX - halfW, mapWidth - this.viewportWidth));
-    this.y = Math.max(0, Math.min(targetY - halfH, mapHeight - this.viewportHeight));
+    this.x = mapWidth <= this.viewportWidth
+      ? -Math.floor((this.viewportWidth - mapWidth) / 2)
+      : targetX - halfW;
+    this.y = mapHeight <= this.viewportHeight
+      ? -Math.floor((this.viewportHeight - mapHeight) / 2)
+      : targetY - halfH;
   }
 
   tileToScreen(tileX, tileY) {
     return {
       sx: this.offsetX + (tileX - this.x) * this.tileSize,
       sy: this.offsetY + (tileY - this.y) * this.tileSize,
+    };
+  }
+
+  // inverse of tileToScreen; used to turn a tap on the canvas into a tile coordinate
+  screenToTile(sx, sy) {
+    return {
+      x: Math.floor((sx - this.offsetX) / this.tileSize) + this.x,
+      y: Math.floor((sy - this.offsetY) / this.tileSize) + this.y,
     };
   }
 

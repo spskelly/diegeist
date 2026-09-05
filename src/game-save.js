@@ -177,13 +177,11 @@ export function loadRunState(game) {
   game.messageLog.add('Run resumed.', game.turnCount);
 
   // Rebuild visuals
-  game.resizeCanvas();
   game.camera = new Camera(game.canvas.width, game.canvas.height - game.hud.hudHeight, game.getCameraZoom());
   game.renderer = new Renderer(game.canvas, game.sprites, game.camera);
   computeFOV(game.map, game.player.position.x, game.player.position.y, FOV_RADIUS);
-  game.camera.centerOn(game.player.position.x, game.player.position.y, game.map.width, game.map.height);
-
   game.state = 'playing';
+  game.resizeCanvas();
   return true;
 }
 

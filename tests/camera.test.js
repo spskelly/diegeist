@@ -16,18 +16,19 @@ describe('Camera', () => {
     expect(cam.y).toBe(15);
   });
 
-  it('clamps to top-left map edge', () => {
+  it('keeps the target centered near the top-left map edge', () => {
     const cam = new Camera(320, 320);
     cam.centerOn(5, 5, 50, 50);
-    expect(cam.x).toBe(0);
-    expect(cam.y).toBe(0);
+    // the player stays in the middle of the screen; the camera may point off-map
+    expect(cam.x).toBe(-5);
+    expect(cam.y).toBe(-5);
   });
 
-  it('clamps to bottom-right map edge', () => {
+  it('keeps the target centered near the bottom-right map edge', () => {
     const cam = new Camera(320, 320);
     cam.centerOn(45, 45, 50, 50);
-    expect(cam.x).toBe(30);
-    expect(cam.y).toBe(30);
+    expect(cam.x).toBe(35);
+    expect(cam.y).toBe(35);
   });
 
   it('converts tile coords to screen pixel coords', () => {
@@ -36,6 +37,14 @@ describe('Camera', () => {
     const { sx, sy } = cam.tileToScreen(17, 17);
     expect(sx).toBe((17 - 15) * TILE_SIZE);
     expect(sy).toBe((17 - 15) * TILE_SIZE);
+  });
+
+  it('converts screen pixel coords back to tile coords', () => {
+    const cam = new Camera(320, 320);
+    cam.centerOn(25, 25, 50, 50);
+    const { sx, sy } = cam.tileToScreen(17, 17);
+    expect(cam.screenToTile(sx + 3, sy + 3)).toEqual({ x: 17, y: 17 });
+    expect(cam.screenToTile(sx + TILE_SIZE, sy)).toEqual({ x: 18, y: 17 });
   });
 
   it('determines if a tile is within the viewport', () => {
@@ -55,11 +64,18 @@ describe('Camera', () => {
     expect(cam.viewportHeight).toBe(20);
   });
 
-  it('handles small maps where viewport is larger than map', () => {
+  it('centers small maps inside a larger viewport', () => {
     const cam = new Camera(320, 320); // 20x20 viewport
     cam.centerOn(5, 5, 10, 10); // map is only 10x10
-    // Camera should clamp to 0,0 since map is smaller than viewport
-    expect(cam.x).toBe(0);
-    expect(cam.y).toBe(0);
+    // a 10-wide map in a 20-wide viewport gets 5 tiles of margin on each side
+    expect(cam.x).toBe(-5);
+    expect(cam.y).toBe(-5);
+    expect(cam.tileToScreen(0, 0)).toEqual({ sx: 5 * TILE_SIZE, sy: 5 * TILE_SIZE });
+  });
+
+  it('supports fractional zoom levels', () => {
+    const cam = new Camera(480, 480, 1.5);
+    expect(cam.tileSize).toBe(24);
+    expect(cam.viewportWidth).toBe(20);
   });
 });

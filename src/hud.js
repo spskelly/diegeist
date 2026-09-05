@@ -218,6 +218,13 @@ export class HUD {
       ctx.fillStyle = '#d3dde7';
       ctx.font = `${Math.round(10 * s)}px monospace`;
       ctx.fillText(`${i + 1}`, slotX + Math.round(3 * s), beltY + slotSize - Math.round(3 * s));
+      // stack size in the top-right corner
+      const count = player.belt[i]?.count || 0;
+      if (count > 1) {
+        const label = `x${count}`;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, slotX + slotSize - ctx.measureText(label).width - Math.round(2 * s), beltY + Math.round(10 * s));
+      }
     }
 
     const skills = player.activeSkills || [];

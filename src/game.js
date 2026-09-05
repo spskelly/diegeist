@@ -71,6 +71,9 @@ import {
 } from './game-screens.js';
 import { getXPForNextLevel, XP_TABLE } from './skill-tree.js';
 
+// height of the status bars drawn above and below the town view
+export const TOWN_BAR_HEIGHT = 30;
+
 export class Game {
   constructor(canvas) {
     this.canvas = canvas;
@@ -180,23 +183,32 @@ export class Game {
     this.canvas.width = window.innerWidth;
     this.canvas.height = window.innerHeight;
     if (this.hud) this.hud.resize(this.canvas.width, this.canvas.height);
-    if (this.camera) {
-      this.camera.setZoom(this.getCameraZoom());
-      this.camera.resize(this.canvas.width, this.canvas.height - (this.hud?.hudHeight || 80));
-      if (this.map && this.player) {
-        this.camera.centerOn(this.player.position.x, this.player.position.y, this.map.width, this.map.height);
-      } else if (this.townMap && this.townPlayerPos) {
-        this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
-      }
+    this.syncCameraViewport();
+  }
+
+  // the town has no bottom hud, only two thin bars, so the camera gets a taller
+  // viewport there than in the dungeon. called whenever the mode or canvas changes.
+  syncCameraViewport() {
+    if (!this.camera) return;
+    this.camera.setZoom(this.getCameraZoom());
+    const inTown = this.state === 'town' || (!this.map && this.townMap);
+    const reserved = inTown ? TOWN_BAR_HEIGHT * 2 : (this.hud?.hudHeight || 80);
+    this.camera.resize(this.canvas.width, Math.max(1, this.canvas.height - reserved));
+    // the town bars sit at the top and bottom, so shift the viewport down past the top bar
+    this.camera.offsetY += inTown ? TOWN_BAR_HEIGHT : 0;
+    if (this.map && this.player) {
+      this.camera.centerOn(this.player.position.x, this.player.position.y, this.map.width, this.map.height);
+    } else if (this.townMap && this.townPlayerPos) {
+      this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
     }
   }
 
   getCameraZoom() {
     const usableHeight = this.canvas.height - (this.hud?.hudHeight || 80);
     const minDimension = Math.min(this.canvas.width, usableHeight);
-    if (minDimension >= 900) return 3;
-    if (minDimension >= 600) return 2;
-    return 1;
+    if (minDimension >= 800) return 3;
+    if (minDimension >= 500) return 2;
+    return 1.5;
   }
 
   getNowMs() {
@@ -239,7 +251,7 @@ export class Game {
     this.townMoveTimer = 0;
     this.townInteractPrompt = false;
     this.sprites.setTown(BIOME_THEMES.town.palette);
-    this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
+    this.syncCameraViewport();
     if (this.audio) this.audio.startAmbientBiome('town');
     this._currentAmbientBiome = 'town';
     if (notice) this.hubNotice = notice;
@@ -996,7 +1008,7 @@ export class Game {
     const h = this.canvas.height;
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-    ctx.fillRect(0, 0, w, 30);
+    ctx.fillRect(0, 0, w, TOWN_BAR_HEIGHT);
     ctx.fillStyle = '#e0d8c0';
     ctx.font = '14px monospace';
     const classInfo = PLAYER_CLASSES[this.selectedClass];
@@ -1009,11 +1021,11 @@ export class Game {
     ctx.fillText(essenceText, w - ctx.measureText(essenceText).width - 10, 20);
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-    ctx.fillRect(0, h - 28, w, 28);
+    ctx.fillRect(0, h - TOWN_BAR_HEIGHT, w, TOWN_BAR_HEIGHT);
     ctx.fillStyle = '#8a9aaa';
     ctx.font = '12px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('Arrows: Move | ESC: Menu | P: Skills', w / 2, h - 10);
+    ctx.fillText('Arrows: Move | ESC: Menu | P: Skills', w / 2, h - 11);
     ctx.textAlign = 'left';
   }
 

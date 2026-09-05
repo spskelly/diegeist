@@ -118,10 +118,14 @@ export function handlePickupAction(game) {
   }
 
   if (item.type === 'consumable') {
+    // a stackable pickup may have merged into an existing stack; only loose items get a belt slot
+    const stillLoose = game.player.inventory.some(i => i.id === item.id);
     const freeBeltSlot = game.player.belt.findIndex(s => s === null);
-    if (freeBeltSlot !== -1) {
+    if (stillLoose && freeBeltSlot !== -1) {
       assignToBelt(game.player, item.id, freeBeltSlot);
       game.messageLog.add(`${item.name} assigned to belt slot ${freeBeltSlot + 1}.`, game.turnCount);
+    } else if (!stillLoose) {
+      game.messageLog.add(`${item.name} added to your stack.`, game.turnCount);
     }
   }
 
