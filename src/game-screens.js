@@ -517,19 +517,21 @@ export function drawInventoryOverlay(game) {
     }
   }
 
-  // --- Control hints ---
-  ctx.fillStyle = '#94a0ad';
-  ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-  ctx.fillText(
-    'Arrows: navigate  Z/Enter: equip/unequip  X: drop  U: unequip',
-    x + Math.round(16 * uiScale),
-    y + panelH - Math.round(36 * uiScale)
-  );
-  ctx.fillText(
-    '1/2/3: belt  Q/E/R/F: skill slot  C: auto belt  Tab/I/ESC: close',
-    x + Math.round(16 * uiScale),
-    y + panelH - Math.round(18 * uiScale)
-  );
+  // --- Control hints (wide panels only; phones use the buttons) ---
+  if (panelW >= Math.round(600 * uiScale)) {
+    ctx.fillStyle = '#94a0ad';
+    ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+    ctx.fillText(
+      'Arrows: navigate  Z/Enter: equip/unequip  X: drop  U: unequip',
+      x + Math.round(16 * uiScale),
+      y + panelH - Math.round(36 * uiScale)
+    );
+    ctx.fillText(
+      '1/2/3: belt  Q/E/R/F: skill slot  C: auto belt  Tab/I/ESC: close',
+      x + Math.round(16 * uiScale),
+      y + panelH - Math.round(18 * uiScale)
+    );
+  }
 }
 
 export function drawStatsOverlay(game) {

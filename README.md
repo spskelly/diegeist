@@ -4,7 +4,7 @@ Tile-based roguelite dungeon crawler built in vanilla JavaScript. Outputs a sing
 
 ## Current Status
 
-Playable game with v1 core loop complete and v2 Phases 1–2 (resources, skill trees) implemented. Class select, explore procedural dungeons, fight, loot, descend, die, persist progression, repeat.
+Playable game with v1 core loop complete and v2 Phases 1–2 (resources, skill trees) implemented. Class select, explore procedural dungeons, fight, loot, descend, die, persist progression, repeat. Plays with keyboard, mouse or touch, so it works as an installed PWA on a phone.
 
 ### Implemented
 
@@ -18,6 +18,10 @@ Playable game with v1 core loop complete and v2 Phases 1–2 (resources, skill t
 - Hub menu between runs (shop, stash, achievements)
 - Pause menu with save & quit and skill tree access
 - Split input: arrow keys for movement, WASD for directional attacks
+- Touch and mouse: tap a tile to walk there, tap an enemy to attack or close in, swipe to step, on-screen buttons for everything else
+- Percentage-based defense, hp that grows with level and CON, and scaled damage numbers so gear and passives are visible
+- Skill tree actives (Rush, Deadeye, Meteor, Temporal Stasis, ...) on a four-slot Q/E/R/F hotbar
+- Boss signature moves: Brood Mother enrage, Rat King crown burst, Bone Lord raising corpses, Void Tyrant charge
 - Adaptive camera zoom with scaled sprite rendering
 - Procedural audio via Web Audio API (SFX + ambient)
 - Save data persistence (meta-currency, run history, stash) via localStorage
@@ -44,10 +48,13 @@ When served over HTTPS the game is installable as a desktop/mobile app via your 
 Requires Node.js 18+ and npm. Only needed if you want to modify the source or run tests.
 
 ```bash
-npm install          # install dev dependencies (vitest)
+npm install          # install dev dependencies (vitest, playwright)
 npm test             # run unit tests
 npm run build        # build to dist/
+npm run playtest     # build, serve and play the real game headlessly (needs a chromium: npx playwright install chromium)
 ```
+
+The playtest drives the built game with keyboard, mouse and touch, runs a bot through several floors and fails on any page error. `npm run playtest -- archer 2500` picks the class and turn budget; set `PLAYTEST_SHOTS=./shots` to keep screenshots.
 
 To test PWA features locally, serve the `dist/` folder:
 
@@ -56,6 +63,18 @@ npx serve dist
 ```
 
 ## Controls
+
+### Touch / mouse
+
+| Gesture | Action |
+|---------|--------|
+| Tap a tile | Walk there (stops when an enemy appears or you take damage) |
+| Tap an enemy | Attack if in reach, otherwise close in |
+| Tap yourself | Pick up, descend stairs, or wait |
+| Swipe | Step (or attack) one tile in that direction |
+| Bottom buttons | Wait, Pick up, Stairs, Bag, Map, Stats, Menu |
+| Belt / skill boxes | Use that consumable or skill |
+| Menus and overlays | Tap a row to select, tap again to confirm |
 
 ### Menus
 
@@ -88,14 +107,15 @@ npx serve dist
 | X | Drop item |
 | C | Assign consumable to belt |
 | U | Unequip selected gear slot |
-| Q / E / R | Use skill slots |
+| Q / E / R / F | Use skill slots |
 | 1 / 2 / 3 | Use belt consumables |
 
 ## Project Structure
 
 ```
-src/               30 modules — the game source
-tests/             21 test files (Vitest)
+src/               31 modules — the game source
+tests/             23 test files (Vitest)
+scripts/playtest.mjs   headless playthrough (Playwright)
 template.html      HTML shell with PWA meta tags and SW registration
 build.js           concatenates src/ into a single HTML file + PWA assets
 dist/              build output (gitignored)
