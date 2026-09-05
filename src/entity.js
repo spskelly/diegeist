@@ -51,9 +51,11 @@ export class Entity {
     this.position.y = y;
   }
 
-  addStatusEffect({ type, duration, value }) {
+  addStatusEffect(effect) {
+    // extra fields (e.g. defenseReduction on berserk) ride along with the effect
+    const { type, duration, value, ...extra } = effect;
     this.statusEffects = this.statusEffects.filter(e => e.type !== type);
-    this.statusEffects.push({ type, turnsRemaining: duration, value });
+    this.statusEffects.push({ ...extra, type, turnsRemaining: duration, value });
   }
 
   hasStatusEffect(type) {

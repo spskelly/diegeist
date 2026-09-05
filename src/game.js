@@ -18,6 +18,7 @@ import {
   cloneItem,
   getEntityStatsWithEquipment,
   getNaturalRegenInterval,
+  getRegenAmount,
   addFloatingText,
   updateCombatVfx,
   syncMilestoneAchievements,
@@ -312,9 +313,10 @@ export class Game {
     const interval = getNaturalRegenInterval(this.player);
     if (this.regenCounter < interval) return;
     this.regenCounter = 0;
-    this.player.heal(1);
-    addFloatingText(this, this.player.position.x, this.player.position.y, '+1 HP', '#73e38e', 780);
-    this.messageLog.add('You recover 1 HP naturally.', this.turnCount);
+    const amount = getRegenAmount(this.player);
+    this.player.heal(amount);
+    addFloatingText(this, this.player.position.x, this.player.position.y, `+${amount} HP`, '#73e38e', 780);
+    this.messageLog.add(`You recover ${amount} HP naturally.`, this.turnCount);
   }
 
   // --- Delegated methods (thin wrappers around extracted modules) ---
@@ -933,7 +935,7 @@ export class Game {
       if (this.treeRegenCounter >= this.treePassiveEffects.passive_regen) {
         this.treeRegenCounter = 0;
         if (this.player.hp < this.player.maxHp) {
-          this.player.heal(1);
+          this.player.heal(getRegenAmount(this.player));
         }
       }
     }
@@ -942,7 +944,8 @@ export class Game {
     for (const effect of this.player.statusEffects) {
       if (effect.type === 'regeneration') {
         const before = this.player.hp;
-        this.player.heal(effect.value);
+        // values below 1 are a fraction of max hp; larger values are flat (legacy items)
+        this.player.heal(effect.value < 1 ? getRegenAmount(this.player, effect.value) : effect.value);
         if (this.player.hp > before) {
           this.messageLog.add(`Regeneration heals ${this.player.hp - before} HP.`, this.turnCount);
         }

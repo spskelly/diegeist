@@ -13,7 +13,7 @@ import { createStarterWeapon } from './items.js';
 import { persistSaveData } from './progression.js';
 import { createEmptyMaterials, scaleMaterials } from './resources.js';
 import { resolvePassiveEffects } from './skill-tree.js';
-import { cloneItem, clearCombatVfx, persistLastClassSelection, syncMilestoneAchievements } from './game-utils.js';
+import { cloneItem, clearCombatVfx, persistLastClassSelection, syncMilestoneAchievements, recalcPlayerMaxHp } from './game-utils.js';
 
 function serializeItemSkill(skill) {
   if (!skill) return null;
@@ -118,6 +118,8 @@ export function saveRunState(game) {
     turnCount: game.turnCount,
     regenCounter: game.regenCounter,
     runSummary: { ...game.runSummary },
+    runMaterials: game.runMaterials ? { ...game.runMaterials } : createEmptyMaterials(),
+    currentRank: game.currentRank || 1,
     selectedClass: game.selectedClass,
     messageLog: game.messageLog.messages.slice(),
   };
@@ -167,6 +169,13 @@ export function loadRunState(game) {
   game.inventoryOpen = false;
   game.statsOpen = false;
   game.mapOpen = false;
+  // run-scoped state that older saves did not carry
+  game.runMaterials = { ...createEmptyMaterials(), ...(snapshot.runMaterials || {}) };
+  game.currentRank = snapshot.currentRank || 1;
+  game.treeRegenCounter = 0;
+  const investments = game.saveData?.skillInvestments?.[game.player.playerClass] || {};
+  game.treePassiveEffects = resolvePassiveEffects(game.player.playerClass, investments);
+  recalcPlayerMaxHp(game);
   clearCombatVfx(game);
 
   // Restore message log
@@ -270,6 +279,7 @@ export function applyPendingHubLoadout(game) {
     if (addToInventory(game.player, stashItem)) {
       if (stashItem.slot && autoEquipIfSlotEmpty(game.player, stashItem.id)) {
         updateActiveSkills(game.player);
+        recalcPlayerMaxHp(game);
         game.messageLog.add(`Stash loadout equipped: ${stashItem.name}.`, game.turnCount);
       } else {
         game.messageLog.add(`Stash loadout added: ${stashItem.name}.`, game.turnCount);
@@ -289,6 +299,7 @@ export function applyPendingHubLoadout(game) {
       if (!addToInventory(game.player, sword)) continue;
       if (autoEquipIfSlotEmpty(game.player, sword.id)) {
         updateActiveSkills(game.player);
+        recalcPlayerMaxHp(game);
       }
       game.messageLog.add('Shop bonus applied: Common Sword.', game.turnCount);
     } else if (purchaseId === 'starting_potions') {

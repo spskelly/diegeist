@@ -20,6 +20,7 @@ import {
   getStashPaneItems,
   getEntityStatsWithEquipment,
   getNaturalRegenInterval,
+  getRegenAmount,
   wrapTextLines,
 } from './game-utils.js';
 import { hasSavedRun } from './game-save.js';
@@ -506,11 +507,11 @@ export function drawStatsOverlay(game) {
 
   ctx.font = `${Math.round(13 * uiScale)}px monospace`;
   ctx.fillStyle = '#cad4de';
-  ctx.fillText(`Class: ${getClassLabel(game.player.playerClass)}`, x + Math.round(16 * uiScale), y + Math.round(58 * uiScale));
+  ctx.fillText(`Class: ${getClassLabel(game.player.playerClass)} Lv${game.player.level || 1}`, x + Math.round(16 * uiScale), y + Math.round(58 * uiScale));
   ctx.fillText(`HP: ${game.player.hp}/${game.player.maxHp}`, x + Math.round(16 * uiScale), y + Math.round(78 * uiScale));
   ctx.fillText(`Floor: ${game.floorNumber}`, x + Math.round(180 * uiScale), y + Math.round(58 * uiScale));
   ctx.fillText(`Essence: ${game.player.gold}`, x + Math.round(180 * uiScale), y + Math.round(78 * uiScale));
-  ctx.fillText(`Natural Regen: 1 HP every ${getNaturalRegenInterval(game.player)} turns`, x + Math.round(16 * uiScale), y + Math.round(98 * uiScale));
+  ctx.fillText(`Natural Regen: ${getRegenAmount(game.player)} HP every ${getNaturalRegenInterval(game.player)} turns`, x + Math.round(16 * uiScale), y + Math.round(98 * uiScale));
 
   const classDef = PLAYER_CLASSES[game.player.playerClass];
   const affinitySet = classDef ? classDef.affinityStats : [];

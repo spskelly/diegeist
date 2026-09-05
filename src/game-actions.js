@@ -1,6 +1,6 @@
-import { TILE, getBiome } from './constants.js';
+import { TILE, getBiome, PLAYER_BASE_ATTACK, ENEMY_BASE_ATTACK } from './constants.js';
 import { Entity } from './entity.js';
-import { resolveAttack } from './combat.js';
+import { resolveAttack, getTrapDamage } from './combat.js';
 import { getAIAction } from './ai.js';
 import {
   addToInventory,
@@ -32,6 +32,7 @@ import {
   addAchievementProgress,
   awardXP,
   getEnemyXP,
+  recalcPlayerMaxHp,
 } from './game-utils.js';
 import { finalizeRun } from './game-save.js';
 
@@ -112,6 +113,7 @@ export function handlePickupAction(game) {
 
   if (item.slot && autoEquipIfSlotEmpty(game.player, item.id)) {
     updateActiveSkills(game.player);
+    recalcPlayerMaxHp(game);
     game.messageLog.add(`${item.name} auto-equipped to ${formatSlotName(item.slot)}.`, game.turnCount);
     if (game.audio) game.audio.uiClick();
     return true;
@@ -273,6 +275,7 @@ export function handleInventoryOverlayAction(game, action) {
       }
       if (equipItem(game.player, item.id)) {
         updateActiveSkills(game.player);
+        recalcPlayerMaxHp(game);
         game.messageLog.add(`You equip ${item.name}.`, game.turnCount);
         clampInventoryCursor(game);
         if (game.audio) game.audio.uiClick();
@@ -311,6 +314,7 @@ export function handleInventoryOverlayAction(game, action) {
     const itemName = selected.item.name;
     if (unequipItem(game.player, selected.slot)) {
       updateActiveSkills(game.player);
+      recalcPlayerMaxHp(game);
       game.messageLog.add(`You unequip ${itemName}.`, game.turnCount);
       clampInventoryCursor(game);
       if (game.audio) game.audio.uiClick();
@@ -324,6 +328,7 @@ export function handleInventoryOverlayAction(game, action) {
     const item = selected.item;
     game.player.equipment[selected.slot] = null;
     updateActiveSkills(game.player);
+    recalcPlayerMaxHp(game);
     dropItemAtPlayer(game, item);
     if (game.audio) game.audio.uiClick();
   }
@@ -333,7 +338,8 @@ export function applyConsumable(game, item) {
   switch (item.effect) {
     case 'heal': {
       const before = game.player.hp;
-      const amount = Math.max(1, Math.floor(game.player.maxHp * item.magnitude));
+      const potionMult = game.treePassiveEffects?.potion_healing_mult || 1;
+      const amount = Math.max(1, Math.floor(game.player.maxHp * item.magnitude * potionMult));
       game.player.heal(amount);
       const healed = game.player.hp - before;
       if (healed > 0) {
@@ -590,7 +596,8 @@ export function handleEnemyDeath(game, enemy) {
 
 export function checkTrapTile(game, x, y) {
   if (game.map.getTile(x, y) !== TILE.TRAP) return;
-  const damage = 2 + game.floorNumber;
+  const resist = game.treePassiveEffects?.trap_resistance || 0;
+  const damage = Math.round(getTrapDamage(game.floorNumber) * (1 - resist));
 
   // DEX dodge roll
   let dodgeChance = game.player.stats.DEX * 1.0;
@@ -598,8 +605,8 @@ export function checkTrapTile(game, x, y) {
   const dodged = Math.random() * 100 < dodgeChance;
 
   game.map.setTile(x, y, TILE.FLOOR);
-  if (dodged) {
-    game.messageLog.add('You dodge a trap!', game.turnCount);
+  if (dodged || damage <= 0) {
+    game.messageLog.add(damage <= 0 ? 'Trap Mastery: you disarm the trap harmlessly.' : 'You dodge a trap!', game.turnCount);
     if (game.audio) game.audio.uiClick();
     return;
   }
@@ -664,8 +671,8 @@ export function processPlayerAction(game, action) {
       );
       if (!enemy) {
         if (game.map.getTile(nx, ny) === TILE.TRAP) {
-          const fullDamage = 2 + game.floorNumber;
-          const damage = Math.max(1, Math.floor(fullDamage * 0.5));
+          const resist = game.treePassiveEffects?.trap_resistance || 0;
+          const damage = Math.max(0, Math.floor(getTrapDamage(game.floorNumber) * 0.5 * (1 - resist)));
           game.player.takeDamage(damage);
           game.map.setTile(nx, ny, TILE.FLOOR);
           game.messageLog.add(`You disarm the trap, taking ${damage} damage.`, game.turnCount);
@@ -694,8 +701,8 @@ export function processPlayerAction(game, action) {
           addProjectile(game, game.player.position.x, game.player.position.y, trap.x, trap.y, spriteKey, dur);
           game.map.setTile(trap.x, trap.y, TILE.FLOOR);
           if (trap.distance <= 1) {
-            const fullDamage = 2 + game.floorNumber;
-            const damage = Math.max(1, Math.floor(fullDamage * 0.5));
+            const resist = game.treePassiveEffects?.trap_resistance || 0;
+            const damage = Math.max(0, Math.floor(getTrapDamage(game.floorNumber) * 0.5 * (1 - resist)));
             game.player.takeDamage(damage);
             game.messageLog.add(`You disarm the trap, taking ${damage} damage.`, game.turnCount);
             if (game.audio) game.audio.playerHurt();
@@ -723,7 +730,7 @@ export function processPlayerAction(game, action) {
     }
 
     const result = resolveCombat(game, game.player, enemy, {
-      baseDamage: 3,
+      baseDamage: PLAYER_BASE_ATTACK,
       damageType,
       weaponMultiplier: getPlayerWeaponMultiplier(game.player, damageType),
     });
@@ -755,7 +762,7 @@ export function processPlayerAction(game, action) {
           );
           if (adjacentEnemy) {
             const cleaveResult = resolveCombat(game, game.player, adjacentEnemy, {
-              baseDamage: Math.floor(3 * 0.5),
+              baseDamage: Math.floor(PLAYER_BASE_ATTACK * 0.5),
               damageType: 'melee',
               weaponMultiplier: getPlayerWeaponMultiplier(game.player, 'melee'),
             });
@@ -816,7 +823,7 @@ export function processEnemyTurn(game, entity) {
   } else if (action.type === 'attack') {
     addProjectileForDamageType(game, entity, game.player, action.damageType || 'melee');
     const result = resolveCombat(game, entity, game.player, {
-      baseDamage: 2,
+      baseDamage: ENEMY_BASE_ATTACK,
       damageType: action.damageType || 'melee',
       weaponMultiplier: 1.0
     });
@@ -848,7 +855,7 @@ export function processEnemyTurn(game, entity) {
         game.treePassiveEffects?.retaliation_chance > 0 && entity.isAlive()) {
       if (Math.random() < game.treePassiveEffects.retaliation_chance) {
         const retResult = resolveCombat(game, game.player, entity, {
-          baseDamage: 1,
+          baseDamage: PLAYER_BASE_ATTACK,
           damageType: 'melee',
           weaponMultiplier: getPlayerWeaponMultiplier(game.player, 'melee') * 0.5,
         });
@@ -864,7 +871,7 @@ export function processEnemyTurn(game, entity) {
 
     if (game.audio) game.audio.playerHurt();
   } else if (action.type === 'summon') {
-    const st = entity.summonTemplate || { name: 'Minion', spriteKey: 'rat', stats: { STR: 2, DEX: 2, CON: 2, INT: 1, WIS: 1, LCK: 1 }, maxHp: 3 };
+    const st = entity.summonTemplate || { name: 'Minion', spriteKey: 'rat', stats: { STR: 2, DEX: 2, CON: 2, INT: 1, WIS: 1, LCK: 1 }, maxHp: 12 };
     const minionId = `minion_${Date.now()}_${Math.random()}`;
     const minion = new Entity({
       id: minionId,

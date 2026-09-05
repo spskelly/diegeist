@@ -1,5 +1,6 @@
-import { PLAYER_CLASSES } from './constants.js';
+import { PLAYER_CLASSES, REGEN_FRACTION } from './constants.js';
 import { getEquippedStats } from './inventory.js';
+import { computePlayerMaxHp, getLevelStatBonuses } from './player.js';
 import { ACHIEVEMENTS, persistSaveData } from './progression.js';
 import { SKILL_TREES, getLevelForXP, getSkillPointsForLevel } from './skill-tree.js';
 
@@ -179,6 +180,44 @@ export function getNaturalRegenInterval(player) {
   const stats = getEntityStatsWithEquipment(player);
   const regenFactor = Math.floor(((stats.CON || 0) + (stats.WIS || 0)) / 4);
   return Math.max(6, 16 - regenFactor);
+}
+
+// regeneration heals a fraction of max hp so it keeps pace with hp growth
+export function getRegenAmount(player, fraction = REGEN_FRACTION) {
+  return Math.max(1, Math.round((player?.maxHp || 0) * fraction));
+}
+
+export function getPlayerLevel(game) {
+  const classKey = game.player?.playerClass;
+  return (classKey && game.saveData?.classLevels?.[classKey]) || game.player?.level || 1;
+}
+
+// recompute max hp from class, level, con (with gear) and tree passives.
+// gaining max hp heals the difference; losing it just clamps current hp.
+export function recalcPlayerMaxHp(game) {
+  const player = game.player;
+  if (!player || !player.playerClass) return;
+  const level = getPlayerLevel(game);
+  const stats = getEntityStatsWithEquipment(player);
+  const newMax = computePlayerMaxHp(player.playerClass, stats, level, game.treePassiveEffects);
+  const delta = newMax - player.maxHp;
+  player.maxHp = newMax;
+  player.level = level;
+  if (delta > 0) player.hp = Math.min(newMax, player.hp + delta);
+  else player.hp = Math.min(player.hp, newMax);
+}
+
+// called when a character level changes mid-run: grant affinity stat points and hp
+export function applyLevelUpGrowth(game, oldLevel, newLevel) {
+  const player = game.player;
+  if (!player || !player.playerClass) return;
+  const before = getLevelStatBonuses(player.playerClass, oldLevel);
+  const after = getLevelStatBonuses(player.playerClass, newLevel);
+  for (const stat of Object.keys(after)) {
+    const gained = (after[stat] || 0) - (before[stat] || 0);
+    if (gained > 0) player.stats[stat] = (player.stats[stat] || 0) + gained;
+  }
+  recalcPlayerMaxHp(game);
 }
 
 export function getSelectedAchievement(game) {
@@ -380,7 +419,10 @@ export function awardXP(game, amount) {
     const newPoints = getSkillPointsForLevel(newLevel);
     const pointsGained = newPoints - oldPoints;
     game.saveData.skillPoints[classKey] = (game.saveData.skillPoints[classKey] || 0) + pointsGained;
-    game.messageLog.add(`Level up! ${classKey.charAt(0).toUpperCase() + classKey.slice(1)} is now level ${newLevel}. +${pointsGained} skill point${pointsGained > 1 ? 's' : ''}.`, game.turnCount, '#ffd700');
+    const hpBefore = game.player.maxHp;
+    applyLevelUpGrowth(game, oldLevel, newLevel);
+    const hpGained = game.player.maxHp - hpBefore;
+    game.messageLog.add(`Level up! ${classKey.charAt(0).toUpperCase() + classKey.slice(1)} is now level ${newLevel}. +${pointsGained} skill point${pointsGained > 1 ? 's' : ''}, +${hpGained} max HP.`, game.turnCount, '#ffd700');
     addFloatingText(game, game.player.position.x, game.player.position.y, `LEVEL ${newLevel}!`, '#ffd700', 1200);
     if (game.audio) game.audio.uiClick();
   }

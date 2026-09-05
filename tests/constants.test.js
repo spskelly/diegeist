@@ -59,9 +59,9 @@ describe('Constants', () => {
     expect(PLAYER_CLASSES.archer.baseStats.LCK).toBe(6);
     expect(PLAYER_CLASSES.mage.baseStats.INT).toBe(8);
     expect(PLAYER_CLASSES.mage.baseStats.WIS).toBe(7);
-    expect(PLAYER_CLASSES.fighter.baseHp).toBe(15);
-    expect(PLAYER_CLASSES.archer.baseHp).toBe(10);
-    expect(PLAYER_CLASSES.mage.baseHp).toBe(10);
+    expect(PLAYER_CLASSES.fighter.baseHp).toBe(50);
+    expect(PLAYER_CLASSES.archer.baseHp).toBe(36);
+    expect(PLAYER_CLASSES.mage.baseHp).toBe(34);
   });
 
   it('defines class affinity stats', () => {
