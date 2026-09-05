@@ -127,7 +127,7 @@ const FIGHTER_TREE = [
     id: 'fighter_regeneration', name: 'Regeneration', branch: 'bulwark', tier: 1,
     maxRank: 3, prerequisites: [], skillType: 'passive',
     cooldown: null,
-    description: 'Passive regen: heal 1 HP every 20/15/10 turns.',
+    description: 'Passive regen: heal 2% max HP every 20/15/10 turns.',
     effectPerRank: [
       { type: 'passive_regen', interval: 20 },
       { type: 'passive_regen', interval: 15 },
@@ -173,7 +173,7 @@ const FIGHTER_TREE = [
     id: 'fighter_rush', name: 'Rush', branch: 'vanguard', tier: 1,
     maxRank: 2, prerequisites: [], skillType: 'active',
     cooldown: 8,
-    description: 'Move 2/3 tiles in a direction, damaging first enemy hit.',
+    description: 'Dash up to 2/3 tiles at an enemy in a straight line and strike it.',
     effectPerRank: [
       { type: 'rush', distance: 2, damage: 1.0 },
       { type: 'rush', distance: 3, damage: 1.0 },
@@ -218,7 +218,7 @@ const FIGHTER_TREE = [
       { skillId: 'fighter_tactical_advance', minRank: 1 },
     ],
     skillType: 'passive', cooldown: null,
-    description: 'Companions deal +30% damage and gain +20% HP.',
+    description: 'Companions deal +30% damage and gain +20% HP. (No companions yet.)',
     effectPerRank: [
       { type: 'companion_buff', damageBonus: 0.30, hpBonus: 0.20 },
     ],
@@ -311,7 +311,7 @@ const ARCHER_TREE = [
     id: 'archer_disengage', name: 'Disengage', branch: 'survival', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'archer_evasion', minRank: 1 }],
     skillType: 'active', cooldown: 6,
-    description: 'Leap away from nearest enemy.',
+    description: 'Leap 2/3 tiles away from the nearest enemy.',
     effectPerRank: [
       { type: 'leap', distance: 2 },
       { type: 'leap', distance: 3 },
@@ -368,7 +368,7 @@ const ARCHER_TREE = [
     id: 'archer_caltrops', name: 'Caltrops', branch: 'trapper', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'archer_trap_mastery', minRank: 1 }],
     skillType: 'active', cooldown: 10,
-    description: 'Place 3x3 caltrops: 30/50% slow for 3 turns.',
+    description: 'Scatter caltrops: enemies within 1 tile are slowed 30/50% for 3 turns.',
     effectPerRank: [
       { type: 'caltrops', slowAmount: 0.30, duration: 3 },
       { type: 'caltrops', slowAmount: 0.50, duration: 3 },
@@ -378,7 +378,7 @@ const ARCHER_TREE = [
     id: 'archer_salvage', name: 'Salvage', branch: 'trapper', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'archer_scavenger', minRank: 2 }],
     skillType: 'passive', cooldown: null,
-    description: 'Break down gear for 1/2 material(s) each.',
+    description: 'Dropped gear is salvaged into 1/2 material(s).',
     effectPerRank: [
       { type: 'salvage', materialsPerItem: 1 },
       { type: 'salvage', materialsPerItem: 2 },
@@ -452,9 +452,9 @@ const MAGE_TREE = [
       { skillId: 'mage_overcharge', minRank: 1 },
     ],
     skillType: 'active', cooldown: 25,
-    description: 'Deal 15 base damage (INT scaling) to a 3x3 area.',
+    description: 'Deal 40 base damage (INT scaling) to a 3x3 area around the nearest enemy.',
     effectPerRank: [
-      { type: 'aoe_damage', damage: 15, radius: 1, statScaling: 'INT' },
+      { type: 'aoe_damage', damage: 40, radius: 1, statScaling: 'INT' },
     ],
   },
 
@@ -551,8 +551,8 @@ const MAGE_TREE = [
   {
     id: 'mage_enchant', name: 'Enchant', branch: 'mysticism', tier: 2,
     maxRank: 2, prerequisites: [{ skillId: 'mage_transmutation', minRank: 1 }],
-    skillType: 'active', cooldown: 1, // once per floor (cooldown managed by floor logic, not turns)
-    description: 'Buff a piece of equipped gear for the rest of the run.',
+    skillType: 'active', cooldown: 999, // once per floor: reset when a new floor starts
+    description: 'Once per floor: +2/+4 to your weapon\'s best stat for the rest of the run.',
     effectPerRank: [
       { type: 'gear_enchant', statBonus: 2 },
       { type: 'gear_enchant', statBonus: 4 },
@@ -772,6 +772,32 @@ export function resolvePassiveEffects(classKey, investments) {
   }
 
   return effects;
+}
+
+// Build usable skill objects for the tree actives a player has invested in.
+// these live on the player for the whole run so cooldowns persist.
+export function createTreeActiveSkills(classKey, investments, savedCooldowns = {}) {
+  return getActiveTreeSkills(classKey, investments).map(node => {
+    const eff = node.currentEffect;
+    let statScaling = 'STR';
+    if (classKey === 'archer') statScaling = 'DEX';
+    if (classKey === 'mage') statScaling = 'INT';
+    return {
+      id: node.id,
+      name: node.name,
+      description: node.description,
+      cooldown: node.cooldown || 0,
+      currentCooldown: savedCooldowns[node.id] || 0,
+      range: eff.distance || eff.radius || 6,
+      area: { type: eff.type === 'aoe_damage' ? 'circle' : 'single', size: eff.radius ? eff.radius * 2 + 1 : 1 },
+      damage: eff.damage && eff.damage > 1 ? eff.damage : 0,
+      statScaling: eff.statScaling || statScaling,
+      skillType: 'tree',
+      treeEffect: { ...eff },
+      rank: node.currentRank,
+      isTreeSkill: true,
+    };
+  });
 }
 
 // Get the list of active (non-passive) skills a player has invested in

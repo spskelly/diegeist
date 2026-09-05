@@ -6,13 +6,13 @@ import { Renderer } from './renderer.js';
 import { MessageLog } from './message-log.js';
 import { createPlayer } from './player.js';
 import { computeFOV } from './fov.js';
-import { FOV_RADIUS } from './constants.js';
+import { FOV_RADIUS, SKILL_SLOT_COUNT } from './constants.js';
 import { updateActiveSkills } from './skills.js';
 import { addToInventory, autoEquipIfSlotEmpty, assignToBelt } from './inventory.js';
 import { createStarterWeapon } from './items.js';
 import { persistSaveData } from './progression.js';
 import { createEmptyMaterials, scaleMaterials } from './resources.js';
-import { resolvePassiveEffects } from './skill-tree.js';
+import { resolvePassiveEffects, createTreeActiveSkills } from './skill-tree.js';
 import { cloneItem, clearCombatVfx, persistLastClassSelection, syncMilestoneAchievements, recalcPlayerMaxHp } from './game-utils.js';
 
 function serializeItemSkill(skill) {
@@ -37,7 +37,8 @@ export function serializeEntity(entity) {
     ),
     inventory: entity.inventory.map(i => ({ ...i, skill: serializeItemSkill(i.skill) })),
     belt: entity.belt.map(i => i ? { ...i } : null),
-    skillSlotBindings: [...(entity.skillSlotBindings || [null, null, null])],
+    skillSlotBindings: [...(entity.skillSlotBindings || new Array(SKILL_SLOT_COUNT).fill(null))],
+    treeSkillCooldowns: Object.fromEntries((entity.treeActiveSkills || []).map(s => [s.id, s.currentCooldown || 0])),
     activeBlessings: [...(entity.activeBlessings || [])],
     statusEffects: (entity.statusEffects || []).map(e => ({ ...e })),
     // Player-specific
@@ -56,6 +57,11 @@ export function serializeEntity(entity) {
     renderScale: entity.renderScale || null,
     auraColor: entity.auraColor || null,
     summonTemplate: entity.summonTemplate || null,
+    bossKey: entity.bossKey || null,
+    enrageStage: entity.enrageStage || 0,
+    bossTurnCounter: entity.bossTurnCounter || 0,
+    alerted: entity.alerted || false,
+    hidden: entity.hidden ?? null,
   };
 }
 
@@ -79,7 +85,9 @@ export function deserializeEntity(data) {
   }
   entity.inventory = (data.inventory || []).map(i => ({ ...i, skill: serializeItemSkill(i.skill) }));
   entity.belt = (data.belt || [null, null, null]).map(i => i ? { ...i } : null);
-  entity.skillSlotBindings = data.skillSlotBindings || [null, null, null];
+  entity.skillSlotBindings = data.skillSlotBindings || new Array(SKILL_SLOT_COUNT).fill(null);
+  while (entity.skillSlotBindings.length < SKILL_SLOT_COUNT) entity.skillSlotBindings.push(null);
+  entity.savedTreeCooldowns = data.treeSkillCooldowns || {};
   entity.activeBlessings = data.activeBlessings || [];
   entity.statusEffects = (data.statusEffects || []).map(e => ({ ...e }));
   if (data.playerClass) {
@@ -98,6 +106,11 @@ export function deserializeEntity(data) {
   if (data.renderScale) entity.renderScale = data.renderScale;
   if (data.auraColor) entity.auraColor = data.auraColor;
   if (data.summonTemplate) entity.summonTemplate = data.summonTemplate;
+  if (data.bossKey) entity.bossKey = data.bossKey;
+  if (data.enrageStage) entity.enrageStage = data.enrageStage;
+  if (data.bossTurnCounter) entity.bossTurnCounter = data.bossTurnCounter;
+  if (data.alerted) entity.alerted = true;
+  if (data.hidden !== null && data.hidden !== undefined) entity.hidden = data.hidden;
   return entity;
 }
 
@@ -120,6 +133,8 @@ export function saveRunState(game) {
     runSummary: { ...game.runSummary },
     runMaterials: game.runMaterials ? { ...game.runMaterials } : createEmptyMaterials(),
     currentRank: game.currentRank || 1,
+    deathSaveUsedThisFloor: game.deathSaveUsedThisFloor || false,
+    corpses: (game.corpses || []).slice(),
     selectedClass: game.selectedClass,
     messageLog: game.messageLog.messages.slice(),
   };
@@ -175,6 +190,10 @@ export function loadRunState(game) {
   game.treeRegenCounter = 0;
   const investments = game.saveData?.skillInvestments?.[game.player.playerClass] || {};
   game.treePassiveEffects = resolvePassiveEffects(game.player.playerClass, investments);
+  game.player.treeActiveSkills = createTreeActiveSkills(game.player.playerClass, investments, game.player.savedTreeCooldowns || {});
+  updateActiveSkills(game.player);
+  game.deathSaveUsedThisFloor = snapshot.deathSaveUsedThisFloor || false;
+  game.corpses = snapshot.corpses || [];
   recalcPlayerMaxHp(game);
   clearCombatVfx(game);
 

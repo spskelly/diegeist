@@ -1,4 +1,5 @@
-import { PLAYER_CLASSES, STAT_NAMES, STAT_DESCRIPTIONS, TILE } from './constants.js';
+import { PLAYER_CLASSES, STAT_NAMES, STAT_DESCRIPTIONS, TILE, SKILL_SLOT_COUNT } from './constants.js';
+import { SKILL_SLOT_KEYS } from './skills.js';
 import { getEquippedStats } from './inventory.js';
 import { ACHIEVEMENTS } from './progression.js';
 import { getXPForNextLevel, XP_TABLE, canInvestSkill, SKILL_TREES } from './skill-tree.js';
@@ -137,8 +138,8 @@ export function getItemInspectLines(game, item, slotLabel = null) {
       lines.push(...wrapTextLines(item.skill.description, 30));
     }
     if (game.player) {
-      const bindings = game.player.skillSlotBindings || [null, null, null];
-      const slotLabels = ['Q', 'E', 'R'];
+      const bindings = game.player.skillSlotBindings || [];
+      const slotLabels = SKILL_SLOT_KEYS;
       let boundLabel = null;
       for (const [eqSlot, equipped] of Object.entries(game.player.equipment)) {
         if (equipped === item) {
@@ -147,7 +148,7 @@ export function getItemInspectLines(game, item, slotLabel = null) {
           break;
         }
       }
-      lines.push(boundLabel ? `Bound to: ${boundLabel}` : 'Q/E/R to assign slot');
+      lines.push(boundLabel ? `Bound to: ${boundLabel}` : 'Q/E/R/F to assign slot');
     }
   }
 
@@ -356,9 +357,9 @@ export function drawInventoryOverlay(game) {
       ctx.fillStyle = getRarityColor(row.item.rarity, selected ? '#ffffff' : '#c3cbd4');
       ctx.fillText(truncateLabel(row.item.name, 18), itemX, rowY);
       if (row.item.skill) {
-        const bindings = game.player.skillSlotBindings || [null, null, null];
-        const slotLabels = ['Q', 'E', 'R'];
-        for (let si = 0; si < 3; si++) {
+        const bindings = game.player.skillSlotBindings || [];
+        const slotLabels = SKILL_SLOT_KEYS;
+        for (let si = 0; si < SKILL_SLOT_COUNT; si++) {
           if (bindings[si] === row.slot) {
             const nameEndX = itemX + ctx.measureText(truncateLabel(row.item.name, 18)).width + Math.round(6 * uiScale);
             ctx.fillStyle = '#6bc4ff';
@@ -475,7 +476,7 @@ export function drawInventoryOverlay(game) {
     y + panelH - Math.round(36 * uiScale)
   );
   ctx.fillText(
-    '1/2/3: belt  Q/E/R: skill slot  C: auto belt  Tab/I/ESC: close',
+    '1/2/3: belt  Q/E/R/F: skill slot  C: auto belt  Tab/I/ESC: close',
     x + Math.round(16 * uiScale),
     y + panelH - Math.round(18 * uiScale)
   );
@@ -539,9 +540,9 @@ export function drawStatsOverlay(game) {
   ctx.fillStyle = '#d8e3ee';
   ctx.fillText('Active Skills:', x + Math.round(16 * uiScale), skillStartY);
   const skills = game.player.activeSkills || [];
-  const slotLabels = ['Q', 'E', 'R'];
+  const slotLabels = SKILL_SLOT_KEYS;
   let drawnCount = 0;
-  for (let i = 0; i < Math.min(3, skills.length); i++) {
+  for (let i = 0; i < Math.min(SKILL_SLOT_COUNT, skills.length); i++) {
     const skill = skills[i];
     if (!skill) continue;
     ctx.fillStyle = '#9ab3c9';
@@ -550,7 +551,7 @@ export function drawStatsOverlay(game) {
   }
   if (drawnCount === 0) {
     ctx.fillStyle = '#7d8894';
-    ctx.fillText('No skills equipped via gear.', x + Math.round(28 * uiScale), skillStartY + Math.round(18 * uiScale));
+    ctx.fillText('No active skills. Gear with skills and skill tree actives fill Q/E/R/F.', x + Math.round(28 * uiScale), skillStartY + Math.round(18 * uiScale));
   }
 
   ctx.fillStyle = '#94a0ad';

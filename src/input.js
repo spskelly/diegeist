@@ -17,6 +17,7 @@ const KEY_MAP = {
   q:          { type: 'skill', slot: 0 },
   e:          { type: 'skill', slot: 1 },
   r:          { type: 'skill', slot: 2 },
+  f:          { type: 'skill', slot: 3 },
   '1':        { type: 'belt', slot: 0 },
   '2':        { type: 'belt', slot: 1 },
   '3':        { type: 'belt', slot: 2 },

@@ -35,6 +35,7 @@ export function resolveAttack(attacker, defender, options = {}) {
     forceDodge = null,
     attackerTreeEffects = null,
     defenderTreeEffects = null,
+    damageMultiplier = 1,
   } = options;
 
   const isMagic = damageType === 'magic';
@@ -111,6 +112,9 @@ export function resolveAttack(attacker, defender, options = {}) {
       damage = Math.floor(damage * attackerTreeEffects.magic_damage_mult);
     }
   }
+
+  // caller-supplied multiplier (ambush, rush, overcharge, chain lightning ...)
+  if (damageMultiplier !== 1) damage = Math.max(1, Math.floor(damage * damageMultiplier));
 
   // War Cry / Berserker Rage: attacker damage boost
   const warCry = attacker.hasStatusEffect?.('war_cry');

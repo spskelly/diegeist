@@ -1,4 +1,5 @@
-import { STAT_NAMES } from './constants.js';
+import { STAT_NAMES, SKILL_SLOT_COUNT } from './constants.js';
+import { SKILL_SLOT_KEYS } from './skills.js';
 
 const STATUS_EFFECT_LABELS = {
   thorns: 'Thorns',
@@ -8,6 +9,12 @@ const STATUS_EFFECT_LABELS = {
   regeneration: 'Regen',
   lucky_strike: 'Lucky',
   mana_shield: 'Shield',
+  berserk: 'Berserk',
+  deadeye: 'Deadeye',
+  invisible: 'Hidden',
+  tactical: 'Tactical',
+  slowed: 'Slowed',
+  stunned: 'Stunned',
 };
 
 export class HUD {
@@ -139,7 +146,7 @@ export class HUD {
 
     const slotSize = Math.round(26 * s);
     const slotGap = Math.round(7 * s);
-    const slotCount = 3;
+    const slotCount = SKILL_SLOT_COUNT;
     const slotAreaW = slotCount * slotSize + (slotCount - 1) * slotGap;
     const rightInset = Math.round(10 * s);
     const rightPanelPad = Math.round(8 * s);
@@ -228,15 +235,15 @@ export class HUD {
     }
 
     const skills = player.activeSkills || [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < SKILL_SLOT_COUNT; i++) {
       const slotX = skillX + i * (slotSize + slotGap);
       const skill = skills[i] || null;
-      ctx.strokeStyle = '#5a6673';
+      ctx.strokeStyle = skill?.isTreeSkill ? '#8a6a3a' : '#5a6673';
       ctx.strokeRect(slotX, skillY, slotSize, slotSize);
       this.drawSkillIcon(ctx, skill, slotX + 1, skillY + 1, slotSize - 2);
       ctx.fillStyle = '#d3dde7';
       ctx.font = `${Math.round(10 * s)}px monospace`;
-      ctx.fillText(i === 0 ? 'Q' : i === 1 ? 'E' : 'R', slotX + Math.round(3 * s), skillY + slotSize - Math.round(3 * s));
+      ctx.fillText(SKILL_SLOT_KEYS[i], slotX + Math.round(3 * s), skillY + slotSize - Math.round(3 * s));
       if (skill && skill.currentCooldown > 0) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
         ctx.fillRect(slotX + 1, skillY + 1, slotSize - 2, slotSize - 2);
@@ -282,7 +289,7 @@ export class HUD {
     ctx.fillStyle = '#7f8a94';
     ctx.font = `${Math.round(11 * s)}px monospace`;
     const line1 = 'Move: Arrows  Attack: WASD  Wait: Space/.  Pickup: G';
-    const line2 = 'Skills: Q/E/R  Belt: 1/2/3  Inventory: I/Tab  Stats: P  Map: M  Stairs: >';
+    const line2 = 'Skills: Q/E/R/F  Belt: 1/2/3  Inventory: I/Tab  Stats: P  Map: M  Stairs: >';
     ctx.fillText(line1, Math.round(12 * s), y + this.hudHeight - Math.round(28 * s));
     ctx.fillText(line2, Math.round(12 * s), y + this.hudHeight - Math.round(10 * s));
   }

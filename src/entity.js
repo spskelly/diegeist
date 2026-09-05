@@ -1,4 +1,4 @@
-import { ENERGY_THRESHOLD } from './constants.js';
+import { ENERGY_THRESHOLD, SKILL_SLOT_COUNT } from './constants.js';
 
 export class Entity {
   constructor({ id, type, x, y, stats, maxHp, speed, behavior = null, name = '' }) {
@@ -16,14 +16,21 @@ export class Entity {
     this.inventory = [];
     this.belt = [null, null, null];
     this.activeSkills = [];
-    this.skillSlotBindings = [null, null, null];
+    this.skillSlotBindings = new Array(SKILL_SLOT_COUNT).fill(null);
+    this.treeActiveSkills = [];
     this.classSkillCooldown = 0;
     this.activeBlessings = [];
     this.statusEffects = [];
   }
 
+  // slowed enemies (war shout, caltrops) gain energy more slowly
+  getEffectiveSpeed() {
+    const slow = this.hasStatusEffect('slowed');
+    return slow ? Math.max(10, Math.round(this.speed * (1 - slow.value))) : this.speed;
+  }
+
   gainEnergy() {
-    this.energy += this.speed;
+    this.energy += this.getEffectiveSpeed();
   }
 
   isReady() {

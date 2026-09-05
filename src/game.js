@@ -7,10 +7,10 @@ import { InputHandler } from './input.js';
 import { SpriteRegistry } from './sprites.js';
 import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
-import { tickCooldowns } from './skills.js';
+import { tickCooldowns, updateActiveSkills } from './skills.js';
 import { HubShop, loadSaveData, persistSaveData, ACHIEVEMENTS } from './progression.js';
 import { AudioManager, BIOME_KEYS } from './audio.js';
-import { resolvePassiveEffects, canInvestSkill, investSkill } from './skill-tree.js';
+import { resolvePassiveEffects, canInvestSkill, investSkill, createTreeActiveSkills } from './skill-tree.js';
 
 // game-utils.js — shared helpers
 import {
@@ -19,6 +19,7 @@ import {
   getEntityStatsWithEquipment,
   getNaturalRegenInterval,
   getRegenAmount,
+  recalcPlayerMaxHp,
   addFloatingText,
   updateCombatVfx,
   syncMilestoneAchievements,
@@ -820,6 +821,13 @@ export class Game {
     this.saveData.skillPoints[classKey] = available - 1;
 
     this.treePassiveEffects = resolvePassiveEffects(classKey, investments);
+    // mid-run investment: rebuild the tree actives (keeping cooldowns) and hp
+    if (this.player && this.player.playerClass === classKey) {
+      const saved = Object.fromEntries((this.player.treeActiveSkills || []).map(s => [s.id, s.currentCooldown || 0]));
+      this.player.treeActiveSkills = createTreeActiveSkills(classKey, investments, saved);
+      updateActiveSkills(this.player);
+      recalcPlayerMaxHp(this);
+    }
     persistSaveData(this.saveData);
     if (this.audio) this.audio.uiClick();
   }
@@ -952,6 +960,10 @@ export class Game {
       }
     }
     this.player.tickStatusEffects();
+    // enemy effects (stun, slow) expire on the player's clock
+    for (const entity of this.map.entities) {
+      if (entity.type === 'enemy' && entity.isAlive()) entity.tickStatusEffects();
+    }
 
     // Run ticks until the player gets another turn
     let safety = 0;

@@ -8,7 +8,7 @@ import { updateActiveSkills } from './skills.js';
 import { computeFOV } from './fov.js';
 import { Camera } from './camera.js';
 import { Renderer } from './renderer.js';
-import { resolvePassiveEffects } from './skill-tree.js';
+import { resolvePassiveEffects, createTreeActiveSkills } from './skill-tree.js';
 import { persistSaveData } from './progression.js';
 import { getFloorClearMaterials, getBossKillMaterials, MATERIAL_COLORS } from './resources.js';
 import {
@@ -123,25 +123,25 @@ export function scaleEnemyTemplate(template, floorNumber) {
 export function getFloorBossTemplate(floorNumber) {
   const BOSS_TEMPLATES = {
     3: {
-      name: 'Brood Mother', spriteKey: 'boss_brood_mother', behavior: 'summoner',
+      name: 'Brood Mother', spriteKey: 'boss_brood_mother', behavior: 'summoner', bossKey: 'brood_mother',
       stats: { STR: 8, DEX: 4, CON: 10, INT: 6, WIS: 4, LCK: 3 }, maxHp: 180, speed: 80,
       renderScale: 1.5, auraColor: 'rgba(50, 180, 50, 0.25)',
       summonTemplate: { name: 'Leech', spriteKey: 'leech', stats: { STR: 3, DEX: 2, CON: 4, INT: 1, WIS: 1, LCK: 2 }, maxHp: 20 },
     },
     6: {
-      name: 'Rat King', spriteKey: 'boss_rat_king', behavior: 'summoner',
+      name: 'Rat King', spriteKey: 'boss_rat_king', behavior: 'summoner', bossKey: 'rat_king',
       stats: { STR: 10, DEX: 8, CON: 10, INT: 4, WIS: 4, LCK: 6 }, maxHp: 300, speed: 95,
       renderScale: 1.5, auraColor: 'rgba(160, 120, 60, 0.25)',
       summonTemplate: { name: 'Rat', spriteKey: 'rat', stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 }, maxHp: 20 },
     },
     9: {
-      name: 'Bone Lord', spriteKey: 'boss_bone_lord', behavior: 'summoner',
+      name: 'Bone Lord', spriteKey: 'boss_bone_lord', behavior: 'summoner', bossKey: 'bone_lord',
       stats: { STR: 14, DEX: 8, CON: 14, INT: 10, WIS: 8, LCK: 4 }, maxHp: 400, speed: 100,
       renderScale: 1.5, auraColor: 'rgba(80, 80, 200, 0.25)',
       summonTemplate: { name: 'Skeleton', spriteKey: 'skeleton', stats: { STR: 5, DEX: 4, CON: 4, INT: 2, WIS: 2, LCK: 2 }, maxHp: 28 },
     },
     10: {
-      name: 'Void Tyrant', spriteKey: 'boss_tyrant', behavior: 'rushdown',
+      name: 'Void Tyrant', spriteKey: 'boss_tyrant', behavior: 'rushdown', bossKey: 'void_tyrant',
       stats: { STR: 15, DEX: 10, CON: 16, INT: 12, WIS: 10, LCK: 8 }, maxHp: 500, speed: 125,
       renderScale: 2.0, auraColor: 'rgba(200, 40, 40, 0.25)',
     },
@@ -186,6 +186,9 @@ export function spawnFloorBoss(game) {
   });
   boss.spriteKey = template.spriteKey;
   boss.isFloorBoss = true;
+  boss.bossKey = template.bossKey || null;
+  boss.enrageStage = 0;
+  boss.bossTurnCounter = 0;
   boss.renderScale = template.renderScale || 1;
   boss.auraColor = template.auraColor || 'rgba(200, 40, 40, 0.25)';
   if (template.summonTemplate) {
@@ -220,7 +223,7 @@ export function spawnFloorItems(game, rooms) {
     const item = Math.random() < 0.4
       ? generateConsumable(game.floorNumber)
       : generateItem({
-        floorLevel: game.floorNumber,
+        floorLevel: game.floorNumber + (game.treePassiveEffects?.gear_level_bonus || 0),
         luck: getEntityStatsWithEquipment(game.player).LCK,
         context: 'drop',
       });
@@ -268,6 +271,7 @@ export function startFloor(game) {
     // Resolve skill tree passive effects before gear so max hp accounts for both
     const investments = game.saveData?.skillInvestments?.[classKey] || {};
     game.treePassiveEffects = resolvePassiveEffects(classKey, investments);
+    game.player.treeActiveSkills = createTreeActiveSkills(classKey, investments);
 
     applyStarterLoadout(game);
     applyPendingHubLoadout(game);
@@ -281,6 +285,12 @@ export function startFloor(game) {
   }
 
   game.turnSystem.addEntity(game.player);
+  // per-floor resets: unbreakable, enchant, corpses for the bone lord
+  game.deathSaveUsedThisFloor = false;
+  game.corpses = [];
+  for (const s of game.player.treeActiveSkills || []) {
+    if (s.treeEffect?.type === 'gear_enchant') s.currentCooldown = 0;
+  }
   updateActiveSkills(game.player);
 
   // Spawn enemy groups

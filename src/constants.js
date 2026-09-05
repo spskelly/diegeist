@@ -12,6 +12,8 @@ export const HP_PER_CON = 2;
 export const HP_GROWTH_PER_LEVEL = 0.08;
 // natural and passive regeneration heal this fraction of max hp per tick
 export const REGEN_FRACTION = 0.02;
+// q/e/r/f skill hotbar
+export const SKILL_SLOT_COUNT = 4;
 export const STAT_NAMES = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'LCK'];
 
 export const RARITY = {
