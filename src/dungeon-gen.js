@@ -440,6 +440,30 @@ function trimDeadEndCorridors(map) {
   }
 }
 
+// a door must connect two passable tiles on opposite sides. trimming dead-end
+// corridors can eat the stub behind a door and leave a door that opens onto a
+// wall; those doors become wall again.
+function removeOrphanDoors(map) {
+  const passable = (x, y) => {
+    const t = map.getTile(x, y);
+    return t === TILE.FLOOR || t === TILE.CORRIDOR || t === TILE.DOOR ||
+           t === TILE.STAIRS_DOWN || t === TILE.TRAP;
+  };
+  let removed = 0;
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      if (map.getTile(x, y) !== TILE.DOOR) continue;
+      const horizontal = passable(x - 1, y) && passable(x + 1, y);
+      const vertical = passable(x, y - 1) && passable(x, y + 1);
+      if (!horizontal && !vertical) {
+        map.setTile(x, y, TILE.WALL);
+        removed++;
+      }
+    }
+  }
+  return removed;
+}
+
 function roomCenter(room) {
   return { x: Math.floor(room.x + room.width / 2), y: Math.floor(room.y + room.height / 2) };
 }
@@ -613,9 +637,11 @@ export function generateDungeon(width, height, archetype, floorNumber, biomeConf
   // Place doors at room-corridor junctions (seal-and-punch)
   placeDoors(map, rooms);
 
-  // Clean up orphaned and dead-end corridor segments
+  // Clean up orphaned and dead-end corridor segments, then any door left
+  // opening onto a wall. removing a door can expose a new dead end, so repeat.
   repairCorridorConnectivity(map);
   trimDeadEndCorridors(map);
+  while (removeOrphanDoors(map) > 0) trimDeadEndCorridors(map);
 
   // Place biome-specific environmental tiles
   if (biomeConfig) {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BSPNode, generateDungeon } from '../src/dungeon-gen.js';
-import { TILE } from '../src/constants.js';
+import { BIOME_THEMES, getBiome, TILE } from '../src/constants.js';
 
 describe('BSPNode', () => {
   it('creates a node with bounds', () => {
@@ -156,26 +156,23 @@ describe('generateDungeon', () => {
     expect(doorCount).toBeGreaterThan(0);
   });
 
-  it('most doors have at least two passable neighbors', () => {
-    for (let run = 0; run < 10; run++) {
+  it('every door connects two passable tiles on opposite sides', () => {
+    // 60 floors across every archetype and biome floor: no door may open onto a wall
+    const isPassable = t => t === TILE.FLOOR || t === TILE.STAIRS_DOWN || t === TILE.TRAP || t === TILE.CORRIDOR || t === TILE.DOOR;
+    for (let run = 0; run < 60; run++) {
       const archetype = ['hybrid', 'corridor-heavy', 'cavernous'][run % 3];
-      const map = generateDungeon(60, 60, archetype, 1);
-      let doors = 0;
-      let valid = 0;
+      const floor = 1 + (run % 10);
+      const map = generateDungeon(60, 50, archetype, floor, BIOME_THEMES[getBiome(floor)]);
+      const orphans = [];
       for (let y = 0; y < map.height; y++) {
         for (let x = 0; x < map.width; x++) {
           if (map.getTile(x, y) !== TILE.DOOR) continue;
-          doors++;
-          const isPassable = t => t === TILE.FLOOR || t === TILE.STAIRS_DOWN || t === TILE.TRAP || t === TILE.CORRIDOR || t === TILE.DOOR;
-          const passableCount = [[0,-1],[0,1],[-1,0],[1,0]]
-            .filter(([dx,dy]) => isPassable(map.getTile(x+dx, y+dy))).length;
-          if (passableCount >= 2) valid++;
+          const horizontal = isPassable(map.getTile(x - 1, y)) && isPassable(map.getTile(x + 1, y));
+          const vertical = isPassable(map.getTile(x, y - 1)) && isPassable(map.getTile(x, y + 1));
+          if (!horizontal && !vertical) orphans.push(`${x},${y}`);
         }
       }
-      // Allow a small number of orphan doors from BSP edge cases
-      expect(valid / doors,
-        `run=${run} ${archetype}: ${valid}/${doors} doors valid`
-      ).toBeGreaterThan(0.9);
+      expect(orphans, `run=${run} ${archetype} floor ${floor}: doors to nowhere at ${orphans.join(' ')}`).toEqual([]);
     }
   });
 
