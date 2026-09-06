@@ -319,6 +319,14 @@ export class Game {
     if (this.audio) this.audio.uiClick();
   }
 
+  openSkillTree(returnState) {
+    this.skillTreeCursor = 0;
+    this.skillTreeScrollOffset = 0;
+    this.skillTreeReturnState = returnState;
+    this.state = 'skillTree';
+    if (this.audio) this.audio.uiClick();
+  }
+
   // --- Natural regen ---
 
   applyNaturalRegen() {
@@ -362,12 +370,8 @@ export class Game {
         if (this.audio) this.audio.uiClick();
         return;
       }
-      if (action.type === 'stats') {
-        this.skillTreeCursor = 0;
-        this.skillTreeScrollOffset = 0;
-        this.skillTreeReturnState = 'town';
-        this.state = 'skillTree';
-        if (this.audio) this.audio.uiClick();
+      if (action.type === 'stats' || action.type === 'skillTree') {
+        this.openSkillTree('town');
         return;
       }
     }
@@ -1121,6 +1125,10 @@ export class Game {
       this.toggleStatsOverlay();
       return;
     }
+    if (action.type === 'skillTree') {
+      this.openSkillTree('playing');
+      return;
+    }
     if (action.type === 'close') {
       this.state = 'pauseMenu';
       this.pauseMenuIndex = 0;
@@ -1241,11 +1249,11 @@ export class Game {
     ctx.fillStyle = '#8a9aaa';
     ctx.font = '12px monospace';
     ctx.textAlign = 'center';
-    if (w >= 560) ctx.fillText('Arrows / tap: Move   Tap shelter: Enter', w / 2, h - 11);
+    if (w >= 560) ctx.fillText('Arrows / tap: Move   Enter: Shelter   K: Skills   Esc: Menu', w / 2, h - 11);
     ctx.textAlign = 'left';
     // tappable buttons in the bottom bar
     const btnH = TOWN_BAR_HEIGHT - 8;
-    drawButton(this, 8, h - TOWN_BAR_HEIGHT + 4, 70, btnH, 'Skills', { type: 'stats' }, { fontSize: 11 });
+    drawButton(this, 8, h - TOWN_BAR_HEIGHT + 4, 70, btnH, 'Skills', { type: 'skillTree' }, { fontSize: 11 });
     drawButton(this, w - 78, h - TOWN_BAR_HEIGHT + 4, 70, btnH, 'Menu', { type: 'close' }, { fontSize: 11 });
   }
 

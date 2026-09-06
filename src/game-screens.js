@@ -1427,11 +1427,11 @@ export function drawPauseMenu(game) {
     'Attack: WASD / tap an enemy',
     'Wait: Space  Pick up: G  Stairs: >',
     'Skills: Q/E/R/F  Belt: 1/2/3',
-    'Bag: I  Stats: P  Map: M  Menu: Esc',
+    'Bag: I  Tree: K  Stats: P  Map: M',
   ] : [
     'Move: Arrows / tap a tile   Attack: WASD / tap an enemy',
     'Wait: Space   Pick up: G   Stairs: >   Skills: Q/E/R/F   Belt: 1/2/3',
-    'Inventory: I   Stats: P   Map: M   Menu: Esc',
+    'Inventory: I   Skill tree: K   Stats: P   Map: M   Menu: Esc',
   ];
   ctx.fillStyle = '#6f7d8a';
   ctx.font = `${Math.round(11 * uiScale)}px monospace`;

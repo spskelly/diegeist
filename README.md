@@ -72,7 +72,7 @@ npx serve dist
 | Tap an enemy | Attack if in reach, otherwise close in |
 | Tap yourself | Pick up, descend stairs, or wait |
 | Swipe | Step (or attack) one tile in that direction |
-| Bottom buttons | Wait, Pick up, Stairs, Bag, Map, Stats, Menu |
+| Bottom buttons | Wait, Pick up, Stairs, Bag, Skills, Map, Stats, Menu |
 | Belt / skill boxes | Use that consumable or skill |
 | Menus and overlays | Tap a row to select, tap again to confirm |
 
@@ -100,6 +100,7 @@ npx serve dist
 |-----|--------|
 | I / Tab | Open inventory |
 | P | Character stats overlay |
+| K | Skill tree |
 | Esc | Close any overlay / pause |
 | Arrows | Navigate inventory grid |
 | Left / Right | Switch inventory tabs |

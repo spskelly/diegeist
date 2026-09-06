@@ -312,26 +312,34 @@ export class HUD {
 
     ctx.restore();
 
-    // tappable command strip along the bottom edge (works with mouse and touch)
+    // tappable command strip along the bottom edge (works with mouse and touch).
+    // wide screens also show each button's key and a one-line movement hint.
     if (game) {
       const btnH = Math.round(24 * s);
       const btnY = y + this.hudHeight - btnH - Math.round(5 * s);
       const buttons = [
-        ['Wait', { type: 'wait' }],
-        ['Pick up', { type: 'pickup' }],
-        ['Stairs', { type: 'descend' }],
-        ['Bag', { type: 'inventory' }],
-        ['Map', { type: 'map' }],
-        ['Stats', { type: 'stats' }],
-        ['Menu', { type: 'close' }],
+        ['Wait', 'Space', { type: 'wait' }],
+        ['Pick up', 'G', { type: 'pickup' }],
+        ['Stairs', '>', { type: 'descend' }],
+        ['Bag', 'I', { type: 'inventory' }],
+        ['Skills', 'K', { type: 'skillTree' }],
+        ['Map', 'M', { type: 'map' }],
+        ['Stats', 'P', { type: 'stats' }],
+        ['Menu', 'Esc', { type: 'close' }],
       ];
       const gap = Math.round(5 * s);
       const avail = this.canvasWidth - Math.round(24 * s);
-      const btnW = Math.min(Math.round(86 * s), Math.floor((avail - gap * (buttons.length - 1)) / buttons.length));
+      const btnW = Math.min(Math.round(96 * s), Math.floor((avail - gap * (buttons.length - 1)) / buttons.length));
+      const showKeys = btnW >= Math.round(80 * s);
       let bx = Math.round(12 * s);
-      for (const [label, action] of buttons) {
-        drawButton(game, bx, btnY, btnW, btnH, label, action, { fontSize: Math.round((btnW < 50 ? 9 : 11) * s) });
+      for (const [label, key, action] of buttons) {
+        drawButton(game, bx, btnY, btnW, btnH, showKeys ? `${label} ${key}` : label, action, { fontSize: Math.round((btnW < 50 ? 9 : 11) * s) });
         bx += btnW + gap;
+      }
+      if (showKeys) {
+        ctx.fillStyle = '#7f8a94';
+        ctx.font = `${Math.round(10 * s)}px monospace`;
+        ctx.fillText('Move: Arrows / tap   Attack: WASD / tap enemy   Skills: Q E R F   Belt: 1 2 3', Math.round(12 * s), btnY - Math.round(5 * s));
       }
     } else {
       ctx.fillStyle = '#7f8a94';
