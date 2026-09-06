@@ -13,6 +13,8 @@ export const HP_GROWTH_PER_LEVEL = 0.08;
 // natural and passive regeneration heal this fraction of max hp per tick
 export const REGEN_FRACTION = 0.02;
 // q/e/r/f skill hotbar
+// how many stash items can be queued as the loadout for the next run
+export const LOADOUT_SLOT_COUNT = 3;
 export const SKILL_SLOT_COUNT = 4;
 export const STAT_NAMES = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'LCK'];
 

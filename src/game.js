@@ -32,6 +32,7 @@ import {
   getSkillTreeNodes,
   getItemSellValue,
   getStashPaneItems,
+  getLoadoutCount,
 } from './game-utils.js';
 
 // game-save.js — save/load & run lifecycle
@@ -41,6 +42,13 @@ import {
   hasSavedRun,
   startNewRun,
   finalizeRun,
+  captureRunItemsForHub,
+  restoreRunCarryover,
+  persistRunCarryover,
+  clearRunCarryover,
+  requestStartRun,
+  queueLoadoutItem,
+  unqueueLoadoutItem,
 } from './game-save.js';
 
 // game-actions.js — player/enemy action processing
@@ -136,7 +144,9 @@ export class Game {
     this.hubRunCarryover = [];
     this.hubCanStashMultipleFromRun = false;
     this.hubStashedFromRunCount = 0;
-    this.pendingStashLoadoutItem = null;
+    // set while the hub waits for a second confirm before discarding run items
+    this.startRunConfirmPending = false;
+    this.victoryNotice = '';
     this.hubShop = new HubShop();
     this.pauseMenuIndex = 0;
     this.settingsMenuIndex = 0;
@@ -166,7 +176,7 @@ export class Game {
 
   init() {
     this.saveData = loadSaveData();
-    this.pendingStashLoadoutItem = this.saveData.pendingLoadoutItem || null;
+    restoreRunCarryover(this);
     if (this.saveData?.settings?.lastClass && this.classOrder.includes(this.saveData.settings.lastClass)) {
       this.selectedClass = this.saveData.settings.lastClass;
     }
@@ -257,6 +267,7 @@ export class Game {
 
   enterHubMenu(notice = '') {
     this.state = 'hubMenu';
+    this.startRunConfirmPending = false;
     this.player = null;
     this.map = null;
     this.hubMenuIndex = 0;
@@ -276,6 +287,7 @@ export class Game {
 
   enterTown(notice = '') {
     this.state = 'town';
+    this.startRunConfirmPending = false;
     this.player = null;
     this.map = null;
     this.townMap = buildTownMap(this.saveData);
@@ -295,22 +307,7 @@ export class Game {
     this.refreshHubShop();
   }
 
-  captureRunItemsForHub(victory = false) {
-    const sourceItems = [];
-    if (this.player) {
-      for (const item of this.player.inventory) {
-        if (item.type === 'consumable') continue;
-        sourceItems.push(cloneItem(item));
-      }
-      for (const item of Object.values(this.player.equipment)) {
-        if (item) sourceItems.push(cloneItem(item));
-      }
-    }
-    this.hubRunCarryover = sourceItems;
-    this.hubCanStashMultipleFromRun = !!victory;
-    this.hubStashedFromRunCount = 0;
-    this.hubRunItemsCursor = 0;
-  }
+  captureRunItemsForHub(victory = false) { return captureRunItemsForHub(this, victory); }
 
   // --- Overlay toggles ---
 
@@ -839,6 +836,7 @@ export class Game {
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
       if (this.deathSaveIndex === 0) {
         this.hubCanStashMultipleFromRun = false;
+        persistRunCarryover(this);
       } else {
         if (this.rawRunMaterials && this.committedMaterials) {
           const restored = {};
@@ -847,12 +845,14 @@ export class Game {
             if (diff > 0) restored[key] = diff;
           }
           this.saveData.addMaterials(restored);
-          persistSaveData(this.saveData);
         }
-        this.hubRunCarryover = [];
+        clearRunCarryover(this);
+        persistSaveData(this.saveData);
       }
       this.state = 'postDeathMenu';
       this.postDeathMenuIndex = 0;
+      this.startRunConfirmPending = false;
+      this.hubNotice = '';
     }
   }
 
@@ -863,6 +863,7 @@ export class Game {
       if (delta !== 0) {
         const optionCount = 3;
         this.postDeathMenuIndex = (this.postDeathMenuIndex + delta + optionCount) % optionCount;
+        this.startRunConfirmPending = false;
         if (this.audio) this.audio.uiClick();
       }
       return;
@@ -873,7 +874,7 @@ export class Game {
     }
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
       if (this.postDeathMenuIndex === 0) {
-        this.startNewRun();
+        requestStartRun(this);
       } else if (this.postDeathMenuIndex === 1) {
         this.enterTown();
       } else {
@@ -884,22 +885,19 @@ export class Game {
 
   handleVictoryAction(action) {
     if (!action) return;
-    if (action.type === 'hub') {
-      this.enterTown('Victory rewards available in stash.');
-      return;
-    }
-    if (action.type === 'inventoryConfirm' || action.type === 'wait' || action.type === 'close') {
-      this.enterTown();
+    if (action.type === 'hub' || action.type === 'inventoryConfirm' || action.type === 'wait' || action.type === 'close') {
+      this.enterTown(this.victoryNotice || 'Victory rewards available in stash.');
     }
   }
 
   handleHubMenuAction(action) {
     if (!action) return;
-    const options = getHubMenuOptions();
+    const options = getHubMenuOptions(this);
     if (isDirectionalAction(action)) {
       const delta = action.dy !== 0 ? action.dy : action.dx;
       if (delta !== 0) {
         this.hubMenuIndex = (this.hubMenuIndex + delta + options.length) % options.length;
+        this.startRunConfirmPending = false;
         if (this.audio) this.audio.uiClick();
       }
       return;
@@ -910,7 +908,8 @@ export class Game {
     }
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
       if (this.hubMenuIndex === 0) {
-        this.startNewRun();
+        requestStartRun(this);
+        return;
       } else if (this.hubMenuIndex === 1) {
         this.state = 'hubShop';
       } else if (this.hubMenuIndex === 2) {
@@ -1005,19 +1004,22 @@ export class Game {
 
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
       if (this.hubStashPane === 'stash') {
-        if (!this.saveData.stash || this.saveData.stash.length === 0) return;
-        const idx = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
-        const removed = this.saveData.removeFromStash(this.saveData.stash[idx].id);
-        if (!removed) return;
-        if (this.pendingStashLoadoutItem) {
-          this.saveData.addToStash(this.pendingStashLoadoutItem);
+        // the pane lists queued loadout rows first, then the stash proper
+        const loadoutCount = getLoadoutCount(this);
+        const total = loadoutCount + (this.saveData.stash ? this.saveData.stash.length : 0);
+        if (total === 0) return;
+        const idx = Math.max(0, Math.min(this.hubStashCursor, total - 1));
+        const changed = idx < loadoutCount
+          ? unqueueLoadoutItem(this, idx)
+          : queueLoadoutItem(this, idx - loadoutCount);
+        const newLoadoutCount = getLoadoutCount(this);
+        const stashLen = this.saveData.stash.length;
+        if (changed && idx >= loadoutCount) {
+          // keep the cursor on the next stash row rather than the row just queued
+          this.hubStashCursor = newLoadoutCount + Math.min(idx - loadoutCount, Math.max(0, stashLen - 1));
         }
-        this.pendingStashLoadoutItem = cloneItem(removed);
-        this.saveData.pendingLoadoutItem = this.pendingStashLoadoutItem;
-        this.hubNotice = `Queued ${removed.name} for next run.`;
-        this.hubStashCursor = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
-        persistSaveData(this.saveData);
-        if (this.audio) this.audio.itemPickup();
+        this.hubStashCursor = Math.max(0, Math.min(this.hubStashCursor, Math.max(0, newLoadoutCount + stashLen - 1)));
+        if (this.audio) { if (changed) this.audio.itemPickup(); else this.audio.uiClick(); }
         return;
       }
 
@@ -1040,34 +1042,31 @@ export class Game {
       this.hubNotice = `Stashed: ${item.name}.`;
       this.hubRunItemsCursor = Math.max(0, Math.min(this.hubRunItemsCursor, this.hubRunCarryover.length - 1));
       setAchievementProgress(this, 'collector', this.saveData.stash.length);
-      persistSaveData(this.saveData);
+      persistRunCarryover(this);
       if (this.audio) this.audio.itemPickup();
     }
 
     if (action.type === 'inventoryDrop') {
-      if (this.pendingStashLoadoutItem) {
-        const returned = this.saveData.addToStash(this.pendingStashLoadoutItem);
-        if (returned) {
-          this.hubNotice = `Returned ${this.pendingStashLoadoutItem.name} to stash.`;
-          this.pendingStashLoadoutItem = null;
-          this.saveData.pendingLoadoutItem = null;
-          persistSaveData(this.saveData);
-          if (this.audio) this.audio.uiClick();
-        } else {
-          this.hubNotice = 'Stash is full.';
-          if (this.audio) this.audio.uiClick();
-        }
-      } else if (this.hubStashPane === 'stash' && this.saveData.stash && this.saveData.stash.length > 0) {
-        const idx = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
-        const item = this.saveData.stash[idx];
-        const value = getItemSellValue(item);
-        this.saveData.removeFromStash(item.id);
-        this.saveData.currency = (this.saveData.currency || 0) + value;
-        this.hubNotice = `Sold ${item.name} for ${value} essence.`;
-        this.hubStashCursor = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
-        persistSaveData(this.saveData);
+      if (this.hubStashPane !== 'stash') return;
+      const loadoutCount = getLoadoutCount(this);
+      const stash = this.saveData.stash || [];
+      const total = loadoutCount + stash.length;
+      if (total === 0) return;
+      const idx = Math.max(0, Math.min(this.hubStashCursor, total - 1));
+      if (idx < loadoutCount) {
+        // x on a queued row sends it back to the stash instead of selling it
+        unqueueLoadoutItem(this, idx);
         if (this.audio) this.audio.uiClick();
+        return;
       }
+      const item = stash[idx - loadoutCount];
+      const value = getItemSellValue(item);
+      this.saveData.removeFromStash(item.id);
+      this.saveData.currency = (this.saveData.currency || 0) + value;
+      this.hubNotice = `Sold ${item.name} for ${value} essence.`;
+      this.hubStashCursor = Math.max(0, Math.min(this.hubStashCursor, Math.max(0, getLoadoutCount(this) + this.saveData.stash.length - 1)));
+      persistSaveData(this.saveData);
+      if (this.audio) this.audio.uiClick();
     }
   }
 

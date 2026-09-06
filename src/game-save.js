@@ -6,7 +6,7 @@ import { Renderer } from './renderer.js';
 import { MessageLog } from './message-log.js';
 import { createPlayer } from './player.js';
 import { computeFOV } from './fov.js';
-import { FOV_RADIUS, SKILL_SLOT_COUNT } from './constants.js';
+import { FOV_RADIUS, SKILL_SLOT_COUNT, LOADOUT_SLOT_COUNT } from './constants.js';
 import { updateActiveSkills } from './skills.js';
 import { addToInventory, autoEquipIfSlotEmpty, assignToBelt } from './inventory.js';
 import { createStarterWeapon } from './items.js';
@@ -238,9 +238,8 @@ export function startNewRun(game) {
   game.inventoryCursorByTab = { inventory: 0, equipment: 0 };
   game.deathSplashFrames = 0;
   game.postDeathMenuIndex = 0;
-  game.hubRunCarryover = [];
-  game.hubCanStashMultipleFromRun = false;
-  game.hubStashedFromRunCount = 0;
+  clearRunCarryover(game);
+  game.startRunConfirmPending = false;
   game.runSummary = {
     classKey: game.selectedClass,
     floorsReached: 1,
@@ -299,20 +298,23 @@ export function applyStarterLoadout(game) {
 export function applyPendingHubLoadout(game) {
   if (!game.player || !game.saveData) return;
 
-  if (game.pendingStashLoadoutItem) {
-    const stashItem = cloneItem(game.pendingStashLoadoutItem);
-    stashItem.id = `stash_loadout_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-    if (addToInventory(game.player, stashItem)) {
-      if (stashItem.slot && autoEquipIfSlotEmpty(game.player, stashItem.id)) {
-        updateActiveSkills(game.player);
-        recalcPlayerMaxHp(game);
-        game.messageLog.add(`Stash loadout equipped: ${stashItem.name}.`, game.turnCount);
-      } else {
-        game.messageLog.add(`Stash loadout added: ${stashItem.name}.`, game.turnCount);
-      }
+  // queued stash items ride along; anything with a free slot is worn right away
+  const loadout = Array.isArray(game.saveData.pendingLoadout) ? game.saveData.pendingLoadout.splice(0) : [];
+  for (let i = 0; i < loadout.length; i++) {
+    const stashItem = cloneItem(loadout[i]);
+    stashItem.id = `stash_loadout_${Date.now()}_${i}_${Math.floor(Math.random() * 1e6)}`;
+    if (!addToInventory(game.player, stashItem)) {
+      game.messageLog.add(`No room for ${stashItem.name}; it stays in the stash.`, game.turnCount);
+      game.saveData.addToStash(loadout[i]);
+      continue;
     }
-    game.pendingStashLoadoutItem = null;
-    game.saveData.pendingLoadoutItem = null;
+    if (stashItem.slot && autoEquipIfSlotEmpty(game.player, stashItem.id)) {
+      updateActiveSkills(game.player);
+      recalcPlayerMaxHp(game);
+      game.messageLog.add(`Stash loadout equipped: ${stashItem.name}.`, game.turnCount);
+    } else {
+      game.messageLog.add(`Stash loadout added: ${stashItem.name}.`, game.turnCount);
+    }
   }
 
   // apothecary brews go into the bag (and belt) at the start of the run
@@ -396,4 +398,131 @@ export function makeMinorHealthPotion() {
     sprite: 'consumable',
     stackable: true,
   };
+}
+
+
+// --- Run item carryover and loadout ---
+
+function syncRunCarryover(game) {
+  if (!game.saveData) return;
+  game.saveData.runCarryover = game.hubRunCarryover.length > 0
+    ? { items: game.hubRunCarryover, victory: !!game.hubCanStashMultipleFromRun, stashedCount: game.hubStashedFromRunCount || 0 }
+    : null;
+}
+
+export function persistRunCarryover(game) {
+  syncRunCarryover(game);
+  if (game.saveData) persistSaveData(game.saveData);
+}
+
+export function clearRunCarryover(game) {
+  game.hubRunCarryover = [];
+  game.hubCanStashMultipleFromRun = false;
+  game.hubStashedFromRunCount = 0;
+  game.hubRunItemsCursor = 0;
+  if (game.saveData) game.saveData.runCarryover = null;
+}
+
+// bring back the run items that were still waiting in the hub when the app closed
+export function restoreRunCarryover(game) {
+  const saved = game.saveData?.runCarryover;
+  if (!saved || !Array.isArray(saved.items) || saved.items.length === 0) {
+    clearRunCarryover(game);
+    return;
+  }
+  game.hubRunCarryover = saved.items.map(cloneItem);
+  game.hubCanStashMultipleFromRun = !!saved.victory;
+  game.hubStashedFromRunCount = saved.stashedCount || 0;
+  game.hubRunItemsCursor = 0;
+}
+
+// collect a finished run's gear for the hub. after a victory everything the
+// player was wearing goes straight into the stash (as far as it fits); bag
+// items and everything after a death wait in the run pane to be chosen
+export function captureRunItemsForHub(game, victory = false) {
+  const sourceItems = [];
+  let autoStashed = 0;
+  if (game.player) {
+    for (const item of game.player.inventory) {
+      if (item.type === 'consumable') continue;
+      sourceItems.push(cloneItem(item));
+    }
+    for (const item of Object.values(game.player.equipment)) {
+      if (!item) continue;
+      if (victory && game.saveData && game.saveData.addToStash(cloneItem(item))) {
+        autoStashed++;
+        continue;
+      }
+      sourceItems.push(cloneItem(item));
+    }
+  }
+  game.hubRunCarryover = sourceItems;
+  game.hubCanStashMultipleFromRun = !!victory;
+  game.hubStashedFromRunCount = 0;
+  game.hubRunItemsCursor = 0;
+  game.victoryNotice = '';
+  if (victory) {
+    const parts = [];
+    if (autoStashed > 0) parts.push(`${autoStashed} equipped item${autoStashed === 1 ? '' : 's'} moved to your stash.`);
+    if (sourceItems.length > 0) parts.push(`${sourceItems.length} bag item${sourceItems.length === 1 ? '' : 's'} waiting in Stash > Run Items.`);
+    game.victoryNotice = parts.join(' ') || 'Victory rewards available in stash.';
+  }
+  persistRunCarryover(game);
+  return { autoStashed, carried: sourceItems.length };
+}
+
+// starting a run throws away whatever is still in the run pane, so the first
+// press only warns; the next press goes through
+export function requestStartRun(game) {
+  const waiting = game.hubRunCarryover ? game.hubRunCarryover.length : 0;
+  if (waiting > 0 && !game.startRunConfirmPending) {
+    game.startRunConfirmPending = true;
+    game.hubNotice = `${waiting} run item${waiting === 1 ? '' : 's'} not stashed will be lost. Confirm again to start.`;
+    if (game.audio) game.audio.uiClick();
+    return false;
+  }
+  game.startRunConfirmPending = false;
+  game.startNewRun();
+  return true;
+}
+
+// queue a stash item for the next run. one item per equipment slot: queueing
+// a second helmet sends the first one back to the stash
+export function queueLoadoutItem(game, stashIndex) {
+  const save = game.saveData;
+  if (!save || !save.stash || stashIndex < 0 || stashIndex >= save.stash.length) return null;
+  if (!Array.isArray(save.pendingLoadout)) save.pendingLoadout = [];
+  const item = save.stash[stashIndex];
+  const sameSlot = item.slot ? save.pendingLoadout.findIndex(q => q.slot === item.slot) : -1;
+  if (sameSlot === -1 && save.pendingLoadout.length >= LOADOUT_SLOT_COUNT) {
+    game.hubNotice = `Loadout is full (${LOADOUT_SLOT_COUNT} items). Unqueue something first.`;
+    return null;
+  }
+  save.removeFromStash(item.id);
+  let swapped = null;
+  if (sameSlot !== -1) {
+    swapped = save.pendingLoadout.splice(sameSlot, 1)[0];
+    save.addToStash(swapped);
+  }
+  save.pendingLoadout.push(item);
+  game.hubNotice = swapped
+    ? `Queued ${item.name} for next run (replaces ${swapped.name}).`
+    : `Queued ${item.name} for next run.`;
+  persistSaveData(save);
+  return item;
+}
+
+export function unqueueLoadoutItem(game, loadoutIndex) {
+  const save = game.saveData;
+  if (!save || !Array.isArray(save.pendingLoadout)) return null;
+  if (loadoutIndex < 0 || loadoutIndex >= save.pendingLoadout.length) return null;
+  const item = save.pendingLoadout[loadoutIndex];
+  if (!save.addToStash(item)) {
+    game.hubNotice = 'Stash is full.';
+    return null;
+  }
+  save.pendingLoadout.splice(loadoutIndex, 1);
+  game.hubNotice = `Returned ${item.name} to stash.`;
+  persistSaveData(save);
+  return item;
 }

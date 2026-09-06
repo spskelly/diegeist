@@ -192,7 +192,7 @@ describe('services', () => {
     save.blueprints.push('apothecary');
     const map = buildTownMap();
     const { building } = placeBuilding(save, map, 'apothecary', 5, 10);
-    const game = { saveData: save, selectedClass: 'fighter', pendingStashLoadoutItem: null, forgeItemIndex: null, leaveBuilding() { this.left = true; } };
+    const game = { saveData: save, selectedClass: 'fighter', forgeItemIndex: null, leaveBuilding() { this.left = true; } };
     const rows = getBuildingMenu(game, building);
     expect(rows.at(-2).label).toMatch(/Upgrade/);
     expect(rows.at(-1).label).toBe('Leave');

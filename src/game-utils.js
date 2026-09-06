@@ -1,4 +1,4 @@
-import { PLAYER_CLASSES, REGEN_FRACTION } from './constants.js';
+import { PLAYER_CLASSES, REGEN_FRACTION, LOADOUT_SLOT_COUNT } from './constants.js';
 import { getEquippedStats } from './inventory.js';
 import { computePlayerMaxHp, getLevelStatBonuses } from './player.js';
 import { ACHIEVEMENTS, persistSaveData } from './progression.js';
@@ -94,8 +94,14 @@ export function wrapTextLines(text, maxChars) {
   return lines;
 }
 
-export function getHubMenuOptions() {
-  return ['Start Run', 'Shop', 'Skill Tree', 'Stash', 'Achievements', 'Back to Class Select'];
+export function getLoadoutLabel(save) {
+  const count = Array.isArray(save?.pendingLoadout) ? save.pendingLoadout.length : 0;
+  return `${count}/${LOADOUT_SLOT_COUNT}`;
+}
+
+export function getHubMenuOptions(game = null) {
+  const start = game?.saveData ? `Start Run (loadout ${getLoadoutLabel(game.saveData)})` : 'Start Run';
+  return [start, 'Shop', 'Skill Tree', 'Stash', 'Achievements', 'Back to Class Select'];
 }
 
 export function clampScrollOffset(cursor, scrollOffset, maxVisible) {
@@ -255,9 +261,16 @@ export function getSkillTreeNodes(game) {
   return sorted;
 }
 
+// the stash pane lists the queued loadout first, then the stash itself
 export function getStashPaneItems(game) {
-  if (game.hubStashPane === 'stash') return game.saveData.stash || [];
+  if (game.hubStashPane === 'stash') {
+    return [...(game.saveData.pendingLoadout || []), ...(game.saveData.stash || [])];
+  }
   return game.hubRunCarryover || [];
+}
+
+export function getLoadoutCount(game) {
+  return Array.isArray(game.saveData?.pendingLoadout) ? game.saveData.pendingLoadout.length : 0;
 }
 
 export function persistLastClassSelection(game) {

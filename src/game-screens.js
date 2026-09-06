@@ -1,4 +1,4 @@
-import { PLAYER_CLASSES, STAT_NAMES, STAT_DESCRIPTIONS, TILE, SKILL_SLOT_COUNT } from './constants.js';
+import { PLAYER_CLASSES, STAT_NAMES, STAT_DESCRIPTIONS, TILE, SKILL_SLOT_COUNT, LOADOUT_SLOT_COUNT } from './constants.js';
 import { SKILL_SLOT_KEYS } from './skills.js';
 import { getEquippedStats } from './inventory.js';
 import { ACHIEVEMENTS } from './progression.js';
@@ -26,6 +26,8 @@ import {
   wrapTextLines,
   getSwingPose,
   CAST_GLOW_BY_SPRITE,
+  getLoadoutCount,
+  getLoadoutLabel,
 } from './game-utils.js';
 import { hasSavedRun } from './game-save.js';
 import { BIOME_KEYS } from './audio.js';
@@ -991,6 +993,11 @@ export function drawPostDeathMenu(game) {
     ctx.fillText(options[i], x + Math.round(28 * uiScale), y + Math.round(206 * uiScale) + matOffset + i * Math.round(36 * uiScale));
   }
 
+  if (game.hubNotice) {
+    ctx.fillStyle = '#ffb36b';
+    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    ctx.fillText(game.hubNotice, x + Math.round(20 * uiScale), y + panelH - Math.round(40 * uiScale));
+  }
   ctx.fillStyle = '#7d8e9f';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
   ctx.fillText('Up/Down: Select  Enter/Z: Confirm', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
@@ -1066,7 +1073,7 @@ export function drawHubMenu(game) {
   const panelH = Math.min(Math.round(430 * uiScale), h - 40);
   const x = Math.floor((w - panelW) / 2);
   const y = Math.floor((h - panelH) / 2);
-  const options = getHubMenuOptions();
+  const options = getHubMenuOptions(game);
 
   ctx.fillStyle = '#0b0f16';
   ctx.fillRect(0, 0, w, h);
@@ -1082,9 +1089,10 @@ export function drawHubMenu(game) {
   ctx.fillStyle = '#b7c7d8';
   ctx.font = `${Math.round(14 * uiScale)}px monospace`;
   ctx.fillText(`Essence: ${game.saveData?.currency || 0}`, x + Math.round(20 * uiScale), y + Math.round(78 * uiScale));
-  const pendingText = game.pendingStashLoadoutItem
-    ? `Pending loadout: ${game.pendingStashLoadoutItem.name}`
-    : 'Pending loadout: none';
+  const loadout = game.saveData?.pendingLoadout || [];
+  const pendingText = loadout.length > 0
+    ? `Loadout ${getLoadoutLabel(game.saveData)}: ${truncateLabel(loadout.map(i => i.name).join(', '), 40)}`
+    : `Loadout ${getLoadoutLabel(game.saveData)}: none (queue gear in Stash)`;
   ctx.fillText(pendingText, x + Math.round(220 * uiScale), y + Math.round(78 * uiScale));
 
   // Material totals
@@ -1118,7 +1126,14 @@ export function drawHubMenu(game) {
 
   ctx.fillStyle = '#9fb2c5';
   ctx.font = `${Math.round(13 * uiScale)}px monospace`;
-  ctx.fillText(`Run stash candidates: ${game.hubRunCarryover.length}`, x + Math.round(340 * uiScale), y + Math.round(134 * uiScale));
+  if (game.hubRunCarryover.length > 0) {
+    // unstashed run items are lost when a run starts, so make that loud
+    ctx.fillStyle = '#ffb36b';
+    ctx.fillText(`${game.hubRunCarryover.length} run item${game.hubRunCarryover.length === 1 ? '' : 's'} not stashed (lost on Start Run)`, x + Math.round(340 * uiScale), y + Math.round(134 * uiScale));
+    ctx.fillStyle = '#9fb2c5';
+  } else {
+    ctx.fillText('Run items: none waiting', x + Math.round(340 * uiScale), y + Math.round(134 * uiScale));
+  }
   ctx.fillText(`Last run: ${game.runSummary?.causeOfDeath || 'N/A'}`, x + Math.round(340 * uiScale), y + Math.round(156 * uiScale));
   if (game.hubNotice) {
     ctx.fillStyle = '#d9e7f5';
@@ -1240,9 +1255,13 @@ export function drawHubStash(game) {
   ctx.fillStyle = '#e8eef5';
   ctx.font = `${Math.round(28 * uiScale)}px monospace`;
   ctx.fillText('Stash', x + Math.round(20 * uiScale), y + Math.round(42 * uiScale));
+  // selling happens here, so the wallet is always in view
+  ctx.fillStyle = '#e7d38a';
+  ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+  ctx.fillText(`Essence: ${game.saveData?.currency || 0}`, x + Math.round(150 * uiScale), y + Math.round(42 * uiScale));
   ctx.fillStyle = '#a7b7c7';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-  ctx.fillText('Left pane: persistent stash  |  Right pane: last run items', x + Math.round(20 * uiScale), y + Math.round(66 * uiScale));
+  ctx.fillText(`Left: loadout (${getLoadoutLabel(game.saveData)}) + stash  |  Right: last run items`, x + Math.round(20 * uiScale), y + Math.round(66 * uiScale));
 
   ctx.strokeStyle = game.hubStashPane === 'stash' ? '#d9ecff' : '#394754';
   ctx.strokeRect(leftX, paneTop, paneW, paneHeight);
@@ -1254,8 +1273,9 @@ export function drawHubStash(game) {
   ctx.fillText(`Stash (${game.saveData.stash.length})`, leftX + Math.round(8 * uiScale), paneTop + Math.round(20 * uiScale));
   ctx.fillText(`Run Items (${game.hubRunCarryover.length})`, rightX + Math.round(8 * uiScale), paneTop + Math.round(20 * uiScale));
 
-  // Scroll views for both panes
-  const stashItems = game.saveData.stash || [];
+  // Scroll views for both panes. the left list is the queued loadout followed by the stash
+  const loadoutCount = getLoadoutCount(game);
+  const stashItems = getStashPaneItems({ hubStashPane: 'stash', saveData: game.saveData });
   const stashSv = getScrollView(game.hubStashCursor, game.hubStashScrollOffset, stashItems.length, maxVisible);
   game.hubStashScrollOffset = stashSv.scrollOffset;
   const runSv = getScrollView(game.hubRunItemsCursor, game.hubRunScrollOffset, game.hubRunCarryover.length, maxVisible);
@@ -1276,9 +1296,11 @@ export function drawHubStash(game) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(leftX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + row * lineH, paneW - Math.round(12 * uiScale), Math.round(20 * uiScale));
     }
-    ctx.fillStyle = selected ? '#ffffff' : getRarityColor(stashItems[i].rarity, '#b6c6d6');
+    const queued = i < loadoutCount;
+    ctx.fillStyle = selected ? '#ffffff' : queued ? '#a3c9f0' : getRarityColor(stashItems[i].rarity, '#b6c6d6');
     ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-    ctx.fillText(truncateLabel(stashItems[i].name, 24), leftX + Math.round(10 * uiScale), startY + row * lineH);
+    const label = queued ? `> ${truncateLabel(stashItems[i].name, 22)}` : truncateLabel(stashItems[i].name, 24);
+    ctx.fillText(label, leftX + Math.round(10 * uiScale), startY + row * lineH);
   }
   drawScrollIndicators(ctx, leftX + Math.round(8 * uiScale),
     paneTop + Math.round(28 * uiScale), paneTop + paneHeight - Math.round(6 * uiScale),
@@ -1313,9 +1335,10 @@ export function drawHubStash(game) {
   const selectedItem = game.hubStashPane === 'stash'
     ? (stashItems[game.hubStashCursor] || null)
     : (game.hubRunCarryover[game.hubRunItemsCursor] || null);
+  const onLoadoutRow = game.hubStashPane === 'stash' && game.hubStashCursor < loadoutCount;
   const summaryLines = getStashItemSummaryLines(game, selectedItem);
   if (selectedItem && game.hubStashPane === 'stash') {
-    summaryLines.push(`Sell value: ${getItemSellValue(selectedItem)} essence`);
+    summaryLines.push(onLoadoutRow ? 'Queued for next run' : `Sell value: ${getItemSellValue(selectedItem)} essence`);
   }
   ctx.font = `${Math.round(11 * uiScale)}px monospace`;
   for (let i = 0; i < Math.min(4, summaryLines.length); i++) {
@@ -1325,10 +1348,12 @@ export function drawHubStash(game) {
 
   const statusY = bottomY + Math.round(50 * uiScale);
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-  if (game.pendingStashLoadoutItem) {
-    ctx.fillStyle = '#a3c9f0';
-    ctx.fillText(`Next run loadout: ${game.pendingStashLoadoutItem.name}`, x + Math.round(20 * uiScale), statusY);
-  }
+  const loadout = game.saveData.pendingLoadout || [];
+  ctx.fillStyle = '#a3c9f0';
+  const loadoutText = loadout.length > 0
+    ? `Next run loadout (${getLoadoutLabel(game.saveData)}): ${truncateLabel(loadout.map(i => i.name).join(', '), 60)}`
+    : `Next run loadout (0/${LOADOUT_SLOT_COUNT}): none. Enter on a stash item queues it, one per slot.`;
+  ctx.fillText(loadoutText, x + Math.round(20 * uiScale), statusY);
   if (game.hubNotice) {
     ctx.fillStyle = '#d9e7f5';
     ctx.fillText(game.hubNotice, x + Math.round(20 * uiScale), statusY + Math.round(16 * uiScale));
@@ -1336,16 +1361,21 @@ export function drawHubStash(game) {
 
   ctx.fillStyle = '#7d8e9f';
   let controls;
-  if (game.pendingStashLoadoutItem) {
-    controls = 'Arrows: navigate  Enter/Z: move  X: unqueue loadout  ESC: Back';
+  if (onLoadoutRow) {
+    controls = 'Arrows: navigate  Enter/Z: unqueue  X: unqueue  ESC: Back';
+  } else if (game.hubStashPane === 'stash') {
+    controls = 'Arrows: navigate  Enter/Z: queue for run  X: sell item  ESC: Back';
   } else {
-    controls = 'Arrows: navigate  Enter/Z: move  X: sell item  ESC: Back';
+    controls = 'Arrows: navigate  Enter/Z: move to stash  ESC: Back';
   }
   ctx.fillText(controls, x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
   const sbw = Math.round(72 * uiScale);
   const sby = y + panelH - Math.round(38 * uiScale);
-  drawButton(game, x + panelW - sbw * 3 - Math.round(36 * uiScale), sby, sbw, Math.round(24 * uiScale), 'Move', { type: 'inventoryConfirm' }, { active: true });
-  drawButton(game, x + panelW - sbw * 2 - Math.round(28 * uiScale), sby, sbw, Math.round(24 * uiScale), game.pendingStashLoadoutItem ? 'Unqueue' : 'Sell', { type: 'inventoryDrop' });
+  const moveLabel = onLoadoutRow ? 'Unqueue' : game.hubStashPane === 'stash' ? 'Queue' : 'Stash';
+  drawButton(game, x + panelW - sbw * 3 - Math.round(36 * uiScale), sby, sbw, Math.round(24 * uiScale), moveLabel, { type: 'inventoryConfirm' }, { active: true });
+  if (game.hubStashPane === 'stash' && !onLoadoutRow) {
+    drawButton(game, x + panelW - sbw * 2 - Math.round(28 * uiScale), sby, sbw, Math.round(24 * uiScale), 'Sell', { type: 'inventoryDrop' });
+  }
   drawButton(game, x + panelW - sbw - Math.round(20 * uiScale), sby, sbw, Math.round(24 * uiScale), 'Back', { type: 'close' });
 }
 

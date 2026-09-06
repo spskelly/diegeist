@@ -15,7 +15,7 @@ Playable game with v1 core loop complete and v2 Phases 1–2 (resources, skill t
 - FOV / line-of-sight with exploration fog
 - Loot drops with rarity tiers, gear-bound skills, belt consumables with auto-refill
 - Combined inventory UI with inspect panel, compare panel, and character stats overlay
-- Hub menu between runs (shop, stash, achievements)
+- Hub menu between runs (shop, stash with a three-item loadout, achievements)
 - Pause menu with save & quit and skill tree access
 - Split input: arrow keys for movement, WASD for directional attacks
 - Touch and mouse: tap a tile to walk there, tap an enemy to attack or close in, swipe to step, on-screen buttons for everything else
@@ -87,6 +87,17 @@ npx serve dist
 | Enter / Z | Confirm |
 | Esc | Back / close |
 | B | Build menu (town) |
+
+### Between runs (stash)
+
+Runs start from scratch except for what you queue. After a **victory** everything you were wearing is moved into the stash automatically; bag items wait in the Run Items pane. After a **death** you may stash one run item. Anything left in Run Items is lost when the next run starts, so Start Run asks for a second confirm while items are waiting, and the pane survives closing the app.
+
+| Key | Action |
+|-----|--------|
+| Enter on a stash item | Queue it for the next run (up to 3, one per equipment slot) |
+| Enter on a queued item | Return it to the stash |
+| Enter on a run item | Move it into the stash |
+| X on a stash item | Sell it for essence |
 
 ### Gameplay
 

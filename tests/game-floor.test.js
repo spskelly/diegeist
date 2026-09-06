@@ -38,7 +38,6 @@ function makeGame() {
     audio: null,
     sprites: null,
     camera: new Camera(800, 600),
-    pendingStashLoadoutItem: null,
     captureRunItemsForHub() {},
     syncMilestoneAchievements() {},
   };

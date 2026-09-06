@@ -350,7 +350,8 @@ export function getBuildingMenu(game, building) {
 
   if (building.type === 'forge') {
     const items = [...(save.stash || [])];
-    if (game.pendingStashLoadoutItem) items.push(game.pendingStashLoadoutItem);
+    // queued loadout gear can be worked on too
+    if (Array.isArray(save.pendingLoadout)) items.push(...save.pendingLoadout);
     if (game.forgeItemIndex === null || game.forgeItemIndex === undefined) {
       if (items.length === 0) rows.push({ label: 'No gear in the stash to work on.', enabled: false, run: () => '' });
       for (let i = 0; i < items.length; i++) {
