@@ -31,6 +31,7 @@ import {
   addFloatingText,
   addHitFeedback,
   addProjectileForDamageType,
+  addWeaponSwing,
   addProjectile,
   addAchievementProgress,
   awardXP,
@@ -532,6 +533,7 @@ export function handleSkillAction(game, slot) {
   const skillDamageMult = getSkillDamageMultiplier(game);
   payOverchargeCost(game);
 
+  addWeaponSwing(game, game.player, targets[0], damageType);
   for (const enemy of targets) {
     addProjectileForDamageType(game, game.player, enemy, damageType);
     const result = resolveCombat(game, game.player, enemy, {
@@ -632,6 +634,7 @@ export function useTreeSkill(game, skill, cooldownReduction = 0) {
   const enemies = visibleEnemies(game);
   const skillDamageMult = getSkillDamageMultiplier(game);
   const hitEnemy = (enemy, baseDamage, damageType, extraMult = 1) => {
+    addWeaponSwing(game, player, enemy, damageType);
     addProjectileForDamageType(game, player, enemy, damageType);
     const result = resolveCombat(game, player, enemy, {
       baseDamage,
@@ -998,6 +1001,7 @@ export function processPlayerAction(game, action) {
       addProjectileForDamageType(game, game.player, enemy, damageType);
     }
 
+    addWeaponSwing(game, game.player, enemy, damageType);
     const result = resolveCombat(game, game.player, enemy, {
       baseDamage: PLAYER_BASE_ATTACK,
       damageType,
@@ -1186,6 +1190,7 @@ export function runBossMechanic(game, boss) {
         if (clear) {
           boss.moveTo(player.position.x - dx, player.position.y - dy);
           game.messageLog.add('The Void Tyrant charges!', game.turnCount, '#ff6a6a');
+          addWeaponSwing(game, boss, player, 'melee');
           const result = resolveCombat(game, boss, player, { baseDamage: ENEMY_BASE_ATTACK, damageType: 'melee', weaponMultiplier: 1.5 });
           addHitFeedback(game, player, result, 'enemy');
           if (result.killed) {
@@ -1239,6 +1244,7 @@ export function processEnemyTurn(game, entity) {
   if (action.type === 'move') {
     entity.moveTo(action.x, action.y);
   } else if (action.type === 'attack') {
+    addWeaponSwing(game, entity, game.player, action.damageType || 'melee');
     addProjectileForDamageType(game, entity, game.player, action.damageType || 'melee');
     const result = resolveCombat(game, entity, game.player, {
       baseDamage: ENEMY_BASE_ATTACK,
@@ -1279,6 +1285,7 @@ export function processEnemyTurn(game, entity) {
         });
         if (retResult.hit) {
           game.messageLog.add(`You retaliate for ${retResult.damage} damage!`, game.turnCount);
+          addWeaponSwing(game, game.player, entity, 'melee');
           addHitFeedback(game, entity, retResult, 'player');
           if (retResult.killed) {
             handleEnemyDeath(game, entity);

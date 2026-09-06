@@ -276,6 +276,7 @@ function getNowMs() {
 export function clearCombatVfx(game) {
   game.combatVfx.floatingTexts.length = 0;
   game.combatVfx.projectiles.length = 0;
+  if (game.combatVfx.swings) game.combatVfx.swings.length = 0;
 }
 
 export function addFloatingText(game, tileX, tileY, text, color = '#ffffff', durationMs = 900) {
@@ -320,6 +321,8 @@ export function addHitFeedback(game, defender, result, source = 'player') {
       ? '#ffd86b'
       : '#ffc18a';
   addFloatingText(game, defender.position.x, defender.position.y, `${result.damage}${critSuffix}`, color, 700);
+  // the renderer flashes the defender's sprite while this window is open
+  defender.vfxHit = { startMs: getNowMs(), durationMs: result.crit ? 200 : 140 };
 }
 
 export function addProjectileForDamageType(game, fromEntity, toEntity, damageType) {
@@ -348,6 +351,124 @@ export function addProjectileForDamageType(game, fromEntity, toEntity, damageTyp
 export function updateCombatVfx(game, nowMs) {
   game.combatVfx.floatingTexts = game.combatVfx.floatingTexts.filter(vfx => nowMs - vfx.startMs < vfx.durationMs);
   game.combatVfx.projectiles = game.combatVfx.projectiles.filter(vfx => nowMs - vfx.startMs < vfx.durationMs);
+  if (game.combatVfx.swings) {
+    game.combatVfx.swings = game.combatVfx.swings.filter(vfx => nowMs - vfx.startMs < vfx.durationMs);
+  }
+}
+
+// Weapon swing animations. a swing is a short-lived overlay of the attacker's
+// weapon sprite pivoting at the attacker's hand toward the target, plus a
+// lunge on the attacker itself (see getEntityVfxOffset in renderer.js).
+
+// ordered so that more specific names win: 'Crossbow' before 'Bow', etc.
+export const WEAPON_SPRITE_BY_NAME = [
+  ['Greataxe', 'weapon_greataxe'],
+  ['Axe', 'weapon_greataxe'],
+  ['Sword', 'weapon_sword'],
+  ['Dagger', 'weapon_dagger'],
+  ['Crossbow', 'weapon_crossbow'],
+  ['Bow', 'weapon_longbow'],
+  ['Staff', 'weapon_staff'],
+  ['Wand', 'weapon_wand'],
+  ['Shield', 'weapon_shield'],
+  ['Orb', 'weapon_orb'],
+];
+
+export const SWING_STYLE_BY_SPRITE = {
+  weapon_sword: 'slash',
+  weapon_greataxe: 'chop',
+  weapon_dagger: 'thrust',
+  weapon_longbow: 'shoot',
+  weapon_crossbow: 'shoot',
+  weapon_staff: 'cast',
+  weapon_wand: 'cast',
+  weapon_shield: 'bash',
+  weapon_orb: 'cast',
+  weapon_fist: 'thrust',
+  weapon_claw: 'slash',
+};
+
+// glow colour drawn at the tip of casting implements
+export const CAST_GLOW_BY_SPRITE = {
+  weapon_staff: '#b070ff',
+  weapon_wand: '#40d0ff',
+  weapon_orb: '#e0f0ff',
+};
+
+export function getWeaponSpriteKey(attacker, damageType = 'melee') {
+  const weapon = attacker?.equipment?.leftHand;
+  if (weapon && typeof weapon.name === 'string') {
+    for (const [needle, key] of WEAPON_SPRITE_BY_NAME) {
+      if (weapon.name.includes(needle)) return key;
+    }
+  }
+  if (damageType === 'ranged') return 'weapon_longbow';
+  if (damageType === 'magic') return 'weapon_wand';
+  // unarmed player punches, everything else claws
+  return attacker?.type === 'player' ? 'weapon_fist' : 'weapon_claw';
+}
+
+export function addWeaponSwing(game, attacker, target, damageType = 'melee', durationMs = null) {
+  if (!game?.combatVfx || !attacker?.position || !target?.position) return null;
+  if (!game.combatVfx.swings) game.combatVfx.swings = [];
+  const now = getNowMs();
+  // several hits resolved in one turn (cleave, chain lightning) share one swing
+  const last = game.combatVfx.swings[game.combatVfx.swings.length - 1];
+  if (last && last.x === attacker.position.x && last.y === attacker.position.y && now - last.startMs < 30) {
+    return last;
+  }
+  const rawX = target.position.x - attacker.position.x;
+  const rawY = target.position.y - attacker.position.y;
+  const len = Math.hypot(rawX, rawY) || 1;
+  const dirX = rawX / len;
+  const dirY = rawY / len;
+  const spriteKey = getWeaponSpriteKey(attacker, damageType);
+  const style = SWING_STYLE_BY_SPRITE[spriteKey] || 'slash';
+  const isReach = style === 'shoot' || style === 'cast';
+  const dur = durationMs ?? (isReach ? 220 : 260);
+  const swing = {
+    x: attacker.position.x,
+    y: attacker.position.y,
+    dirX,
+    dirY,
+    spriteKey,
+    style,
+    startMs: now,
+    durationMs: dur,
+    source: attacker.type === 'player' ? 'player' : 'enemy',
+  };
+  game.combatVfx.swings.push(swing);
+  // melee attackers lunge toward the target, shooters and casters recoil a touch
+  attacker.vfxLunge = { dx: dirX, dy: dirY, amount: isReach ? -0.08 : 0.28, startMs: now, durationMs: dur };
+  return swing;
+}
+
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+// pose of a swing at progress t in [0, 1]: where the hand pivot sits along
+// the attack direction (in tiles), how far the weapon is rotated off that
+// direction (radians), sprite scale, alpha, and glow strength for casters
+export function getSwingPose(style, t) {
+  const p = Math.max(0, Math.min(1, t));
+  const arc = Math.sin(Math.PI * p);
+  const alpha = p < 0.65 ? 1 : Math.max(0, (1 - p) / 0.35);
+  switch (style) {
+    case 'chop':
+      return { offset: 0.2 + 0.15 * arc, angle: -1.7 + 2.2 * easeOutCubic(p), scale: 1.15, alpha, glow: 0 };
+    case 'thrust':
+      return { offset: 0.1 + 0.5 * arc, angle: 0, scale: 0.95, alpha, glow: 0 };
+    case 'bash':
+      return { offset: 0.1 + 0.4 * arc, angle: 0, scale: 1.05, alpha, glow: 0 };
+    case 'shoot':
+      return { offset: 0.3 - 0.1 * arc, angle: 0, scale: 1, alpha, glow: 0 };
+    case 'cast':
+      return { offset: 0.3, angle: 0, scale: 1, alpha, glow: arc };
+    case 'slash':
+    default:
+      return { offset: 0.15 + 0.1 * arc, angle: -1.2 + 2.4 * easeOutCubic(p), scale: 1, alpha, glow: 0 };
+  }
 }
 
 // Achievement & XP functions

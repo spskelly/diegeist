@@ -23,6 +23,7 @@ Playable game with v1 core loop complete and v2 Phases 1–2 (resources, skill t
 - Skill tree actives (Rush, Deadeye, Meteor, Temporal Stasis, ...) on a four-slot Q/E/R/F hotbar
 - Boss signature moves: Brood Mother enrage, Rat King crown burst, Bone Lord raising corpses, Void Tyrant charge
 - A town you build with run materials: Farm and Mine pay income, the Watchtower scouts early floors, the Library respecs, and the Forge, Apothecary and Shrine (blueprints from bosses) rework gear, brew potions and bless the next run
+- Weapon animations: every attack swings, thrusts, chops, draws or casts with the equipped weapon's sprite, attackers lunge, and whatever gets hit flashes
 - Adaptive camera zoom with scaled sprite rendering
 - Procedural audio via Web Audio API (SFX + ambient)
 - Save data persistence (meta-currency, run history, stash) via localStorage

@@ -144,7 +144,7 @@ export class Game {
     this._currentAmbientBiome = null;
     this._settingsSavedAmbientBiome = null;
     this.skillTreeReturnState = 'pauseMenu';
-    this.combatVfx = { floatingTexts: [], projectiles: [] };
+    this.combatVfx = { floatingTexts: [], projectiles: [], swings: [] };
     this.townMap = null;
     this.townPlayerPos = null;
     this.townMoveTimer = 0;
@@ -1642,7 +1642,7 @@ export class Game {
       return;
     }
 
-    this.renderer.render({ map: this.map, player: this.player });
+    this.renderer.render({ map: this.map, player: this.player, nowMs });
     drawCombatVfx(this, nowMs);
     // Build XP data for HUD
     let xpData = null;

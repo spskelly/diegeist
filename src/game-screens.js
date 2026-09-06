@@ -24,6 +24,8 @@ import {
   getNaturalRegenInterval,
   getRegenAmount,
   wrapTextLines,
+  getSwingPose,
+  CAST_GLOW_BY_SPRITE,
 } from './game-utils.js';
 import { hasSavedRun } from './game-save.js';
 import { BIOME_KEYS } from './audio.js';
@@ -250,9 +252,53 @@ export function getStashItemSummaryLines(game, item) {
   return lines;
 }
 
+// weapon swings: the weapon sprite pivots at the attacker's hand and rotates
+// toward the target following the pose curve for its style
+function drawWeaponSwings(game, nowMs) {
+  const swings = game.combatVfx.swings;
+  if (!swings || swings.length === 0) return;
+  const ctx = game.ctx;
+  const cam = game.camera;
+  const ts = cam.tileSize;
+  for (const vfx of swings) {
+    if (game.map && !game.map.isVisible(vfx.x, vfx.y)) continue;
+    if (!cam.isInView(vfx.x, vfx.y)) continue;
+    const t = Math.max(0, Math.min(1, (nowMs - vfx.startMs) / vfx.durationMs));
+    const pose = getSwingPose(vfx.style, t);
+    if (pose.alpha <= 0) continue;
+    const { sx, sy } = cam.tileToScreen(vfx.x, vfx.y);
+    const pivotX = sx + ts / 2 + vfx.dirX * pose.offset * ts;
+    const pivotY = sy + ts / 2 + vfx.dirY * pose.offset * ts;
+    const size = Math.max(8, Math.floor(ts * 0.85 * pose.scale));
+    const sprite = game.sprites.get(vfx.spriteKey);
+    ctx.save();
+    ctx.globalAlpha = pose.alpha;
+    ctx.translate(pivotX, pivotY);
+    ctx.rotate(Math.atan2(vfx.dirY, vfx.dirX) + pose.angle);
+    // the grip sits a little behind the pivot so the blade extends outward
+    if (sprite) {
+      ctx.drawImage(sprite, -size * 0.25, -size / 2, size, size);
+    } else {
+      ctx.fillStyle = '#e8e8e8';
+      ctx.fillRect(-size * 0.25, -2, size, 4);
+    }
+    if (pose.glow > 0) {
+      const glowColor = CAST_GLOW_BY_SPRITE[vfx.spriteKey] || '#ffffff';
+      ctx.globalAlpha = pose.alpha * Math.min(1, 0.35 + pose.glow * 0.6);
+      ctx.fillStyle = glowColor;
+      ctx.beginPath();
+      ctx.arc(size * 0.62, 0, Math.max(2, ts * 0.22 * pose.glow), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
 export function drawCombatVfx(game, nowMs) {
   const ctx = game.ctx;
   const cam = game.camera;
+
+  drawWeaponSwings(game, nowMs);
 
   for (const vfx of game.combatVfx.projectiles) {
     const t = Math.max(0, Math.min(1, (nowMs - vfx.startMs) / vfx.durationMs));
