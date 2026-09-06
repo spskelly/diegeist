@@ -23,6 +23,7 @@ import {
   getNaturalRegenInterval,
   getRegenAmount,
   recalcPlayerMaxHp,
+  rebuildPassiveEffects,
   addFloatingText,
   updateCombatVfx,
   syncMilestoneAchievements,
@@ -54,6 +55,12 @@ import { startFloor, handleFloorTransition } from './game-floor.js';
 
 // town.js — town map & spawn
 import { buildTownMap, getTownSpawnPos, SHELTER_ENTRANCE_POS } from './town.js';
+import {
+  BUILDINGS, BUILDING_ORDER, BUILDING_SIZE, getBuildingDef, hasBlueprint, getBuildingByType,
+  canPlaceBuilding, placeBuilding, findBuildingAt, getEntrance, getBuildingMenu, getTownLevel,
+  canAffordCost, getBuildCost, formatCost,
+} from './town-buildings.js';
+import { MATERIAL_COLORS, MATERIALS } from './resources.js';
 
 // game-screens.js — all draw functions
 import {
@@ -73,6 +80,8 @@ import {
   drawStatsOverlay,
   drawMapOverlay,
   drawCombatVfx,
+  drawBuildMenu,
+  drawBuildingMenu,
 } from './game-screens.js';
 import { getXPForNextLevel, XP_TABLE } from './skill-tree.js';
 
@@ -145,6 +154,14 @@ export class Game {
     // tap-to-travel state for the dungeon and the town
     this.travel = null;
     this.townTravel = null;
+    // town building: build menu cursor, placement ghost, the building being used
+    this.buildMenuIndex = 0;
+    this.placement = null;
+    this.activeBuilding = null;
+    this.buildingCursor = 0;
+    this.forgeItemIndex = null;
+    this.buildingNotice = '';
+    this.townInteractBuilding = null;
   }
 
   init() {
@@ -206,7 +223,7 @@ export class Game {
   syncCameraViewport() {
     if (!this.camera) return;
     this.camera.setZoom(this.getCameraZoom());
-    const inTown = this.state === 'town' || (!this.map && this.townMap);
+    const inTown = ['town', 'townBuild', 'townPlace', 'building'].includes(this.state) || (!this.map && this.townMap);
     const reserved = inTown ? TOWN_BAR_HEIGHT * 2 : (this.hud?.hudHeight || 80);
     this.camera.resize(this.canvas.width, Math.max(1, this.canvas.height - reserved));
     // the town bars sit at the top and bottom, so shift the viewport down past the top bar
@@ -261,8 +278,12 @@ export class Game {
     this.state = 'town';
     this.player = null;
     this.map = null;
-    this.townMap = buildTownMap();
+    this.townMap = buildTownMap(this.saveData);
     this.townPlayerPos = getTownSpawnPos(this.saveData);
+    // never resume inside a building footprint (a building may have been placed since)
+    if (!TILE.properties[this.townMap.getTile(this.townPlayerPos.x, this.townPlayerPos.y)]?.walkable) {
+      this.townPlayerPos = getTownSpawnPos(null);
+    }
     this.townMoveTimer = 0;
     this.townInteractPrompt = false;
     this.sprites.setTown(BIOME_THEMES.town.palette);
@@ -270,6 +291,7 @@ export class Game {
     if (this.audio) this.audio.startAmbientBiome('town');
     this._currentAmbientBiome = 'town';
     if (notice) this.hubNotice = notice;
+    else if (this.townIncomeNotice) { this.hubNotice = this.townIncomeNotice; this.townIncomeNotice = ''; }
     this.refreshHubShop();
   }
 
@@ -354,6 +376,9 @@ export class Game {
   handleTownUpdate(action) {
     const currentTile = this.townMap.getTile(this.townPlayerPos.x, this.townPlayerPos.y);
     this.townInteractPrompt = (currentTile === TILE.SHELTER_ENTRANCE);
+    this.townInteractBuilding = currentTile === TILE.BUILDING_ENTRANCE
+      ? findBuildingAt(this.saveData.buildings, this.townPlayerPos.x, this.townPlayerPos.y)
+      : null;
 
     if (action && action.type !== 'townTravel') this.townTravel = null;
     if (action && action.type === 'townTravel') action = null;
@@ -363,6 +388,14 @@ export class Game {
         this.saveData.townPlayerPos = { ...this.townPlayerPos };
         persistSaveData(this.saveData);
         this.enterHubMenu();
+        return;
+      }
+      if ((action.type === 'inventoryConfirm' || action.type === 'wait') && this.townInteractBuilding) {
+        this.openBuilding(this.townInteractBuilding);
+        return;
+      }
+      if (action.type === 'build') {
+        this.openBuildMenu();
         return;
       }
       if (action.type === 'close') {
@@ -405,7 +438,7 @@ export class Game {
           }
         }
       }
-      // a tap on the shelter walks to the door and steps inside
+      // a tap on the shelter or a building walks to the door and steps inside
       if (this.townTravel?.enterPending) {
         this.townTravel = null;
         const tile = this.townMap.getTile(this.townPlayerPos.x, this.townPlayerPos.y);
@@ -413,7 +446,176 @@ export class Game {
           this.saveData.townPlayerPos = { ...this.townPlayerPos };
           persistSaveData(this.saveData);
           this.enterHubMenu();
+        } else if (tile === TILE.BUILDING_ENTRANCE) {
+          const b = findBuildingAt(this.saveData.buildings, this.townPlayerPos.x, this.townPlayerPos.y);
+          if (b) this.openBuilding(b);
         }
+      }
+    }
+  }
+
+  // --- town building ---
+
+  openBuildMenu() {
+    this.state = 'townBuild';
+    this.buildMenuIndex = Math.max(0, Math.min(this.buildMenuIndex, BUILDING_ORDER.length - 1));
+    this.buildingNotice = '';
+    if (this.audio) this.audio.uiClick();
+  }
+
+  // whether a build-menu row can start placement right now
+  getBuildOption(type) {
+    const def = getBuildingDef(type);
+    const built = getBuildingByType(this.saveData, type);
+    const blueprint = hasBlueprint(this.saveData, type);
+    const cost = getBuildCost(type, 1);
+    const affordable = canAffordCost(this.saveData, cost);
+    let status = '';
+    if (built) status = `Built (level ${built.level})`;
+    else if (!blueprint) status = 'Blueprint needed';
+    else if (!affordable) status = 'Not enough materials';
+    return { def, built, blueprint, cost, affordable, placeable: !built && blueprint && affordable, status };
+  }
+
+  handleTownBuildAction(action) {
+    if (!action) return;
+    if (action.type === 'close' || action.type === 'build') {
+      this.state = 'town';
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+    if (isDirectionalAction(action)) {
+      const delta = action.dy !== 0 ? action.dy : action.dx;
+      if (delta !== 0) {
+        this.buildMenuIndex = (this.buildMenuIndex + delta + BUILDING_ORDER.length) % BUILDING_ORDER.length;
+        if (this.audio) this.audio.uiClick();
+      }
+      return;
+    }
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      const type = BUILDING_ORDER[this.buildMenuIndex];
+      const opt = this.getBuildOption(type);
+      if (!opt.placeable) {
+        this.buildingNotice = opt.status;
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      this.startPlacement(type);
+    }
+  }
+
+  startPlacement(type) {
+    // the ghost starts on the nearest valid spot around the player, so
+    // confirming immediately usually works; it can still be moved from there
+    const px = this.townPlayerPos.x;
+    const py = this.townPlayerPos.y;
+    let best = null;
+    for (let r = 1; r <= 8 && !best; r++) {
+      for (let dy = -r; dy <= r && !best; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const x = px + dx;
+          const y = py + dy;
+          if (canPlaceBuilding(this.townMap, x, y, this.saveData.buildings, this.townPlayerPos).ok) { best = { x, y }; break; }
+        }
+      }
+    }
+    this.placement = {
+      type,
+      x: best ? best.x : Math.max(1, Math.min(this.townMap.width - 1 - BUILDING_SIZE, px + 1)),
+      y: best ? best.y : Math.max(1, Math.min(this.townMap.height - 2 - BUILDING_SIZE, py - BUILDING_SIZE - 1)),
+    };
+    this.camera.centerOn(this.placement.x, this.placement.y, this.townMap.width, this.townMap.height);
+    this.state = 'townPlace';
+    this.buildingNotice = '';
+    if (this.audio) this.audio.uiClick();
+  }
+
+  movePlacement(dx, dy) {
+    if (!this.placement) return;
+    this.placement.x = Math.max(1, Math.min(this.townMap.width - 1 - BUILDING_SIZE, this.placement.x + dx));
+    this.placement.y = Math.max(1, Math.min(this.townMap.height - 2 - BUILDING_SIZE, this.placement.y + dy));
+    this.camera.centerOn(this.placement.x, this.placement.y, this.townMap.width, this.townMap.height);
+  }
+
+  handleTownPlaceAction(action) {
+    if (!action || !this.placement) return;
+    if (action.type === 'close') {
+      this.placement = null;
+      this.state = 'townBuild';
+      this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+    if (isDirectionalAction(action)) {
+      this.movePlacement(action.dx, action.dy);
+      return;
+    }
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      const { type, x, y } = this.placement;
+      const result = placeBuilding(this.saveData, this.townMap, type, x, y, this.townPlayerPos);
+      if (!result.ok) {
+        this.buildingNotice = result.reason;
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      persistSaveData(this.saveData);
+      this.placement = null;
+      this.state = 'town';
+      this.hubNotice = `${getBuildingDef(type).name} built.`;
+      this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
+      if (this.audio) this.audio.blessing();
+    }
+  }
+
+  openBuilding(building) {
+    this.activeBuilding = building;
+    this.buildingCursor = 0;
+    this.forgeItemIndex = null;
+    this.buildingNotice = '';
+    this.state = 'building';
+    if (this.audio) this.audio.uiClick();
+  }
+
+  leaveBuilding() {
+    this.activeBuilding = null;
+    this.forgeItemIndex = null;
+    this.state = 'town';
+    persistSaveData(this.saveData);
+    if (this.audio) this.audio.uiClick();
+  }
+
+  handleBuildingAction(action) {
+    if (!action || !this.activeBuilding) return;
+    if (action.type === 'close') {
+      if (this.forgeItemIndex !== null) { this.forgeItemIndex = null; this.buildingCursor = 0; return; }
+      this.leaveBuilding();
+      return;
+    }
+    const rows = getBuildingMenu(this, this.activeBuilding);
+    if (isDirectionalAction(action)) {
+      const delta = action.dy !== 0 ? action.dy : action.dx;
+      if (delta !== 0 && rows.length > 0) {
+        this.buildingCursor = (this.buildingCursor + delta + rows.length) % rows.length;
+        if (this.audio) this.audio.uiClick();
+      }
+      return;
+    }
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      const row = rows[Math.min(this.buildingCursor, rows.length - 1)];
+      if (!row) return;
+      if (!row.enabled) {
+        this.buildingNotice = row.detail || 'Not available.';
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      const notice = row.run(this);
+      if (notice) this.buildingNotice = notice;
+      if (this.state === 'building') {
+        persistSaveData(this.saveData);
+        const after = getBuildingMenu(this, this.activeBuilding);
+        this.buildingCursor = Math.min(this.buildingCursor, after.length - 1);
+        if (this.audio) this.audio.uiClick();
       }
     }
   }
@@ -429,6 +631,14 @@ export class Game {
       }
       if (this.state === 'playing' && !overlayOpen) return this.handleMapTap(gesture.x, gesture.y);
       if (this.state === 'town') return this.handleTownTap(gesture.x, gesture.y);
+      if (this.state === 'townPlace' && this.placement) {
+        // tapping the ghost confirms; tapping elsewhere moves the ghost there
+        const { x, y } = this.camera.screenToTile(gesture.x, gesture.y);
+        const p = this.placement;
+        if (x >= p.x && x < p.x + BUILDING_SIZE && y >= p.y && y < p.y + BUILDING_SIZE) return { type: 'inventoryConfirm' };
+        if (this.townMap.inBounds(x, y)) this.movePlacement(x - p.x, y - p.y);
+        return null;
+      }
       if (this.state === 'deathSplash' || this.state === 'victory') return { type: 'inventoryConfirm' };
       return null;
     }
@@ -557,6 +767,11 @@ export class Game {
     let enterOnArrive = false;
     if (tile === TILE.SHELTER || tile === TILE.SHELTER_ENTRANCE) {
       target = { ...SHELTER_ENTRANCE_POS };
+      enterOnArrive = true;
+    } else if (tile === TILE.BUILDING || tile === TILE.BUILDING_ENTRANCE) {
+      const b = findBuildingAt(this.saveData.buildings, x, y);
+      if (!b) return null;
+      target = getEntrance(b);
       enterOnArrive = true;
     } else if (!TILE.properties[tile]?.walkable) {
       return null;
@@ -1015,9 +1230,9 @@ export class Game {
     this.saveData.skillInvestments[classKey] = investments;
     this.saveData.skillPoints[classKey] = available - 1;
 
-    this.treePassiveEffects = resolvePassiveEffects(classKey, investments);
     // mid-run investment: rebuild the tree actives (keeping cooldowns) and hp
     if (this.player && this.player.playerClass === classKey) {
+      rebuildPassiveEffects(this);
       const saved = Object.fromEntries((this.player.treeActiveSkills || []).map(s => [s.id, s.currentCooldown || 0]));
       this.player.treeActiveSkills = createTreeActiveSkills(classKey, investments, saved);
       updateActiveSkills(this.player);
@@ -1063,6 +1278,18 @@ export class Game {
     }
     if (this.state === 'town') {
       this.handleTownUpdate(action);
+      return;
+    }
+    if (this.state === 'townBuild') {
+      this.handleTownBuildAction(action);
+      return;
+    }
+    if (this.state === 'townPlace') {
+      this.handleTownPlaceAction(action);
+      return;
+    }
+    if (this.state === 'building') {
+      this.handleBuildingAction(action);
       return;
     }
     if (this.state === 'hubMenu') {
@@ -1202,6 +1429,7 @@ export class Game {
 
   drawTown() {
     this.renderer.render({ map: this.townMap, player: null });
+    this.drawTownBuildings();
 
     const spriteKey = 'player_' + this.selectedClass;
     const sprite = this.sprites.get(spriteKey);
@@ -1210,7 +1438,14 @@ export class Game {
       this.ctx.drawImage(sprite, sx, sy, this.camera.tileSize, this.camera.tileSize);
     }
 
-    if (this.townInteractPrompt) {
+    if (this.state === 'townPlace' && this.placement) this.drawPlacementGhost();
+
+    const promptText = this.townInteractPrompt
+      ? 'Enter / Space : Enter Shelter'
+      : this.townInteractBuilding
+        ? `Enter / Space : Enter ${getBuildingDef(this.townInteractBuilding.type)?.name || 'building'}`
+        : null;
+    if (promptText && this.state === 'town') {
       const cx = Math.floor(this.canvas.width / 2);
       const py = this.canvas.height - 100;
       this.ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
@@ -1218,12 +1453,73 @@ export class Game {
       this.ctx.fillStyle = '#ffd700';
       this.ctx.font = '14px monospace';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText('Enter / Space : Enter Shelter', cx, py + 5);
+      this.ctx.fillText(promptText, cx, py + 5);
       this.ctx.textAlign = 'left';
       registerRegion(this, cx - 130, py - 14, 260, 28, { type: 'inventoryConfirm' });
     }
 
     this.drawTownHUD();
+  }
+
+  // buildings are painted over their tile sprites: a coloured body, a roof
+  // strip and the name, so each type reads at a glance
+  drawTownBuildings() {
+    const ctx = this.ctx;
+    const ts = this.camera.tileSize;
+    for (const b of this.saveData?.buildings || []) {
+      const def = getBuildingDef(b.type);
+      if (!def || !this.camera.isInView(b.x, b.y) && !this.camera.isInView(b.x + 1, b.y + 1)) continue;
+      const { sx, sy } = this.camera.tileToScreen(b.x, b.y);
+      const w = ts * BUILDING_SIZE;
+      const h = ts * BUILDING_SIZE;
+      ctx.fillStyle = def.color;
+      ctx.fillRect(sx + 2, sy + Math.floor(h * 0.3), w - 4, h - Math.floor(h * 0.3) - 2);
+      ctx.fillStyle = def.roof;
+      ctx.fillRect(sx, sy, w, Math.floor(h * 0.34));
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.strokeRect(sx + 0.5, sy + 0.5, w - 1, h - 1);
+      const font = Math.max(9, Math.floor(ts * 0.42));
+      ctx.font = `bold ${font}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#000000';
+      ctx.fillText(def.name, sx + w / 2 + 1, sy + Math.floor(h * 0.68) + 1);
+      ctx.fillStyle = '#f4efe0';
+      ctx.fillText(def.name, sx + w / 2, sy + Math.floor(h * 0.68));
+      ctx.font = `${Math.max(8, Math.floor(ts * 0.33))}px monospace`;
+      ctx.fillStyle = '#ffd700';
+      ctx.fillText(`L${b.level}`, sx + w / 2, sy + Math.floor(h * 0.94));
+      ctx.textAlign = 'left';
+    }
+  }
+
+  drawPlacementGhost() {
+    const ctx = this.ctx;
+    const ts = this.camera.tileSize;
+    const p = this.placement;
+    const check = canPlaceBuilding(this.townMap, p.x, p.y, this.saveData.buildings, this.townPlayerPos);
+    const { sx, sy } = this.camera.tileToScreen(p.x, p.y);
+    ctx.fillStyle = check.ok ? 'rgba(90, 220, 110, 0.45)' : 'rgba(230, 70, 70, 0.45)';
+    ctx.fillRect(sx, sy, ts * BUILDING_SIZE, ts * BUILDING_SIZE);
+    ctx.strokeStyle = check.ok ? '#8dff9d' : '#ff7a7a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx + 1, sy + 1, ts * BUILDING_SIZE - 2, ts * BUILDING_SIZE - 2);
+    ctx.lineWidth = 1;
+    // door marker
+    ctx.fillStyle = check.ok ? 'rgba(255, 215, 0, 0.6)' : 'rgba(255, 120, 120, 0.5)';
+    ctx.fillRect(sx + 3, sy + ts * BUILDING_SIZE + 3, ts - 6, ts - 6);
+    // instructions
+    const def = getBuildingDef(p.type);
+    const cx = Math.floor(this.canvas.width / 2);
+    const py = this.canvas.height - 100;
+    const text = check.ok ? `Place ${def.name}: Enter / tap the ghost.  Esc: cancel` : `${def.name}: ${check.reason || this.buildingNotice}`;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(cx - 200, py - 14, 400, 28);
+    ctx.fillStyle = check.ok ? '#ffd700' : '#ff9a9a';
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(text, cx, py + 5);
+    ctx.textAlign = 'left';
+    if (check.ok) registerRegion(this, cx - 200, py - 14, 400, 28, { type: 'inventoryConfirm' });
   }
 
   drawTownHUD() {
@@ -1238,22 +1534,43 @@ export class Game {
     const classInfo = PLAYER_CLASSES[this.selectedClass];
     const className = classInfo ? classInfo.name : this.selectedClass;
     const lvl = this.saveData?.classLevels?.[this.selectedClass] || 1;
-    ctx.fillText(`${className} Lv.${lvl}`, 10, 20);
+    const leftText = `${className} Lv.${lvl}   Town Lv.${getTownLevel(this.saveData)}`;
+    ctx.fillText(leftText, 10, 20);
 
     const essenceText = `Essence: ${this.saveData?.currency || 0}`;
     ctx.fillStyle = '#ffd700';
     ctx.fillText(essenceText, w - ctx.measureText(essenceText).width - 10, 20);
+
+    // material totals between the two, abbreviated on narrow screens
+    const mats = this.saveData?.materials || {};
+    const abbr = { timber: 'TMB', stone: 'STN', iron: 'IRN', crystal: 'CRY', aether: 'ATH' };
+    const narrow = w < 720;
+    ctx.font = `bold ${narrow ? 11 : 13}px monospace`;
+    const parts = MATERIALS.map(m => ({ m, label: `${narrow ? abbr[m] : m} ${mats[m] || 0}` }));
+    const totalW = parts.reduce((s, p) => s + ctx.measureText(p.label).width + 12, 0);
+    let mx = narrow ? 10 : Math.max(ctx.measureText(leftText).width + 30, Math.floor((w - totalW) / 2));
+    const my = narrow ? h - TOWN_BAR_HEIGHT - 8 : 20;
+    if (narrow) { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, my - 12, totalW + 8, 16); }
+    for (const p of parts) {
+      ctx.fillStyle = '#000';
+      ctx.fillText(p.label, mx + 1, my + 1);
+      ctx.fillStyle = MATERIAL_COLORS[p.m];
+      ctx.fillText(p.label, mx, my);
+      mx += ctx.measureText(p.label).width + 12;
+    }
+    ctx.font = '14px monospace';
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.fillRect(0, h - TOWN_BAR_HEIGHT, w, TOWN_BAR_HEIGHT);
     ctx.fillStyle = '#8a9aaa';
     ctx.font = '12px monospace';
     ctx.textAlign = 'center';
-    if (w >= 560) ctx.fillText('Arrows / tap: Move   Enter: Shelter   K: Skills   Esc: Menu', w / 2, h - 11);
+    if (w >= 640) ctx.fillText('Arrows / tap: Move   Enter: Shelter or building   B: Build   K: Skills   Esc: Menu', w / 2, h - 11);
     ctx.textAlign = 'left';
     // tappable buttons in the bottom bar
     const btnH = TOWN_BAR_HEIGHT - 8;
     drawButton(this, 8, h - TOWN_BAR_HEIGHT + 4, 70, btnH, 'Skills', { type: 'skillTree' }, { fontSize: 11 });
+    drawButton(this, 84, h - TOWN_BAR_HEIGHT + 4, 70, btnH, 'Build', { type: 'build' }, { fontSize: 11, active: this.state === 'townBuild' });
     drawButton(this, w - 78, h - TOWN_BAR_HEIGHT + 4, 70, btnH, 'Menu', { type: 'close' }, { fontSize: 11 });
   }
 
@@ -1282,6 +1599,20 @@ export class Game {
     }
     if (this.state === 'town') {
       this.drawTown();
+      return;
+    }
+    if (this.state === 'townBuild') {
+      this.drawTown();
+      drawBuildMenu(this);
+      return;
+    }
+    if (this.state === 'townPlace') {
+      this.drawTown();
+      return;
+    }
+    if (this.state === 'building') {
+      this.drawTown();
+      drawBuildingMenu(this);
       return;
     }
     if (this.state === 'hubMenu') {

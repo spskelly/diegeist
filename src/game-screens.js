@@ -3,7 +3,8 @@ import { SKILL_SLOT_KEYS } from './skills.js';
 import { getEquippedStats } from './inventory.js';
 import { ACHIEVEMENTS } from './progression.js';
 import { getXPForNextLevel, XP_TABLE, canInvestSkill, SKILL_TREES } from './skill-tree.js';
-import { MATERIAL_COLORS } from './resources.js';
+import { MATERIAL_COLORS, MATERIALS } from './resources.js';
+import { BUILDING_ORDER, BLUEPRINT_SOURCES, getBuildingDef, getBuildingMenu, describeBuilding, formatCost } from './town-buildings.js';
 import {
   getRarityColor,
   formatSlotName,
@@ -1727,4 +1728,171 @@ export function drawSkillTree(game) {
   const tbY = y + panelH - Math.round(30 * uiScale);
   drawButton(game, x + panelW - Math.round(156 * uiScale), tbY, Math.round(70 * uiScale), Math.round(22 * uiScale), 'Invest', { type: 'inventoryConfirm' }, { active: available > 0 });
   drawButton(game, x + panelW - Math.round(78 * uiScale), tbY, Math.round(64 * uiScale), Math.round(22 * uiScale), 'Close', { type: 'close' });
+}
+
+// --- town: build menu and building service menu ---
+
+export function drawBuildMenu(game) {
+  const ctx = game.ctx;
+  const w = game.canvas.width;
+  const h = game.canvas.height;
+  const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+  const panelW = Math.min(Math.round(640 * uiScale), w - 24);
+  const panelH = Math.min(Math.round(440 * uiScale), h - 80);
+  const x = Math.floor((w - panelW) / 2);
+  const y = Math.floor((h - panelH) / 2);
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#171d28';
+  ctx.fillRect(x, y, panelW, panelH);
+  ctx.strokeStyle = '#4f6075';
+  ctx.strokeRect(x, y, panelW, panelH);
+
+  ctx.fillStyle = '#e8eef5';
+  ctx.font = `${Math.round(22 * uiScale)}px monospace`;
+  ctx.fillText('Build', x + Math.round(20 * uiScale), y + Math.round(36 * uiScale));
+
+  // material totals
+  const mats = game.saveData?.materials || {};
+  ctx.font = `bold ${Math.round(12 * uiScale)}px monospace`;
+  let mx = x + Math.round(20 * uiScale);
+  const my = y + Math.round(58 * uiScale);
+  for (const m of MATERIALS) {
+    const label = `${m} ${mats[m] || 0}`;
+    ctx.fillStyle = '#000';
+    ctx.fillText(label, mx + 1, my + 1);
+    ctx.fillStyle = MATERIAL_COLORS[m];
+    ctx.fillText(label, mx, my);
+    mx += ctx.measureText(label).width + Math.round(12 * uiScale);
+  }
+
+  const rowH = Math.round(30 * uiScale);
+  const startY = y + Math.round(88 * uiScale);
+  const narrow = panelW < Math.round(520 * uiScale);
+  for (let i = 0; i < BUILDING_ORDER.length; i++) {
+    const type = BUILDING_ORDER[i];
+    const opt = game.getBuildOption(type);
+    const rowY = startY + i * rowH;
+    const selected = i === game.buildMenuIndex;
+    registerRegion(game, x + Math.round(12 * uiScale), rowY - Math.round(18 * uiScale), panelW - Math.round(24 * uiScale), rowH, rowSelectAction('buildMenuIndex', i));
+    if (selected) {
+      ctx.fillStyle = '#2b3a4d';
+      ctx.fillRect(x + Math.round(12 * uiScale), rowY - Math.round(18 * uiScale), panelW - Math.round(24 * uiScale), rowH - 2);
+    }
+    // colour swatch
+    ctx.fillStyle = opt.def.color;
+    ctx.fillRect(x + Math.round(20 * uiScale), rowY - Math.round(12 * uiScale), Math.round(14 * uiScale), Math.round(14 * uiScale));
+    ctx.fillStyle = opt.placeable ? (selected ? '#ffffff' : '#c8d4e0') : (opt.built ? '#9ce2a3' : '#6a7a8a');
+    ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+    ctx.fillText(opt.def.name, x + Math.round(42 * uiScale), rowY);
+    ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+    ctx.fillStyle = opt.built ? '#9ce2a3' : (opt.blueprint ? (opt.affordable ? '#afc0d2' : '#c98a7a') : '#7a8a9a');
+    const right = opt.built ? opt.status : (opt.blueprint ? formatCost(opt.cost) : 'Blueprint needed');
+    ctx.fillText(right, x + Math.round(narrow ? 42 : 220 * uiScale), rowY + (narrow ? Math.round(12 * uiScale) : 0));
+    if (!narrow) {
+      ctx.fillStyle = '#6f7d8a';
+      ctx.fillText(opt.def.blurb, x + Math.round(400 * uiScale), rowY);
+    }
+  }
+
+  const sel = game.getBuildOption(BUILDING_ORDER[game.buildMenuIndex]);
+  const infoY = startY + BUILDING_ORDER.length * rowH + Math.round(6 * uiScale);
+  ctx.fillStyle = '#afc0d2';
+  ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+  ctx.fillText(sel.def.blurb, x + Math.round(20 * uiScale), infoY);
+  ctx.fillStyle = '#d9e7f5';
+  const selStatus = !sel.blueprint ? `Blueprint drops from ${BLUEPRINT_SOURCES[sel.def.blueprint] || 'a boss'}.` : sel.status;
+  ctx.fillText(game.buildingNotice || (sel.placeable ? `Costs ${formatCost(sel.cost)}. Enter to place.` : selStatus), x + Math.round(20 * uiScale), infoY + Math.round(18 * uiScale));
+
+  drawButton(game, x + panelW - Math.round(156 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(70 * uiScale), Math.round(24 * uiScale), 'Place', { type: 'inventoryConfirm' }, { active: sel.placeable, dim: !sel.placeable });
+  drawButton(game, x + panelW - Math.round(78 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(64 * uiScale), Math.round(24 * uiScale), 'Close', { type: 'close' });
+  ctx.fillStyle = '#7d8e9f';
+  ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+  ctx.fillText('Up/Down: Select  Enter: Place  ESC: Close', x + Math.round(20 * uiScale), y + panelH - Math.round(16 * uiScale));
+}
+
+export function drawBuildingMenu(game) {
+  const building = game.activeBuilding;
+  if (!building) return;
+  const def = getBuildingDef(building.type);
+  const ctx = game.ctx;
+  const w = game.canvas.width;
+  const h = game.canvas.height;
+  const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+  const panelW = Math.min(Math.round(640 * uiScale), w - 24);
+  const panelH = Math.min(Math.round(460 * uiScale), h - 80);
+  const x = Math.floor((w - panelW) / 2);
+  const y = Math.floor((h - panelH) / 2);
+  const rows = getBuildingMenu(game, building);
+  if (game.buildingCursor >= rows.length) game.buildingCursor = Math.max(0, rows.length - 1);
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#171d28';
+  ctx.fillRect(x, y, panelW, panelH);
+  ctx.strokeStyle = def.color;
+  ctx.strokeRect(x, y, panelW, panelH);
+
+  ctx.fillStyle = '#e8eef5';
+  ctx.font = `${Math.round(22 * uiScale)}px monospace`;
+  ctx.fillText(`${def.name}  L${building.level}`, x + Math.round(20 * uiScale), y + Math.round(36 * uiScale));
+  ctx.fillStyle = '#afc0d2';
+  ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+  const descLines = wrapTextLines(describeBuilding(game.saveData, building), Math.floor((panelW - 40 * uiScale) / (7.2 * uiScale)));
+  for (let i = 0; i < Math.min(2, descLines.length); i++) {
+    ctx.fillText(descLines[i], x + Math.round(20 * uiScale), y + Math.round(58 * uiScale) + i * Math.round(15 * uiScale));
+  }
+
+  const mats = game.saveData?.materials || {};
+  ctx.font = `bold ${Math.round(11 * uiScale)}px monospace`;
+  let mx = x + Math.round(20 * uiScale);
+  const my = y + Math.round(92 * uiScale);
+  for (const m of MATERIALS) {
+    const label = `${m} ${mats[m] || 0}`;
+    ctx.fillStyle = '#000';
+    ctx.fillText(label, mx + 1, my + 1);
+    ctx.fillStyle = MATERIAL_COLORS[m];
+    ctx.fillText(label, mx, my);
+    mx += ctx.measureText(label).width + Math.round(10 * uiScale);
+  }
+
+  const rowH = Math.round(26 * uiScale);
+  const startY = y + Math.round(120 * uiScale);
+  const maxVisible = Math.max(1, Math.floor((panelH - Math.round(200 * uiScale)) / rowH));
+  const sv = getScrollView(game.buildingCursor, game.buildingScrollOffset || 0, rows.length, maxVisible);
+  game.buildingScrollOffset = sv.scrollOffset;
+  for (let i = sv.startIdx; i < sv.endIdx; i++) {
+    const row = rows[i];
+    const rowY = startY + (i - sv.startIdx) * rowH;
+    const selected = i === game.buildingCursor;
+    registerRegion(game, x + Math.round(12 * uiScale), rowY - Math.round(16 * uiScale), panelW - Math.round(24 * uiScale), rowH, rowSelectAction('buildingCursor', i));
+    if (selected) {
+      ctx.fillStyle = '#2b3a4d';
+      ctx.fillRect(x + Math.round(12 * uiScale), rowY - Math.round(16 * uiScale), panelW - Math.round(24 * uiScale), rowH - 2);
+    }
+    ctx.font = `${Math.round(13 * uiScale)}px monospace`;
+    ctx.fillStyle = row.enabled ? (selected ? '#ffffff' : '#c8d4e0') : '#6a7a8a';
+    ctx.fillText(row.label, x + Math.round(22 * uiScale), rowY);
+    if (row.cost) {
+      const costText = formatCost(row.cost);
+      ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+      ctx.fillStyle = row.enabled ? '#afc0d2' : '#8a6a6a';
+      ctx.fillText(costText, x + panelW - Math.round(22 * uiScale) - ctx.measureText(costText).width, rowY);
+    }
+  }
+  drawScrollIndicators(ctx, x + Math.round(22 * uiScale), startY - Math.round(26 * uiScale), startY + maxVisible * rowH - Math.round(6 * uiScale), sv.showUpArrow, sv.showDownArrow, uiScale);
+
+  const selRow = rows[game.buildingCursor];
+  const infoY = y + panelH - Math.round(64 * uiScale);
+  ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+  ctx.fillStyle = '#8fa5bb';
+  if (selRow?.detail) ctx.fillText(selRow.detail, x + Math.round(20 * uiScale), infoY);
+  ctx.fillStyle = '#d9e7f5';
+  if (game.buildingNotice) ctx.fillText(game.buildingNotice, x + Math.round(20 * uiScale), infoY + Math.round(16 * uiScale));
+
+  drawButton(game, x + panelW - Math.round(156 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(70 * uiScale), Math.round(24 * uiScale), 'Select', { type: 'inventoryConfirm' }, { active: !!selRow?.enabled });
+  drawButton(game, x + panelW - Math.round(78 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(64 * uiScale), Math.round(24 * uiScale), 'Leave', { type: 'close' });
+  ctx.fillStyle = '#7d8e9f';
+  ctx.fillText('Up/Down: Select  Enter: Confirm  ESC: Leave', x + Math.round(20 * uiScale), y + panelH - Math.round(16 * uiScale));
 }

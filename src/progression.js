@@ -45,6 +45,11 @@ export class SaveData {
     this.skillPoints = { fighter: 0, archer: 0, mage: 0 };
     this.skillInvestments = { fighter: {}, archer: {}, mage: {} };
     this.townPlayerPos = null;
+    // town: placed buildings, found blueprints, and what is queued for the next run
+    this.buildings = [];
+    this.blueprints = [];
+    this.brewedPotions = [];
+    this.preRunBlessing = null;
   }
 
   addCurrency(amount) {
@@ -131,6 +136,10 @@ export class SaveData {
       skillPoints: this.skillPoints,
       skillInvestments: this.skillInvestments,
       townPlayerPos: this.townPlayerPos,
+      buildings: this.buildings,
+      blueprints: this.blueprints,
+      brewedPotions: this.brewedPotions,
+      preRunBlessing: this.preRunBlessing,
     });
   }
 
@@ -146,6 +155,10 @@ export class SaveData {
     if (!save.skillPoints) save.skillPoints = { fighter: 0, archer: 0, mage: 0 };
     if (!save.skillInvestments) save.skillInvestments = { fighter: {}, archer: {}, mage: {} };
     if (!save.townPlayerPos) save.townPlayerPos = null;
+    if (!Array.isArray(save.buildings)) save.buildings = [];
+    if (!Array.isArray(save.blueprints)) save.blueprints = [];
+    if (!Array.isArray(save.brewedPotions)) save.brewedPotions = [];
+    if (!save.preRunBlessing) save.preRunBlessing = null;
     return save;
   }
 }

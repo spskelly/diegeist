@@ -18,8 +18,33 @@ import {
   getEnemyXP,
   clearCombatVfx,
   recalcPlayerMaxHp,
+  rebuildPassiveEffects,
 } from './game-utils.js';
+import { getWatchtowerRevealFloors } from './town-buildings.js';
 import { applyStarterLoadout, applyPendingHubLoadout } from './game-save.js';
+
+// marks whole rooms (plus their walls) explored, in random order, until the
+// given fraction of walkable tiles is known. returns the number of rooms revealed.
+export function revealRooms(map, fraction) {
+  let walkable = 0;
+  for (let y = 0; y < map.height; y++) for (let x = 0; x < map.width; x++) if (map.isWalkable(x, y)) walkable++;
+  const target = Math.floor(walkable * fraction);
+  const rooms = map.rooms.slice().sort(() => Math.random() - 0.5);
+  let explored = 0;
+  let revealed = 0;
+  for (const room of rooms) {
+    if (explored >= target) break;
+    for (let y = room.y - 1; y <= room.y + room.height; y++) {
+      for (let x = room.x - 1; x <= room.x + room.width; x++) {
+        if (!map.inBounds(x, y) || map.isExplored(x, y)) continue;
+        map.setExplored(x, y, true);
+        if (map.isWalkable(x, y)) explored++;
+      }
+    }
+    revealed++;
+  }
+  return revealed;
+}
 
 export function getEnemyBaseTemplatesForFloor(floorNumber) {
   const biome = getBiome(floorNumber);
@@ -268,13 +293,15 @@ export function startFloor(game) {
     game.player.floorNumber = game.floorNumber;
     game.runSummary.classKey = game.player.playerClass;
 
-    // Resolve skill tree passive effects before gear so max hp accounts for both
+    // Resolve skill tree passive effects before gear so max hp accounts for both.
+    // the hub loadout may hand over a shrine blessing, so rebuild after it too.
     const investments = game.saveData?.skillInvestments?.[classKey] || {};
-    game.treePassiveEffects = resolvePassiveEffects(classKey, investments);
     game.player.treeActiveSkills = createTreeActiveSkills(classKey, investments);
+    rebuildPassiveEffects(game);
 
     applyStarterLoadout(game);
     applyPendingHubLoadout(game);
+    rebuildPassiveEffects(game);
     recalcPlayerMaxHp(game);
     game.player.hp = game.player.maxHp;
   } else {
@@ -411,6 +438,11 @@ export function startFloor(game) {
   game._currentAmbientBiome = getBiome(game.floorNumber);
 
   computeFOV(game.map, game.player.position.x, game.player.position.y, FOV_RADIUS);
+  // watchtower: the first floors of a run start with part of the map scouted
+  if (game.floorNumber <= getWatchtowerRevealFloors(game.saveData)) {
+    const revealed = revealRooms(game.map, 0.34);
+    if (revealed > 0) game.messageLog.add('Your watchtower scouted this floor ahead of you.', game.turnCount, '#9fd0ff');
+  }
   // the camera viewport differs between town and dungeon; make sure it is dungeon-sized now
   if (game.syncCameraViewport) game.syncCameraViewport();
   else game.camera.centerOn(game.player.position.x, game.player.position.y, game.map.width, game.map.height);

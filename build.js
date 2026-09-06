@@ -30,6 +30,7 @@ const SOURCE_ORDER = [
   'hud.js',
   'audio.js',
   'town.js',
+  'town-buildings.js',
   'game-utils.js',
   'game-save.js',
   'game-actions.js',

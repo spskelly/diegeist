@@ -148,6 +148,7 @@ export const BIOME_THEMES = {
       rock:     { primary: '#6a6a6a', secondary: '#5a5a5a', highlight: '#7a7a7a' },
       hill:     { primary: '#5a7a30', secondary: '#4a6a28', contour: '#6a8a3a' },
       shelter:  { walls: '#7a5a3a', roof: '#5a3a1a', door: '#8a6a4a' },
+      building: { walls: '#6a6a72', roof: '#44444c', door: '#8a7a5a' },
     },
   },
 };
@@ -159,7 +160,7 @@ export const TILE = {
   WALL: 0, FLOOR: 1, CORRIDOR: 2, DOOR: 3, STAIRS_DOWN: 4, WATER: 5, TRAP: 6, DOOR_OPEN: 7,
   // Town tiles (100+ range)
   GRASS: 100, TOWN_PATH: 101, TOWN_WATER: 102, TOWN_ROCK: 103, TOWN_HILL: 104,
-  SHELTER: 105, SHELTER_ENTRANCE: 106,
+  SHELTER: 105, SHELTER_ENTRANCE: 106, BUILDING: 107, BUILDING_ENTRANCE: 108,
   properties: {
     0: { name: 'Wall', walkable: false, blocksLOS: true },
     1: { name: 'Floor', walkable: true, blocksLOS: false },
@@ -176,5 +177,7 @@ export const TILE = {
     104: { name: 'Hill', walkable: true, blocksLOS: false },
     105: { name: 'Shelter', walkable: false, blocksLOS: true },
     106: { name: 'Shelter Entrance', walkable: true, blocksLOS: false },
+    107: { name: 'Building', walkable: false, blocksLOS: true },
+    108: { name: 'Building Entrance', walkable: true, blocksLOS: false },
   },
 };

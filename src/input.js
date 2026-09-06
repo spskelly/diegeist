@@ -28,6 +28,7 @@ const KEY_MAP = {
   u:          { type: 'inventoryUnequip' },
   p:          { type: 'stats' },
   k:          { type: 'skillTree' },
+  b:          { type: 'build' },
   h:          { type: 'hub' },
   m:          { type: 'map' },
 };

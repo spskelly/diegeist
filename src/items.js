@@ -297,6 +297,65 @@ export function generateConsumable(floorLevel) {
   };
 }
 
+// --- forge helpers: rework an existing item in place ---
+
+const RARITY_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+
+function templateForItem(item) {
+  return ITEM_TEMPLATES.find(t => t.baseName.toLowerCase().replace(/\s+/g, '_') === item.sprite)
+    || ITEM_TEMPLATES.find(t => t.slot === item.slot)
+    || ITEM_TEMPLATES[0];
+}
+
+export function rerollItemStats(item) {
+  const template = templateForItem(item);
+  item.statBonuses = generateStatBonuses(item.rarity || 'common', item.floorLevel || 1, template.primaryStat);
+  return item;
+}
+
+export function promoteItemRarity(item) {
+  const idx = RARITY_ORDER.indexOf(item.rarity || 'common');
+  if (idx === -1 || idx >= RARITY_ORDER.length - 2) return item;
+  item.rarity = RARITY_ORDER[idx + 1];
+  // regenerate bonuses at the new rarity but never below the old primary stat
+  const template = templateForItem(item);
+  const old = item.statBonuses || {};
+  const fresh = generateStatBonuses(item.rarity, item.floorLevel || 1, template.primaryStat);
+  for (const [stat, val] of Object.entries(old)) fresh[stat] = Math.max(fresh[stat] || 0, val);
+  item.statBonuses = fresh;
+  if (!item.skill) item.skill = generateSkill(item.rarity, getSkillTag(template));
+  return item;
+}
+
+export function socketItemStat(item, amount = 3) {
+  const bonuses = item.statBonuses || (item.statBonuses = {});
+  const missing = STAT_NAMES.filter(s => !bonuses[s]);
+  const pool = missing.length > 0 ? missing : STAT_NAMES;
+  const stat = pool[Math.floor(Math.random() * pool.length)];
+  bonuses[stat] = (bonuses[stat] || 0) + amount;
+  return item;
+}
+
+export function createConsumableByName(name, floorLevel = 1) {
+  const template = CONSUMABLE_TYPES.find(c => c.name === name);
+  if (!template) return null;
+  return {
+    id: `item_${nextItemId++}`,
+    name: template.name,
+    type: 'consumable',
+    rarity: template.rarity,
+    slot: null,
+    statBonuses: {},
+    skill: null,
+    effect: template.effect,
+    magnitude: template.magnitudeBase,
+    floorLevel,
+    description: `${template.name}.`,
+    sprite: 'consumable',
+    stackable: true,
+  };
+}
+
 export function createStarterWeapon(classKey) {
   const template = STARTER_CLASS_WEAPONS[classKey];
   if (!template) return null;

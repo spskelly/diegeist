@@ -200,6 +200,8 @@ export function buildTownTileSprites(palette) {
     town_hill:      { size: TILE_SIZE, draw: makeHillDraw(palette.hill) },
     town_shelter:   { size: TILE_SIZE, draw: makeShelterDraw(palette.shelter) },
     town_shelter_entrance: { size: TILE_SIZE, draw: makeShelterEntranceDraw(palette.grass, palette.shelter) },
+    town_building:  { size: TILE_SIZE, draw: makeShelterDraw(palette.building || palette.shelter) },
+    town_building_entrance: { size: TILE_SIZE, draw: makeShelterEntranceDraw(palette.grass, palette.building || palette.shelter) },
   };
 }
 
@@ -750,6 +752,8 @@ export const TILE_SPRITE_MAP = {
   104: 'town_hill',
   105: 'town_shelter',
   106: 'town_shelter_entrance',
+  107: 'town_building',
+  108: 'town_building_entrance',
 };
 
 export class SpriteRegistry {

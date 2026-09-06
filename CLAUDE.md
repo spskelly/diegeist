@@ -25,9 +25,9 @@ Diegeist is a roguelite dungeon crawler. All game code lives in `src/` as ES mod
 
 ### Module dependency order
 
-`constants` → `resources` → `skill-tree` → `game-map` → `entity` → `player` → `turn-system` → `camera` → `fov` → `pathfinding` → `combat` → `ai` → `dungeon-gen` → `items` → `inventory` → `skills` → `progression` → `message-log` → `input` → `ui` → `sprites` → `renderer` → `hud` → `audio` → `town` → `game-utils` → `game-save` → `game-actions` → `game-floor` → `game-screens` → `game`
+`constants` → `resources` → `skill-tree` → `game-map` → `entity` → `player` → `turn-system` → `camera` → `fov` → `pathfinding` → `combat` → `ai` → `dungeon-gen` → `items` → `inventory` → `skills` → `progression` → `message-log` → `input` → `ui` → `sprites` → `renderer` → `hud` → `audio` → `town` → `town-buildings` → `game-utils` → `game-save` → `game-actions` → `game-floor` → `game-screens` → `game`
 
-`game.js` is the main orchestrator. It imports everything else and runs a state machine (`init`, `startMenu`, `playing`, `pauseMenu`, `skillTree`, `deathSplash`, `deathSaveChoice`, `postDeathMenu`, `victory`, `hubMenu`, `hubShop`, `hubStash`, `hubAchievements`).
+`game.js` is the main orchestrator. It imports everything else and runs a state machine (`init`, `startMenu`, `town`, `townBuild`, `townPlace`, `building`, `playing`, `pauseMenu`, `settings`, `skillTree`, `deathSplash`, `deathSaveChoice`, `postDeathMenu`, `victory`, `hubMenu`, `hubShop`, `hubStash`, `hubAchievements`).
 
 ### Key design patterns
 
@@ -37,6 +37,7 @@ Diegeist is a roguelite dungeon crawler. All game code lives in `src/` as ES mod
 - **BSP dungeon generation:** recursive space partitioning with room archetypes (`corridor-heavy`, `cavernous`, `hybrid`), then corridor carving, room typing (start/boss/special), enemy spawning, and loot placement.
 - **Percentage mitigation:** `calculateDamage()` scales `base × stat/5 × weapon` and then removes 2% per point of CON (WIS against magic), capped at 60%. Max HP comes from `computePlayerMaxHp()` (class base + 2×CON, +8% per level, tree multiplier) and must be recomputed via `recalcPlayerMaxHp(game)` whenever gear or level changes.
 - **Hit regions:** every draw function registers tap targets through `registerRegion()` / `drawButton()` in `ui.js`; `Game.translatePointerAction()` turns taps and swipes into the same action objects the keyboard produces. Regions are cleared at the start of each `draw()`.
+- **Town buildings:** `town-buildings.js` owns definitions, placement rules, costs, income and services. Buildings live in `saveData.buildings`, get stamped onto the town map as `TILE.BUILDING` / `TILE.BUILDING_ENTRANCE`, and their run effects flow through `rebuildPassiveEffects(game)` (blessing, library XP), `applyPendingHubLoadout()` (brewed potions) and `finalizeRun()` (income). Blueprints drop from bosses via `BLUEPRINT_DROPS`.
 - **Skill hotbar:** four slots (`SKILL_SLOT_COUNT`). Slot 0 is the class skill when a matching weapon is equipped, then bound gear skills, then skill-tree actives (`player.treeActiveSkills`, persistent objects so cooldowns survive `updateActiveSkills()`).
 
 ### Tests

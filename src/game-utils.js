@@ -2,7 +2,9 @@ import { PLAYER_CLASSES, REGEN_FRACTION } from './constants.js';
 import { getEquippedStats } from './inventory.js';
 import { computePlayerMaxHp, getLevelStatBonuses } from './player.js';
 import { ACHIEVEMENTS, persistSaveData } from './progression.js';
-import { SKILL_TREES, getLevelForXP, getSkillPointsForLevel } from './skill-tree.js';
+import { SKILL_TREES, getLevelForXP, getSkillPointsForLevel, resolvePassiveEffects } from './skill-tree.js';
+import { applyBlessingToEffects, getLibraryXpBonus } from './town-buildings.js';
+import { BASE_SPEED } from './constants.js';
 
 // Pure utility functions
 
@@ -190,6 +192,20 @@ export function getRegenAmount(player, fraction = REGEN_FRACTION) {
 export function getPlayerLevel(game) {
   const classKey = game.player?.playerClass;
   return (classKey && game.saveData?.classLevels?.[classKey]) || game.player?.level || 1;
+}
+
+// tree passives plus whatever the town granted for this run (shrine blessing,
+// library xp bonus). every place that used to call resolvePassiveEffects for
+// the player goes through here so the town bonuses are never dropped.
+export function rebuildPassiveEffects(game) {
+  const classKey = game.player?.playerClass || game.selectedClass;
+  const investments = game.saveData?.skillInvestments?.[classKey] || {};
+  const effects = resolvePassiveEffects(classKey, investments);
+  applyBlessingToEffects(effects, game.runBlessing || null);
+  effects.xp_bonus = (effects.xp_bonus || 0) + getLibraryXpBonus(game.saveData);
+  game.treePassiveEffects = effects;
+  if (game.player) game.player.speed = BASE_SPEED + (effects.speed_bonus || 0);
+  return effects;
 }
 
 // recompute max hp from class, level, con (with gear) and tree passives.

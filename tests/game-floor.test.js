@@ -14,7 +14,11 @@ import {
   scaleEnemyTemplate,
   getEnemyBaseTemplatesForFloor,
   getFloorBossTemplate,
+  revealRooms,
 } from '../src/game-floor.js';
+import { placeBuilding, chooseBlessing, brewPotion } from '../src/town-buildings.js';
+import { buildTownMap } from '../src/town.js';
+import { finalizeRun } from '../src/game-save.js';
 
 function makeGame() {
   const game = {
@@ -89,8 +93,10 @@ describe('handleFloorTransition', () => {
 describe('enemy scaling', () => {
   it('scales hp and stats with floor number', () => {
     const leech = getEnemyBaseTemplatesForFloor(1)[0];
-    const f1 = scaleEnemyTemplate(leech, 1);
-    const f9 = scaleEnemyTemplate(leech, 9);
+    // elite promotion is random; sample until a regular enemy comes out
+    const regular = (floor) => { for (let i = 0; i < 200; i++) { const e = scaleEnemyTemplate(leech, floor); if (!e.isElite) return e; } return scaleEnemyTemplate(leech, floor); };
+    const f1 = regular(1);
+    const f9 = regular(9);
     expect(f1.maxHp).toBe(leech.maxHp);
     expect(f9.maxHp).toBeGreaterThan(f1.maxHp * 1.5);
     expect(f9.stats.STR).toBeGreaterThan(f1.stats.STR);
@@ -103,5 +109,77 @@ describe('enemy scaling', () => {
       expect(boss.maxHp).toBeGreaterThanOrEqual(180);
     }
     expect(getFloorBossTemplate(4)).toBeNull();
+  });
+
+});
+
+describe('town effects on a run', () => {
+  function exploredFraction(map) {
+    let walkable = 0, explored = 0;
+    for (let y = 0; y < map.height; y++) for (let x = 0; x < map.width; x++) {
+      if (!map.isWalkable(x, y)) continue;
+      walkable++;
+      if (map.isExplored(x, y)) explored++;
+    }
+    return explored / walkable;
+  }
+
+  it('watchtower scouts the first floor', () => {
+    const plain = makeGame();
+    startFloor(plain);
+    const baseline = exploredFraction(plain.map);
+
+    const game = makeGame();
+    game.saveData.materials.timber = 50;
+    placeBuilding(game.saveData, buildTownMap(), 'watchtower', 5, 10);
+    startFloor(game);
+    expect(exploredFraction(game.map)).toBeGreaterThan(Math.max(0.3, baseline));
+    expect(game.messageLog.messages.some(m => /watchtower/.test(m.text))).toBe(true);
+  });
+
+  it('revealRooms stops once the fraction is reached', () => {
+    const game = makeGame();
+    startFloor(game);
+    for (let y = 0; y < game.map.height; y++) for (let x = 0; x < game.map.width; x++) game.map.setExplored(x, y, false);
+    const revealed = revealRooms(game.map, 0.34);
+    expect(revealed).toBeGreaterThan(0);
+    expect(revealed).toBeLessThan(game.map.rooms.length);
+  });
+
+  it('brewed potions and the shrine blessing are consumed at run start', () => {
+    const game = makeGame();
+    game.saveData.materials = { timber: 50, stone: 50, iron: 50, crystal: 50, aether: 50 };
+    brewPotion(game.saveData, { type: 'apothecary', level: 1 }, 'Minor Health Potion');
+    brewPotion(game.saveData, { type: 'apothecary', level: 1 }, 'Minor Health Potion');
+    chooseBlessing(game.saveData, { type: 'shrine', level: 1 }, 'vigor');
+    startFloor(game);
+    const potions = [...game.player.inventory, ...game.player.belt.filter(Boolean)].filter(i => i.name === 'Minor Health Potion');
+    expect(potions.reduce((n, p) => n + (p.count || 1), 0)).toBe(2);
+    expect(game.saveData.brewedPotions).toEqual([]);
+    expect(game.saveData.preRunBlessing).toBeNull();
+    expect(game.runBlessing.id).toBe('vigor');
+    expect(game.treePassiveEffects.max_hp_mult).toBeCloseTo(1.15);
+    const unblessed = makeGame();
+    startFloor(unblessed);
+    expect(game.player.maxHp).toBeGreaterThan(unblessed.player.maxHp);
+  });
+
+  it('haste blessing raises the player speed', () => {
+    const game = makeGame();
+    game.saveData.materials.aether = 10;
+    chooseBlessing(game.saveData, { type: 'shrine', level: 1 }, 'haste');
+    startFloor(game);
+    expect(game.player.speed).toBe(110);
+  });
+
+  it('farm income is paid when a run ends', () => {
+    const game = makeGame();
+    game.saveData.materials.timber = 30;
+    placeBuilding(game.saveData, buildTownMap(), 'farm', 5, 10);
+    startFloor(game);
+    const before = game.saveData.materials.timber;
+    finalizeRun(game, 'Leech');
+    expect(game.saveData.materials.timber).toBe(before + 4);
+    expect(game.townIncomeNotice).toMatch(/Farm/);
   });
 });

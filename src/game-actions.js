@@ -16,6 +16,8 @@ import { assignSkillToSlot, canUseSkill, syncClassSkillCooldown, updateActiveSki
 import { generateItem, generateConsumable } from './items.js';
 import { rollMaterialDrop, getBossKillMaterials, MATERIAL_COLORS, BIOME_MATERIALS } from './resources.js';
 import { SKILL_SLOT_KEYS } from './skills.js';
+import { BLUEPRINT_DROPS, getBuildingDef } from './town-buildings.js';
+import { persistSaveData } from './progression.js';
 import {
   isDirectionalAction,
   getEntityStatsWithEquipment,
@@ -802,6 +804,19 @@ export function handleEnemyDeath(game, enemy) {
       position: { x: enemy.position.x, y: enemy.position.y },
     });
     game.messageLog.add(`The ${enemy.name} drops ${bossDrop.name}!`, game.turnCount);
+
+    // first kill of a boss hands over a building blueprint, saved immediately
+    const blueprint = BLUEPRINT_DROPS[enemy.bossKey];
+    if (blueprint && game.saveData) {
+      if (!Array.isArray(game.saveData.blueprints)) game.saveData.blueprints = [];
+      if (!game.saveData.blueprints.includes(blueprint)) {
+        game.saveData.blueprints.push(blueprint);
+        persistSaveData(game.saveData);
+        const name = getBuildingDef(blueprint)?.name || blueprint;
+        game.messageLog.add(`Blueprint found: ${name}! Build it in town.`, game.turnCount, '#ffd700');
+        addFloatingText(game, enemy.position.x, enemy.position.y, `${name} blueprint!`, '#ffd700', 1400);
+      }
+    }
 
     if (game.floorNumber >= 10) {
       const victoryBonus = 120;

@@ -167,6 +167,33 @@ const decide = (page) => page.evaluate(() => {
     await shot(page, expected);
     await press(page, 'Escape');
   }
+  // town: grant materials, build a farm by keyboard, walk in, upgrade it
+  await press(page, 'Escape');
+  check((await state(page)) === 'town', 'escape from the hub returns to town');
+  await page.evaluate(() => { const g = window.__game; g.saveData.materials.timber = 60; g.saveData.materials.stone = 20; });
+  await press(page, 'b');
+  check((await state(page)) === 'townBuild', 'B opens the build menu');
+  await press(page, 'Enter');
+  check((await state(page)) === 'townPlace', 'enter on an affordable building starts placement');
+  await press(page, 'Enter');
+  const built = await page.evaluate(() => window.__game.saveData.buildings.map(b => `${b.type}:${b.level}`));
+  check(built.length === 1 && built[0] === 'farm:1', `placing should build a farm, got ${built.join(',')}`);
+  await shot(page, 'town-farm');
+  const door = await page.evaluate(() => { const g = window.__game; const b = g.saveData.buildings[0]; const { sx, sy } = g.camera.tileToScreen(b.x, b.y); return { x: sx + 4, y: sy + 4 }; });
+  await page.mouse.click(door.x, door.y);
+  for (let i = 0; i < 80 && (await state(page)) === 'town'; i++) await page.waitForTimeout(50);
+  check((await state(page)) === 'building', 'clicking a building walks to its door and opens it');
+  await press(page, 'Enter');
+  check(await page.evaluate(() => window.__game.saveData.buildings[0].level) === 2, 'the upgrade row raises the farm to level 2');
+  await shot(page, 'town-farm-menu');
+  await press(page, 'Escape');
+  check((await state(page)) === 'town', 'leaving a building returns to town');
+  await page.keyboard.down('ArrowDown'); await page.waitForTimeout(160); await page.keyboard.up('ArrowDown'); await frames(page, 2);
+  // back into the shelter and start the run
+  const shelter = await page.evaluate(() => { const g = window.__game; const { sx, sy } = g.camera.tileToScreen(15, 15); return { x: sx + 8, y: sy + 8 }; });
+  await page.mouse.click(shelter.x, shelter.y);
+  for (let i = 0; i < 80 && (await state(page)) === 'town'; i++) await page.waitForTimeout(50);
+  check((await state(page)) === 'hubMenu', 'clicking the shelter opens the hub');
   await page.evaluate(() => { window.__game.hubMenuIndex = 0; });
   await press(page, 'Enter');
   check((await state(page)) === 'playing', 'start run should enter the dungeon');

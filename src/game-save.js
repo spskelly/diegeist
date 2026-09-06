@@ -13,7 +13,8 @@ import { createStarterWeapon } from './items.js';
 import { persistSaveData } from './progression.js';
 import { createEmptyMaterials, scaleMaterials } from './resources.js';
 import { resolvePassiveEffects, createTreeActiveSkills } from './skill-tree.js';
-import { cloneItem, clearCombatVfx, persistLastClassSelection, syncMilestoneAchievements, recalcPlayerMaxHp } from './game-utils.js';
+import { cloneItem, clearCombatVfx, persistLastClassSelection, syncMilestoneAchievements, recalcPlayerMaxHp, rebuildPassiveEffects } from './game-utils.js';
+import { applyTownIncome, describeBlessing } from './town-buildings.js';
 
 function serializeItemSkill(skill) {
   if (!skill) return null;
@@ -135,6 +136,7 @@ export function saveRunState(game) {
     currentRank: game.currentRank || 1,
     deathSaveUsedThisFloor: game.deathSaveUsedThisFloor || false,
     corpses: (game.corpses || []).slice(),
+    runBlessing: game.runBlessing || null,
     selectedClass: game.selectedClass,
     messageLog: game.messageLog.messages.slice(),
   };
@@ -189,7 +191,8 @@ export function loadRunState(game) {
   game.currentRank = snapshot.currentRank || 1;
   game.treeRegenCounter = 0;
   const investments = game.saveData?.skillInvestments?.[game.player.playerClass] || {};
-  game.treePassiveEffects = resolvePassiveEffects(game.player.playerClass, investments);
+  game.runBlessing = snapshot.runBlessing || null;
+  rebuildPassiveEffects(game);
   game.player.treeActiveSkills = createTreeActiveSkills(game.player.playerClass, investments, game.player.savedTreeCooldowns || {});
   updateActiveSkills(game.player);
   game.deathSaveUsedThisFloor = snapshot.deathSaveUsedThisFloor || false;
@@ -249,6 +252,7 @@ export function startNewRun(game) {
   game.currentRank = 1;
   game.treePassiveEffects = null;
   game.treeRegenCounter = 0;
+  game.runBlessing = null;
   game.startFloor();
   game.state = 'playing';
   if (game.audio) game.audio.uiClick();
@@ -269,6 +273,9 @@ export function finalizeRun(game, causeOfDeath) {
     game.committedMaterials = { ...mats };
     game.rawRunMaterials = { ...game.runMaterials };
   }
+  // town income arrives whenever a run ends, whatever the outcome
+  const income = applyTownIncome(game.saveData);
+  game.townIncomeNotice = income.lines.length ? `Town income: ${income.lines.join('  ')}` : '';
   game.saveData.addRunHistory({
     classKey: game.runSummary.classKey,
     floorsReached: game.runSummary.floorsReached,
@@ -307,6 +314,28 @@ export function applyPendingHubLoadout(game) {
     game.pendingStashLoadoutItem = null;
     game.saveData.pendingLoadoutItem = null;
   }
+
+  // apothecary brews go into the bag (and belt) at the start of the run
+  const brewed = Array.isArray(game.saveData.brewedPotions) ? game.saveData.brewedPotions.splice(0) : [];
+  let brewedCount = 0;
+  for (const potion of brewed) {
+    const copy = { ...potion, id: `brew_${Date.now()}_${Math.floor(Math.random() * 1e6)}` };
+    if (!addToInventory(game.player, copy)) break;
+    brewedCount++;
+    if (game.player.inventory.some(i => i.id === copy.id)) {
+      const freeBeltSlot = game.player.belt.findIndex(s => s === null);
+      if (freeBeltSlot !== -1) assignToBelt(game.player, copy.id, freeBeltSlot);
+    }
+  }
+  if (brewedCount > 0) game.messageLog.add(`Apothecary: ${brewedCount} brewed potion${brewedCount === 1 ? '' : 's'} packed.`, game.turnCount, '#7ad1d1');
+
+  // shrine blessing lasts the whole run and is consumed now
+  if (game.saveData.preRunBlessing) {
+    game.runBlessing = game.saveData.preRunBlessing;
+    game.saveData.preRunBlessing = null;
+    game.messageLog.add(`Shrine blessing: ${describeBlessing(game.runBlessing)}.`, game.turnCount, '#c0a0e0');
+  }
+  if (brewedCount > 0 || game.runBlessing) persistSaveData(game.saveData);
 
   if (!Array.isArray(game.saveData.pendingRunPurchases) || game.saveData.pendingRunPurchases.length === 0) return;
 

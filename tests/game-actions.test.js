@@ -10,6 +10,7 @@ import { createEmptyMaterials } from '../src/resources.js';
 import { computeFOV } from '../src/fov.js';
 import { TILE, FOV_RADIUS, SKILL_SLOT_COUNT } from '../src/constants.js';
 import { addFloatingText } from '../src/game-utils.js';
+import { SaveData } from '../src/progression.js';
 import {
   useTreeSkill,
   handleSkillAction,
@@ -277,6 +278,8 @@ describe('wired passives', () => {
 
 describe('boss mechanics', () => {
   function addBoss(game, key, overrides = {}) {
+    // the player must not dodge, or hp assertions become random
+    game.player.stats.DEX = 0;
     return addEnemy(game, 12, 10, { name: key, isFloorBoss: true, bossKey: key, maxHp: 400, ...overrides });
   }
 
@@ -330,5 +333,19 @@ describe('boss mechanics', () => {
     runBossMechanic(game, boss);
     expect(boss.enrageStage).toBe(2);
     expect(boss.speed).toBe(143);
+  });
+
+  it('the first kill of a boss drops its building blueprint', () => {
+    const game = makeGame();
+    game.saveData = new SaveData();
+    const boss = addBoss(game, 'brood_mother');
+    boss.hp = 0;
+    handleEnemyDeath(game, boss);
+    expect(game.saveData.blueprints).toEqual(['forge']);
+    expect(game.messageLog.messages.some(m => /Blueprint found: Forge/.test(m.text))).toBe(true);
+    const again = addBoss(game, 'brood_mother', { id: 'boss2' });
+    again.hp = 0;
+    handleEnemyDeath(game, again);
+    expect(game.saveData.blueprints).toEqual(['forge']);
   });
 });
