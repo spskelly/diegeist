@@ -179,8 +179,13 @@ describe('renderer vfx windows', () => {
     const enemy = makeEnemy(3, 3);
     addHitFeedback(game, enemy, { damage: 5, crit: false, dodged: false }, 'player');
     expect(enemy.vfxHit).toBeDefined();
-    expect(isHitFlashActive(enemy, enemy.vfxHit.startMs + 10)).toBe(true);
-    expect(isHitFlashActive(enemy, enemy.vfxHit.startMs + enemy.vfxHit.durationMs)).toBe(false);
+    expect(enemy.vfxHit.durationMs).toBeGreaterThan(0);
+    // pin the start to an integer clock so the closing boundary is exact.
+    // performance.now() is fractional and (start + duration) - start can
+    // round to a hair under duration, which made this assertion flaky
+    enemy.vfxHit.startMs = 1000;
+    expect(isHitFlashActive(enemy, 1010)).toBe(true);
+    expect(isHitFlashActive(enemy, 1000 + enemy.vfxHit.durationMs)).toBe(false);
     const other = makeEnemy(4, 4);
     addHitFeedback(game, other, { damage: 0, crit: false, dodged: true }, 'player');
     expect(other.vfxHit).toBeUndefined();
