@@ -1,16 +1,29 @@
 import { SOFT_GATE_MULTIPLIER } from './constants.js';
 
+// defense is percentage-based: every point of CON (or WIS against magic) shaves
+// MITIGATION_PER_POINT off incoming damage, capped at MAX_MITIGATION. a flat
+// subtraction made every low-level hit collapse to the minimum of 1 damage.
+export const MITIGATION_PER_POINT = 0.02;
+export const MAX_MITIGATION = 0.6;
+
 export function getEffectiveStat(statValue, isAffinity) {
   return isAffinity ? statValue : statValue * SOFT_GATE_MULTIPLIER;
 }
 
+export function getMitigation(statValue) {
+  return Math.min(MAX_MITIGATION, Math.max(0, statValue || 0) * MITIGATION_PER_POINT);
+}
+
+// damage dealt by a trap on a given floor. disarming it costs half.
+export function getTrapDamage(floorNumber) {
+  return 6 + floorNumber * 3;
+}
+
 export function calculateDamage({ baseDamage, stat, isAffinity, weaponMultiplier, defense, isMagic, targetWIS }) {
   const effectiveStat = getEffectiveStat(stat, isAffinity);
-  let dmg = baseDamage * (effectiveStat / 5) * weaponMultiplier - defense;
-  if (isMagic && targetWIS > 0) {
-    dmg -= targetWIS * 0.5;
-  }
-  return Math.max(1, Math.floor(dmg));
+  const raw = baseDamage * (effectiveStat / 5) * weaponMultiplier;
+  const mitigation = getMitigation(isMagic ? targetWIS : defense);
+  return Math.max(1, Math.round(raw * (1 - mitigation)));
 }
 
 export function resolveAttack(attacker, defender, options = {}) {
@@ -22,7 +35,10 @@ export function resolveAttack(attacker, defender, options = {}) {
     forceDodge = null,
     attackerTreeEffects = null,
     defenderTreeEffects = null,
+    damageMultiplier = 1,
   } = options;
+
+  const isMagic = damageType === 'magic';
 
   // Determine if dodged
   let dodgeChance = defender.stats.DEX * 1.0; // DEX% dodge chance
@@ -30,31 +46,40 @@ export function resolveAttack(attacker, defender, options = {}) {
   const dodged = forceDodge !== null ? forceDodge : Math.random() * 100 < dodgeChance;
 
   if (dodged) {
-    return { hit: false, dodged: true, blocked: false, crit: false, damage: 0, killed: false, thornsDamage: 0 };
+    return { hit: false, dodged: true, blocked: false, countered: false, crit: false, damage: 0, killed: false, thornsDamage: 0 };
   }
 
   // Block chance (Shield Wall) — skill tree passive
   if (defenderTreeEffects?.block_chance > 0) {
     const blocked = Math.random() * 100 < defenderTreeEffects.block_chance * 100;
     if (blocked) {
-      return { hit: false, dodged: false, blocked: true, crit: false, damage: 0, killed: false, thornsDamage: 0 };
+      return { hit: false, dodged: false, blocked: true, countered: false, crit: false, damage: 0, killed: false, thornsDamage: 0 };
     }
   }
 
-  // Determine relevant stat and affinity
+  // Counterspell — negate a magic attack entirely
+  if (isMagic && defenderTreeEffects?.counterspell_chance > 0) {
+    if (Math.random() < defenderTreeEffects.counterspell_chance) {
+      return { hit: false, dodged: false, blocked: true, countered: true, crit: false, damage: 0, killed: false, thornsDamage: 0 };
+    }
+  }
+
+  // Determine relevant stat and affinity. the soft gate only applies to
+  // classed attackers; monsters have no affinity list and use their stats in full.
   let relevantStat;
   let isAffinity;
-  const affinityStats = attacker.affinityStats || [];
+  const affinityStats = attacker.affinityStats || null;
+  const hasAffinity = (stat) => !affinityStats || affinityStats.includes(stat);
 
   if (damageType === 'melee') {
     relevantStat = attacker.stats.STR;
-    isAffinity = affinityStats.includes('STR');
+    isAffinity = hasAffinity('STR');
   } else if (damageType === 'ranged') {
     relevantStat = attacker.stats.DEX;
-    isAffinity = affinityStats.includes('DEX');
+    isAffinity = hasAffinity('DEX');
   } else {
     relevantStat = attacker.stats.INT;
-    isAffinity = affinityStats.includes('INT');
+    isAffinity = hasAffinity('INT');
   }
 
   // Determine crit (lucky_strike doubles crit chance)
@@ -64,9 +89,8 @@ export function resolveAttack(attacker, defender, options = {}) {
   if (attackerTreeEffects?.crit_bonus) critChance += attackerTreeEffects.crit_bonus;
   const isCrit = forceCrit !== null ? forceCrit : Math.random() * 100 < critChance;
 
-  // Calculate defense (CON-based rough defense)
-  const defense = Math.floor(defender.stats.CON * 0.3);
-  const isMagic = damageType === 'magic';
+  // Defense is CON for physical hits and WIS for magic (percentage mitigation)
+  const defense = defender.stats.CON;
 
   let damage = calculateDamage({
     baseDamage,
@@ -89,14 +113,32 @@ export function resolveAttack(attacker, defender, options = {}) {
     }
   }
 
-  // War Cry: attacker damage boost
+  // caller-supplied multiplier (ambush, rush, overcharge, chain lightning ...)
+  if (damageMultiplier !== 1) damage = Math.max(1, Math.floor(damage * damageMultiplier));
+
+  // War Cry / Berserker Rage: attacker damage boost
   const warCry = attacker.hasStatusEffect?.('war_cry');
   if (warCry) damage = Math.floor(damage * warCry.value);
+  const berserk = attacker.hasStatusEffect?.('berserk');
+  if (berserk) damage = Math.floor(damage * berserk.value);
+
+  // Tactical Advance: one-shot bonus granted by stepping next to an enemy
+  const tactical = attacker.hasStatusEffect?.('tactical');
+  if (tactical) {
+    damage = Math.floor(damage * (1 + tactical.value));
+    attacker.statusEffects = attacker.statusEffects.filter(e => e.type !== 'tactical');
+  }
 
   if (isCrit) {
     let critMult = 2;
     if (attackerTreeEffects?.crit_damage_bonus) critMult += attackerTreeEffects.crit_damage_bonus;
     damage = Math.floor(damage * critMult);
+  }
+
+  // Berserker Rage on the defender: takes extra damage
+  const defenderBerserk = defender.hasStatusEffect?.('berserk');
+  if (defenderBerserk && defenderBerserk.defenseReduction) {
+    damage = Math.floor(damage * (1 + defenderBerserk.defenseReduction));
   }
 
   // Fortify: defender damage reduction
@@ -107,9 +149,15 @@ export function resolveAttack(attacker, defender, options = {}) {
   const ironSkin = defender.hasStatusEffect?.('iron_skin');
   if (ironSkin) damage = Math.max(1, Math.floor(damage * (1 - ironSkin.value)));
 
-  // Skill tree damage reduction
+  // Skill tree damage reduction (Iron Hide), magic resistance (Arcane Barrier), passive absorb (Mana Shield)
   if (defenderTreeEffects?.damage_reduction > 0) {
     damage = Math.max(1, Math.floor(damage * (1 - defenderTreeEffects.damage_reduction)));
+  }
+  if (isMagic && defenderTreeEffects?.magic_resistance > 0) {
+    damage = Math.max(1, Math.floor(damage * (1 - defenderTreeEffects.magic_resistance)));
+  }
+  if (defenderTreeEffects?.passive_absorb > 0) {
+    damage = Math.max(1, Math.floor(damage * (1 - defenderTreeEffects.passive_absorb)));
   }
 
   // Mana Shield: absorb damage
@@ -138,6 +186,7 @@ export function resolveAttack(attacker, defender, options = {}) {
     hit: true,
     dodged: false,
     blocked: false,
+    countered: false,
     crit: isCrit,
     damage,
     thornsDamage,

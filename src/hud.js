@@ -1,4 +1,6 @@
-import { STAT_NAMES } from './constants.js';
+import { STAT_NAMES, SKILL_SLOT_COUNT } from './constants.js';
+import { SKILL_SLOT_KEYS } from './skills.js';
+import { registerRegion, drawButton } from './ui.js';
 
 const STATUS_EFFECT_LABELS = {
   thorns: 'Thorns',
@@ -8,6 +10,12 @@ const STATUS_EFFECT_LABELS = {
   regeneration: 'Regen',
   lucky_strike: 'Lucky',
   mana_shield: 'Shield',
+  berserk: 'Berserk',
+  deadeye: 'Deadeye',
+  invisible: 'Hidden',
+  tactical: 'Tactical',
+  slowed: 'Slowed',
+  stunned: 'Stunned',
 };
 
 export class HUD {
@@ -109,7 +117,7 @@ export class HUD {
     }
   }
 
-  draw(player, messageLog, derivedStats = null, runMaterials = null, xpData = null) {
+  draw(player, messageLog, derivedStats = null, runMaterials = null, xpData = null, game = null) {
     const ctx = this.ctx;
     const s = this.uiScale;
     const y = this.canvasHeight - this.hudHeight;
@@ -120,11 +128,34 @@ export class HUD {
     ctx.fillStyle = '#333';
     ctx.fillRect(0, y, this.canvasWidth, 1);
 
+    const slotSize = Math.round(26 * s);
+    const slotGap = Math.round(7 * s);
+    const slotCount = SKILL_SLOT_COUNT;
+    const slotAreaW = slotCount * slotSize + (slotCount - 1) * slotGap;
+    const rightInset = Math.round(10 * s);
+    const rightPanelPad = Math.round(8 * s);
+    const rightPanelW = slotAreaW + rightPanelPad * 2;
+    const rightPanelH = slotSize * 2 + Math.round(38 * s);
+    const rightPanelX = this.canvasWidth - rightPanelW - rightInset;
+    const rightPanelY = y + Math.round(6 * s);
+    const beltX = rightPanelX + rightPanelPad;
+    const beltY = rightPanelY + Math.round(18 * s);
+    const skillY = beltY + slotSize + Math.round(18 * s);
+    const skillX = beltX;
+    // everything left of the belt/skill panel is clipped so narrow screens never overlap
+    const leftAreaW = rightPanelX - Math.round(10 * s);
+    const narrow = leftAreaW < Math.round(420 * s);
+
     const hpBarX = Math.round(12 * s);
     const hpBarY = y + Math.round(10 * s);
-    const hpBarW = Math.round(200 * s);
+    const hpBarW = Math.min(Math.round(200 * s), Math.round(leftAreaW * 0.55));
     const hpBarH = Math.round(18 * s);
     const hpRatio = player.hp / player.maxHp;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, y, leftAreaW, this.hudHeight);
+    ctx.clip();
 
     ctx.fillStyle = '#400';
     ctx.fillRect(hpBarX, hpBarY, hpBarW, hpBarH);
@@ -137,31 +168,15 @@ export class HUD {
     ctx.font = `${Math.round(12 * s)}px monospace`;
     ctx.fillText(`HP: ${player.hp}/${player.maxHp}`, hpBarX + Math.round(5 * s), hpBarY + Math.round(14 * s));
 
-    const slotSize = Math.round(26 * s);
-    const slotGap = Math.round(7 * s);
-    const slotCount = 3;
-    const slotAreaW = slotCount * slotSize + (slotCount - 1) * slotGap;
-    const rightInset = Math.round(10 * s);
-    const rightPanelPad = Math.round(8 * s);
-    const rightPanelW = slotAreaW + rightPanelPad * 2;
-    const rightPanelH = slotSize * 2 + Math.round(38 * s);
-    const rightPanelX = this.canvasWidth - rightPanelW - rightInset;
-    const rightPanelY = y + Math.round(6 * s);
-    const beltX = rightPanelX + rightPanelPad;
-    const beltY = rightPanelY + Math.round(18 * s);
-    const skillY = beltY + slotSize + Math.round(18 * s);
-    const skillX = beltX;
-
-    ctx.fillStyle = '#19202a';
-    ctx.fillRect(rightPanelX, rightPanelY, rightPanelW, rightPanelH);
-    ctx.strokeStyle = '#3d4b59';
-    ctx.strokeRect(rightPanelX, rightPanelY, rightPanelW, rightPanelH);
-
-    const infoX = hpBarX + hpBarW + Math.round(18 * s);
+    const infoX = hpBarX + hpBarW + Math.round(12 * s);
     ctx.fillStyle = '#d9e1ea';
     ctx.font = `${Math.round(12 * s)}px monospace`;
-    ctx.fillText(`Floor ${player.floorNumber}`, infoX, hpBarY + Math.round(14 * s));
-    ctx.fillText(`Essence ${player.gold}`, infoX + Math.round(110 * s), hpBarY + Math.round(14 * s));
+    if (narrow) {
+      ctx.fillText(`F${player.floorNumber} ${player.gold}e`, infoX, hpBarY + Math.round(14 * s));
+    } else {
+      ctx.fillText(`Floor ${player.floorNumber}`, infoX, hpBarY + Math.round(14 * s));
+      ctx.fillText(`Essence ${player.gold}`, infoX + Math.round(90 * s), hpBarY + Math.round(14 * s));
+    }
 
     // Run materials
     if (runMaterials) {
@@ -205,6 +220,14 @@ export class HUD {
       }
     }
 
+    // end of the clipped left column; the panel and buttons draw unclipped
+    ctx.restore();
+
+    ctx.fillStyle = '#19202a';
+    ctx.fillRect(rightPanelX, rightPanelY, rightPanelW, rightPanelH);
+    ctx.strokeStyle = '#3d4b59';
+    ctx.strokeRect(rightPanelX, rightPanelY, rightPanelW, rightPanelH);
+
     ctx.fillStyle = '#90a0b0';
     ctx.font = `${Math.round(10 * s)}px monospace`;
     ctx.fillText('BELT', beltX, beltY - Math.round(5 * s));
@@ -218,18 +241,27 @@ export class HUD {
       ctx.fillStyle = '#d3dde7';
       ctx.font = `${Math.round(10 * s)}px monospace`;
       ctx.fillText(`${i + 1}`, slotX + Math.round(3 * s), beltY + slotSize - Math.round(3 * s));
+      if (game) registerRegion(game, slotX, beltY, slotSize, slotSize, { type: 'belt', slot: i });
+      // stack size in the top-right corner
+      const count = player.belt[i]?.count || 0;
+      if (count > 1) {
+        const label = `x${count}`;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, slotX + slotSize - ctx.measureText(label).width - Math.round(2 * s), beltY + Math.round(10 * s));
+      }
     }
 
     const skills = player.activeSkills || [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < SKILL_SLOT_COUNT; i++) {
       const slotX = skillX + i * (slotSize + slotGap);
       const skill = skills[i] || null;
-      ctx.strokeStyle = '#5a6673';
+      ctx.strokeStyle = skill?.isTreeSkill ? '#8a6a3a' : '#5a6673';
       ctx.strokeRect(slotX, skillY, slotSize, slotSize);
       this.drawSkillIcon(ctx, skill, slotX + 1, skillY + 1, slotSize - 2);
       ctx.fillStyle = '#d3dde7';
       ctx.font = `${Math.round(10 * s)}px monospace`;
-      ctx.fillText(i === 0 ? 'Q' : i === 1 ? 'E' : 'R', slotX + Math.round(3 * s), skillY + slotSize - Math.round(3 * s));
+      ctx.fillText(SKILL_SLOT_KEYS[i], slotX + Math.round(3 * s), skillY + slotSize - Math.round(3 * s));
+      if (game) registerRegion(game, slotX, skillY, slotSize, slotSize, { type: 'skill', slot: i });
       if (skill && skill.currentCooldown > 0) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
         ctx.fillRect(slotX + 1, skillY + 1, slotSize - 2, slotSize - 2);
@@ -239,9 +271,15 @@ export class HUD {
       }
     }
 
-    const statLine = STAT_NAMES.map(stat => `${stat}:${stats[stat] || 0}`).join('  ');
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, rightPanelY + rightPanelH, this.canvasWidth, this.hudHeight);
+    ctx.rect(0, y, leftAreaW, rightPanelY + rightPanelH - y);
+    ctx.clip();
+
+    const statLine = STAT_NAMES.map(stat => `${stat}:${stats[stat] || 0}`).join(narrow ? ' ' : '  ');
     ctx.fillStyle = '#b6c2cd';
-    ctx.font = `${Math.round(11 * s)}px monospace`;
+    ctx.font = `${Math.round((narrow ? 10 : 11) * s)}px monospace`;
     ctx.fillText(statLine, Math.round(12 * s), y + Math.round(50 * s));
 
     // Active status effects
@@ -272,11 +310,41 @@ export class HUD {
       ctx.fillText(messages[i].text, Math.round(12 * s), messageStartY + i * messageLineH);
     }
 
-    ctx.fillStyle = '#7f8a94';
-    ctx.font = `${Math.round(11 * s)}px monospace`;
-    const line1 = 'Move: Arrows  Attack: WASD  Wait: Space/.  Pickup: G';
-    const line2 = 'Skills: Q/E/R  Belt: 1/2/3  Inventory: I/Tab  Stats: P  Map: M  Stairs: >';
-    ctx.fillText(line1, Math.round(12 * s), y + this.hudHeight - Math.round(28 * s));
-    ctx.fillText(line2, Math.round(12 * s), y + this.hudHeight - Math.round(10 * s));
+    ctx.restore();
+
+    // tappable command strip along the bottom edge (works with mouse and touch).
+    // wide screens also show each button's key and a one-line movement hint.
+    if (game) {
+      const btnH = Math.round(24 * s);
+      const btnY = y + this.hudHeight - btnH - Math.round(5 * s);
+      const buttons = [
+        ['Wait', 'Space', { type: 'wait' }],
+        ['Pick up', 'G', { type: 'pickup' }],
+        ['Stairs', '>', { type: 'descend' }],
+        ['Bag', 'I', { type: 'inventory' }],
+        ['Skills', 'K', { type: 'skillTree' }],
+        ['Map', 'M', { type: 'map' }],
+        ['Stats', 'P', { type: 'stats' }],
+        ['Menu', 'Esc', { type: 'close' }],
+      ];
+      const gap = Math.round(5 * s);
+      const avail = this.canvasWidth - Math.round(24 * s);
+      const btnW = Math.min(Math.round(96 * s), Math.floor((avail - gap * (buttons.length - 1)) / buttons.length));
+      const showKeys = btnW >= Math.round(80 * s);
+      let bx = Math.round(12 * s);
+      for (const [label, key, action] of buttons) {
+        drawButton(game, bx, btnY, btnW, btnH, showKeys ? `${label} ${key}` : label, action, { fontSize: Math.round((btnW < 50 ? 9 : 11) * s) });
+        bx += btnW + gap;
+      }
+      if (showKeys) {
+        ctx.fillStyle = '#7f8a94';
+        ctx.font = `${Math.round(10 * s)}px monospace`;
+        ctx.fillText('Move: Arrows / tap   Attack: WASD / tap enemy   Skills: Q E R F   Belt: 1 2 3', Math.round(12 * s), btnY - Math.round(5 * s));
+      }
+    } else {
+      ctx.fillStyle = '#7f8a94';
+      ctx.font = `${Math.round(11 * s)}px monospace`;
+      ctx.fillText('Move: Arrows  Attack: WASD  Wait: Space  Pickup: G  Skills: Q/E/R/F  Belt: 1/2/3', Math.round(12 * s), y + this.hudHeight - Math.round(10 * s));
+    }
   }
 }

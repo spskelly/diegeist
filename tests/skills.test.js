@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { updateActiveSkills, syncClassSkillCooldown, tickCooldowns, canUseSkill, useSkill } from '../src/skills.js';
+import { createTreeActiveSkills } from '../src/skill-tree.js';
 import { Entity } from '../src/entity.js';
 
 function makePlayer(playerClass = 'fighter') {
@@ -62,10 +63,11 @@ describe('updateActiveSkills', () => {
     const item = makeSkillItem('Cleave', 4);
     p.equipment.leftHand = item;
     updateActiveSkills(p);
-    expect(p.activeSkills).toHaveLength(3);
+    expect(p.activeSkills).toHaveLength(4);
     expect(p.activeSkills[0].name).toBe('Cleave');
     expect(p.activeSkills[1]).toBeNull();
     expect(p.activeSkills[2]).toBeNull();
+    expect(p.activeSkills[3]).toBeNull();
   });
 
   it('removes skills when gear is unequipped', () => {
@@ -76,7 +78,7 @@ describe('updateActiveSkills', () => {
     expect(p.activeSkills[0].name).toBe('Cleave');
     p.equipment.leftHand = null;
     updateActiveSkills(p);
-    expect(p.activeSkills).toHaveLength(3);
+    expect(p.activeSkills).toHaveLength(4);
     expect(p.activeSkills.every(s => s === null)).toBe(true);
   });
 
@@ -85,7 +87,7 @@ describe('updateActiveSkills', () => {
     p.equipment.leftHand = makeSkillItem('Cleave', 4);
     p.equipment.rightHand = { ...makeSkillItem('Shield Bash', 5), slot: 'rightHand', id: 'item_2' };
     updateActiveSkills(p);
-    expect(p.activeSkills).toHaveLength(3);
+    expect(p.activeSkills).toHaveLength(4);
     expect(p.activeSkills.filter(s => s !== null)).toHaveLength(2);
   });
 
@@ -93,7 +95,7 @@ describe('updateActiveSkills', () => {
     const p = makePlayer();
     p.equipment.head = { id: 'helm', slot: 'head', statBonuses: { CON: 2 }, skill: null };
     updateActiveSkills(p);
-    expect(p.activeSkills).toHaveLength(3);
+    expect(p.activeSkills).toHaveLength(4);
     expect(p.activeSkills.every(s => s === null)).toBe(true);
   });
 });
@@ -219,5 +221,43 @@ describe('class skills', () => {
     p.activeSkills[0].currentCooldown = 5;
     syncClassSkillCooldown(p);
     expect(p.classSkillCooldown).toBe(5);
+  });
+});
+
+describe('skill tree actives in the hotbar', () => {
+  it('fills empty slots after the class skill and gear skills', () => {
+    const p = makePlayer('archer');
+    p.equipment.leftHand = makeWeapon('ranged');
+    p.treeActiveSkills = createTreeActiveSkills('archer', { archer_disengage: 1, archer_deadeye: 1 });
+    updateActiveSkills(p);
+    expect(p.activeSkills[0].name).toBe('Quick Shot');
+    // tree actives follow tree order: marksmanship before survival
+    expect(p.activeSkills[1].name).toBe('Deadeye');
+    expect(p.activeSkills[1].skillType).toBe('tree');
+    expect(p.activeSkills[2].name).toBe('Disengage');
+    expect(p.activeSkills[3]).toBeNull();
+  });
+
+  it('keeps tree skill cooldowns across rebuilds and ticks them', () => {
+    const p = makePlayer('fighter');
+    p.treeActiveSkills = createTreeActiveSkills('fighter', { fighter_rush: 2 });
+    updateActiveSkills(p);
+    const rush = p.activeSkills[0];
+    expect(rush.treeEffect.distance).toBe(3);
+    useSkill(rush);
+    expect(rush.currentCooldown).toBe(8);
+    p.equipment.head = { id: 'h', slot: 'head', statBonuses: {}, skill: null };
+    updateActiveSkills(p);
+    expect(p.activeSkills[0]).toBe(rush);
+    tickCooldowns(p);
+    expect(rush.currentCooldown).toBe(7);
+  });
+
+  it('restores saved cooldowns and applies cooldown reduction', () => {
+    const skills = createTreeActiveSkills('mage', { mage_meteor: 1 }, { mage_meteor: 5 });
+    expect(skills[0].currentCooldown).toBe(5);
+    skills[0].currentCooldown = 0;
+    useSkill(skills[0], 4);
+    expect(skills[0].currentCooldown).toBe(21);
   });
 });

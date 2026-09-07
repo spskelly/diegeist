@@ -6,14 +6,15 @@ import { Renderer } from './renderer.js';
 import { MessageLog } from './message-log.js';
 import { createPlayer } from './player.js';
 import { computeFOV } from './fov.js';
-import { FOV_RADIUS } from './constants.js';
+import { FOV_RADIUS, SKILL_SLOT_COUNT, LOADOUT_SLOT_COUNT } from './constants.js';
 import { updateActiveSkills } from './skills.js';
 import { addToInventory, autoEquipIfSlotEmpty, assignToBelt } from './inventory.js';
 import { createStarterWeapon } from './items.js';
 import { persistSaveData } from './progression.js';
 import { createEmptyMaterials, scaleMaterials } from './resources.js';
-import { resolvePassiveEffects } from './skill-tree.js';
-import { cloneItem, clearCombatVfx, persistLastClassSelection, syncMilestoneAchievements } from './game-utils.js';
+import { resolvePassiveEffects, createTreeActiveSkills } from './skill-tree.js';
+import { cloneItem, clearCombatVfx, persistLastClassSelection, syncMilestoneAchievements, recalcPlayerMaxHp, rebuildPassiveEffects } from './game-utils.js';
+import { applyTownIncome, describeBlessing } from './town-buildings.js';
 
 function serializeItemSkill(skill) {
   if (!skill) return null;
@@ -37,7 +38,8 @@ export function serializeEntity(entity) {
     ),
     inventory: entity.inventory.map(i => ({ ...i, skill: serializeItemSkill(i.skill) })),
     belt: entity.belt.map(i => i ? { ...i } : null),
-    skillSlotBindings: [...(entity.skillSlotBindings || [null, null, null])],
+    skillSlotBindings: [...(entity.skillSlotBindings || new Array(SKILL_SLOT_COUNT).fill(null))],
+    treeSkillCooldowns: Object.fromEntries((entity.treeActiveSkills || []).map(s => [s.id, s.currentCooldown || 0])),
     activeBlessings: [...(entity.activeBlessings || [])],
     statusEffects: (entity.statusEffects || []).map(e => ({ ...e })),
     // Player-specific
@@ -56,6 +58,11 @@ export function serializeEntity(entity) {
     renderScale: entity.renderScale || null,
     auraColor: entity.auraColor || null,
     summonTemplate: entity.summonTemplate || null,
+    bossKey: entity.bossKey || null,
+    enrageStage: entity.enrageStage || 0,
+    bossTurnCounter: entity.bossTurnCounter || 0,
+    alerted: entity.alerted || false,
+    hidden: entity.hidden ?? null,
   };
 }
 
@@ -79,7 +86,9 @@ export function deserializeEntity(data) {
   }
   entity.inventory = (data.inventory || []).map(i => ({ ...i, skill: serializeItemSkill(i.skill) }));
   entity.belt = (data.belt || [null, null, null]).map(i => i ? { ...i } : null);
-  entity.skillSlotBindings = data.skillSlotBindings || [null, null, null];
+  entity.skillSlotBindings = data.skillSlotBindings || new Array(SKILL_SLOT_COUNT).fill(null);
+  while (entity.skillSlotBindings.length < SKILL_SLOT_COUNT) entity.skillSlotBindings.push(null);
+  entity.savedTreeCooldowns = data.treeSkillCooldowns || {};
   entity.activeBlessings = data.activeBlessings || [];
   entity.statusEffects = (data.statusEffects || []).map(e => ({ ...e }));
   if (data.playerClass) {
@@ -98,6 +107,11 @@ export function deserializeEntity(data) {
   if (data.renderScale) entity.renderScale = data.renderScale;
   if (data.auraColor) entity.auraColor = data.auraColor;
   if (data.summonTemplate) entity.summonTemplate = data.summonTemplate;
+  if (data.bossKey) entity.bossKey = data.bossKey;
+  if (data.enrageStage) entity.enrageStage = data.enrageStage;
+  if (data.bossTurnCounter) entity.bossTurnCounter = data.bossTurnCounter;
+  if (data.alerted) entity.alerted = true;
+  if (data.hidden !== null && data.hidden !== undefined) entity.hidden = data.hidden;
   return entity;
 }
 
@@ -118,6 +132,11 @@ export function saveRunState(game) {
     turnCount: game.turnCount,
     regenCounter: game.regenCounter,
     runSummary: { ...game.runSummary },
+    runMaterials: game.runMaterials ? { ...game.runMaterials } : createEmptyMaterials(),
+    currentRank: game.currentRank || 1,
+    deathSaveUsedThisFloor: game.deathSaveUsedThisFloor || false,
+    corpses: (game.corpses || []).slice(),
+    runBlessing: game.runBlessing || null,
     selectedClass: game.selectedClass,
     messageLog: game.messageLog.messages.slice(),
   };
@@ -167,6 +186,18 @@ export function loadRunState(game) {
   game.inventoryOpen = false;
   game.statsOpen = false;
   game.mapOpen = false;
+  // run-scoped state that older saves did not carry
+  game.runMaterials = { ...createEmptyMaterials(), ...(snapshot.runMaterials || {}) };
+  game.currentRank = snapshot.currentRank || 1;
+  game.treeRegenCounter = 0;
+  const investments = game.saveData?.skillInvestments?.[game.player.playerClass] || {};
+  game.runBlessing = snapshot.runBlessing || null;
+  rebuildPassiveEffects(game);
+  game.player.treeActiveSkills = createTreeActiveSkills(game.player.playerClass, investments, game.player.savedTreeCooldowns || {});
+  updateActiveSkills(game.player);
+  game.deathSaveUsedThisFloor = snapshot.deathSaveUsedThisFloor || false;
+  game.corpses = snapshot.corpses || [];
+  recalcPlayerMaxHp(game);
   clearCombatVfx(game);
 
   // Restore message log
@@ -177,13 +208,11 @@ export function loadRunState(game) {
   game.messageLog.add('Run resumed.', game.turnCount);
 
   // Rebuild visuals
-  game.resizeCanvas();
   game.camera = new Camera(game.canvas.width, game.canvas.height - game.hud.hudHeight, game.getCameraZoom());
   game.renderer = new Renderer(game.canvas, game.sprites, game.camera);
   computeFOV(game.map, game.player.position.x, game.player.position.y, FOV_RADIUS);
-  game.camera.centerOn(game.player.position.x, game.player.position.y, game.map.width, game.map.height);
-
   game.state = 'playing';
+  game.resizeCanvas();
   return true;
 }
 
@@ -209,9 +238,8 @@ export function startNewRun(game) {
   game.inventoryCursorByTab = { inventory: 0, equipment: 0 };
   game.deathSplashFrames = 0;
   game.postDeathMenuIndex = 0;
-  game.hubRunCarryover = [];
-  game.hubCanStashMultipleFromRun = false;
-  game.hubStashedFromRunCount = 0;
+  clearRunCarryover(game);
+  game.startRunConfirmPending = false;
   game.runSummary = {
     classKey: game.selectedClass,
     floorsReached: 1,
@@ -223,6 +251,7 @@ export function startNewRun(game) {
   game.currentRank = 1;
   game.treePassiveEffects = null;
   game.treeRegenCounter = 0;
+  game.runBlessing = null;
   game.startFloor();
   game.state = 'playing';
   if (game.audio) game.audio.uiClick();
@@ -243,6 +272,9 @@ export function finalizeRun(game, causeOfDeath) {
     game.committedMaterials = { ...mats };
     game.rawRunMaterials = { ...game.runMaterials };
   }
+  // town income arrives whenever a run ends, whatever the outcome
+  const income = applyTownIncome(game.saveData);
+  game.townIncomeNotice = income.lines.length ? `Town income: ${income.lines.join('  ')}` : '';
   game.saveData.addRunHistory({
     classKey: game.runSummary.classKey,
     floorsReached: game.runSummary.floorsReached,
@@ -266,20 +298,46 @@ export function applyStarterLoadout(game) {
 export function applyPendingHubLoadout(game) {
   if (!game.player || !game.saveData) return;
 
-  if (game.pendingStashLoadoutItem) {
-    const stashItem = cloneItem(game.pendingStashLoadoutItem);
-    stashItem.id = `stash_loadout_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-    if (addToInventory(game.player, stashItem)) {
-      if (stashItem.slot && autoEquipIfSlotEmpty(game.player, stashItem.id)) {
-        updateActiveSkills(game.player);
-        game.messageLog.add(`Stash loadout equipped: ${stashItem.name}.`, game.turnCount);
-      } else {
-        game.messageLog.add(`Stash loadout added: ${stashItem.name}.`, game.turnCount);
-      }
+  // queued stash items ride along; anything with a free slot is worn right away
+  const loadout = Array.isArray(game.saveData.pendingLoadout) ? game.saveData.pendingLoadout.splice(0) : [];
+  for (let i = 0; i < loadout.length; i++) {
+    const stashItem = cloneItem(loadout[i]);
+    stashItem.id = `stash_loadout_${Date.now()}_${i}_${Math.floor(Math.random() * 1e6)}`;
+    if (!addToInventory(game.player, stashItem)) {
+      game.messageLog.add(`No room for ${stashItem.name}; it stays in the stash.`, game.turnCount);
+      game.saveData.addToStash(loadout[i]);
+      continue;
     }
-    game.pendingStashLoadoutItem = null;
-    game.saveData.pendingLoadoutItem = null;
+    if (stashItem.slot && autoEquipIfSlotEmpty(game.player, stashItem.id)) {
+      updateActiveSkills(game.player);
+      recalcPlayerMaxHp(game);
+      game.messageLog.add(`Stash loadout equipped: ${stashItem.name}.`, game.turnCount);
+    } else {
+      game.messageLog.add(`Stash loadout added: ${stashItem.name}.`, game.turnCount);
+    }
   }
+
+  // apothecary brews go into the bag (and belt) at the start of the run
+  const brewed = Array.isArray(game.saveData.brewedPotions) ? game.saveData.brewedPotions.splice(0) : [];
+  let brewedCount = 0;
+  for (const potion of brewed) {
+    const copy = { ...potion, id: `brew_${Date.now()}_${Math.floor(Math.random() * 1e6)}` };
+    if (!addToInventory(game.player, copy)) break;
+    brewedCount++;
+    if (game.player.inventory.some(i => i.id === copy.id)) {
+      const freeBeltSlot = game.player.belt.findIndex(s => s === null);
+      if (freeBeltSlot !== -1) assignToBelt(game.player, copy.id, freeBeltSlot);
+    }
+  }
+  if (brewedCount > 0) game.messageLog.add(`Apothecary: ${brewedCount} brewed potion${brewedCount === 1 ? '' : 's'} packed.`, game.turnCount, '#7ad1d1');
+
+  // shrine blessing lasts the whole run and is consumed now
+  if (game.saveData.preRunBlessing) {
+    game.runBlessing = game.saveData.preRunBlessing;
+    game.saveData.preRunBlessing = null;
+    game.messageLog.add(`Shrine blessing: ${describeBlessing(game.runBlessing)}.`, game.turnCount, '#c0a0e0');
+  }
+  if (brewedCount > 0 || game.runBlessing) persistSaveData(game.saveData);
 
   if (!Array.isArray(game.saveData.pendingRunPurchases) || game.saveData.pendingRunPurchases.length === 0) return;
 
@@ -291,6 +349,7 @@ export function applyPendingHubLoadout(game) {
       if (!addToInventory(game.player, sword)) continue;
       if (autoEquipIfSlotEmpty(game.player, sword.id)) {
         updateActiveSkills(game.player);
+        recalcPlayerMaxHp(game);
       }
       game.messageLog.add('Shop bonus applied: Common Sword.', game.turnCount);
     } else if (purchaseId === 'starting_potions') {
@@ -339,4 +398,131 @@ export function makeMinorHealthPotion() {
     sprite: 'consumable',
     stackable: true,
   };
+}
+
+
+// --- Run item carryover and loadout ---
+
+function syncRunCarryover(game) {
+  if (!game.saveData) return;
+  game.saveData.runCarryover = game.hubRunCarryover.length > 0
+    ? { items: game.hubRunCarryover, victory: !!game.hubCanStashMultipleFromRun, stashedCount: game.hubStashedFromRunCount || 0 }
+    : null;
+}
+
+export function persistRunCarryover(game) {
+  syncRunCarryover(game);
+  if (game.saveData) persistSaveData(game.saveData);
+}
+
+export function clearRunCarryover(game) {
+  game.hubRunCarryover = [];
+  game.hubCanStashMultipleFromRun = false;
+  game.hubStashedFromRunCount = 0;
+  game.hubRunItemsCursor = 0;
+  if (game.saveData) game.saveData.runCarryover = null;
+}
+
+// bring back the run items that were still waiting in the hub when the app closed
+export function restoreRunCarryover(game) {
+  const saved = game.saveData?.runCarryover;
+  if (!saved || !Array.isArray(saved.items) || saved.items.length === 0) {
+    clearRunCarryover(game);
+    return;
+  }
+  game.hubRunCarryover = saved.items.map(cloneItem);
+  game.hubCanStashMultipleFromRun = !!saved.victory;
+  game.hubStashedFromRunCount = saved.stashedCount || 0;
+  game.hubRunItemsCursor = 0;
+}
+
+// collect a finished run's gear for the hub. after a victory everything the
+// player was wearing goes straight into the stash (as far as it fits); bag
+// items and everything after a death wait in the run pane to be chosen
+export function captureRunItemsForHub(game, victory = false) {
+  const sourceItems = [];
+  let autoStashed = 0;
+  if (game.player) {
+    for (const item of game.player.inventory) {
+      if (item.type === 'consumable') continue;
+      sourceItems.push(cloneItem(item));
+    }
+    for (const item of Object.values(game.player.equipment)) {
+      if (!item) continue;
+      if (victory && game.saveData && game.saveData.addToStash(cloneItem(item))) {
+        autoStashed++;
+        continue;
+      }
+      sourceItems.push(cloneItem(item));
+    }
+  }
+  game.hubRunCarryover = sourceItems;
+  game.hubCanStashMultipleFromRun = !!victory;
+  game.hubStashedFromRunCount = 0;
+  game.hubRunItemsCursor = 0;
+  game.victoryNotice = '';
+  if (victory) {
+    const parts = [];
+    if (autoStashed > 0) parts.push(`${autoStashed} equipped item${autoStashed === 1 ? '' : 's'} moved to your stash.`);
+    if (sourceItems.length > 0) parts.push(`${sourceItems.length} bag item${sourceItems.length === 1 ? '' : 's'} waiting in Stash > Run Items.`);
+    game.victoryNotice = parts.join(' ') || 'Victory rewards available in stash.';
+  }
+  persistRunCarryover(game);
+  return { autoStashed, carried: sourceItems.length };
+}
+
+// starting a run throws away whatever is still in the run pane, so the first
+// press only warns; the next press goes through
+export function requestStartRun(game) {
+  const waiting = game.hubRunCarryover ? game.hubRunCarryover.length : 0;
+  if (waiting > 0 && !game.startRunConfirmPending) {
+    game.startRunConfirmPending = true;
+    game.hubNotice = `${waiting} run item${waiting === 1 ? '' : 's'} not stashed will be lost. Confirm again to start.`;
+    if (game.audio) game.audio.uiClick();
+    return false;
+  }
+  game.startRunConfirmPending = false;
+  game.startNewRun();
+  return true;
+}
+
+// queue a stash item for the next run. one item per equipment slot: queueing
+// a second helmet sends the first one back to the stash
+export function queueLoadoutItem(game, stashIndex) {
+  const save = game.saveData;
+  if (!save || !save.stash || stashIndex < 0 || stashIndex >= save.stash.length) return null;
+  if (!Array.isArray(save.pendingLoadout)) save.pendingLoadout = [];
+  const item = save.stash[stashIndex];
+  const sameSlot = item.slot ? save.pendingLoadout.findIndex(q => q.slot === item.slot) : -1;
+  if (sameSlot === -1 && save.pendingLoadout.length >= LOADOUT_SLOT_COUNT) {
+    game.hubNotice = `Loadout is full (${LOADOUT_SLOT_COUNT} items). Unqueue something first.`;
+    return null;
+  }
+  save.removeFromStash(item.id);
+  let swapped = null;
+  if (sameSlot !== -1) {
+    swapped = save.pendingLoadout.splice(sameSlot, 1)[0];
+    save.addToStash(swapped);
+  }
+  save.pendingLoadout.push(item);
+  game.hubNotice = swapped
+    ? `Queued ${item.name} for next run (replaces ${swapped.name}).`
+    : `Queued ${item.name} for next run.`;
+  persistSaveData(save);
+  return item;
+}
+
+export function unqueueLoadoutItem(game, loadoutIndex) {
+  const save = game.saveData;
+  if (!save || !Array.isArray(save.pendingLoadout)) return null;
+  if (loadoutIndex < 0 || loadoutIndex >= save.pendingLoadout.length) return null;
+  const item = save.pendingLoadout[loadoutIndex];
+  if (!save.addToStash(item)) {
+    game.hubNotice = 'Stash is full.';
+    return null;
+  }
+  save.pendingLoadout.splice(loadoutIndex, 1);
+  game.hubNotice = `Returned ${item.name} to stash.`;
+  persistSaveData(save);
+  return item;
 }

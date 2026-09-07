@@ -3,6 +3,19 @@ export const ENERGY_THRESHOLD = 100;
 export const BASE_SPEED = 100;
 export const FOV_RADIUS = 8;
 export const SOFT_GATE_MULTIPLIER = 0.65;
+// damage numbers are scaled so that a level 1 hit lands in the 8-20 range and
+// percentage mitigation, crits and gear bonuses are visible in the result
+export const PLAYER_BASE_ATTACK = 10;
+export const ENEMY_BASE_ATTACK = 8;
+// max hp = (class base hp + con * HP_PER_CON) * (1 + HP_GROWTH_PER_LEVEL * (level - 1))
+export const HP_PER_CON = 2;
+export const HP_GROWTH_PER_LEVEL = 0.08;
+// natural and passive regeneration heal this fraction of max hp per tick
+export const REGEN_FRACTION = 0.02;
+// q/e/r/f skill hotbar
+// how many stash items can be queued as the loadout for the next run
+export const LOADOUT_SLOT_COUNT = 3;
+export const SKILL_SLOT_COUNT = 4;
 export const STAT_NAMES = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'LCK'];
 
 export const RARITY = {
@@ -24,9 +37,9 @@ export const STAT_DESCRIPTIONS = {
 };
 
 export const PLAYER_CLASSES = {
-  fighter: { name: 'Fighter', description: 'Tough melee brawler. High STR and CON.', affinity: 'STR, CON — full melee and health scaling', baseStats: { STR: 8, DEX: 5, CON: 7, INT: 2, WIS: 3, LCK: 5 }, baseHp: 15, affinityStats: ['STR', 'CON'] },
-  archer: { name: 'Archer', description: 'Agile ranged striker. High DEX and LCK.', affinity: 'DEX, LCK — full ranged and crit scaling', baseStats: { STR: 4, DEX: 8, CON: 5, INT: 3, WIS: 4, LCK: 6 }, baseHp: 10, affinityStats: ['DEX', 'LCK'] },
-  mage: { name: 'Mage', description: 'Powerful spellcaster. High INT and WIS.', affinity: 'INT, WIS — full magic and resist scaling', baseStats: { STR: 3, DEX: 4, CON: 4, INT: 8, WIS: 7, LCK: 4 }, baseHp: 10, affinityStats: ['INT', 'WIS'] },
+  fighter: { name: 'Fighter', description: 'Tough melee brawler. High STR and CON.', affinity: 'STR, CON — full melee and health scaling', baseStats: { STR: 8, DEX: 5, CON: 7, INT: 2, WIS: 3, LCK: 5 }, baseHp: 50, affinityStats: ['STR', 'CON'] },
+  archer: { name: 'Archer', description: 'Agile ranged striker. High DEX and LCK.', affinity: 'DEX, LCK — full ranged and crit scaling', baseStats: { STR: 4, DEX: 8, CON: 5, INT: 3, WIS: 4, LCK: 6 }, baseHp: 36, affinityStats: ['DEX', 'LCK'] },
+  mage: { name: 'Mage', description: 'Powerful spellcaster. High INT and WIS.', affinity: 'INT, WIS — full magic and resist scaling', baseStats: { STR: 3, DEX: 4, CON: 4, INT: 8, WIS: 7, LCK: 4 }, baseHp: 34, affinityStats: ['INT', 'WIS'] },
 };
 
 export const CLASS_SKILLS = {
@@ -36,7 +49,7 @@ export const CLASS_SKILLS = {
     cooldown: 0,
     range: 6,
     area: { type: 'single', size: 1 },
-    damage: 3,
+    damage: 10,
     statScaling: 'DEX',
     requiredAttackType: 'ranged',
   },
@@ -46,7 +59,7 @@ export const CLASS_SKILLS = {
     cooldown: 0,
     range: 6,
     area: { type: 'single', size: 1 },
-    damage: 3,
+    damage: 10,
     statScaling: 'INT',
     requiredAttackType: 'magic',
   },
@@ -137,6 +150,7 @@ export const BIOME_THEMES = {
       rock:     { primary: '#6a6a6a', secondary: '#5a5a5a', highlight: '#7a7a7a' },
       hill:     { primary: '#5a7a30', secondary: '#4a6a28', contour: '#6a8a3a' },
       shelter:  { walls: '#7a5a3a', roof: '#5a3a1a', door: '#8a6a4a' },
+      building: { walls: '#6a6a72', roof: '#44444c', door: '#8a7a5a' },
     },
   },
 };
@@ -148,7 +162,7 @@ export const TILE = {
   WALL: 0, FLOOR: 1, CORRIDOR: 2, DOOR: 3, STAIRS_DOWN: 4, WATER: 5, TRAP: 6, DOOR_OPEN: 7,
   // Town tiles (100+ range)
   GRASS: 100, TOWN_PATH: 101, TOWN_WATER: 102, TOWN_ROCK: 103, TOWN_HILL: 104,
-  SHELTER: 105, SHELTER_ENTRANCE: 106,
+  SHELTER: 105, SHELTER_ENTRANCE: 106, BUILDING: 107, BUILDING_ENTRANCE: 108,
   properties: {
     0: { name: 'Wall', walkable: false, blocksLOS: true },
     1: { name: 'Floor', walkable: true, blocksLOS: false },
@@ -165,5 +179,7 @@ export const TILE = {
     104: { name: 'Hill', walkable: true, blocksLOS: false },
     105: { name: 'Shelter', walkable: false, blocksLOS: true },
     106: { name: 'Shelter Entrance', walkable: true, blocksLOS: false },
+    107: { name: 'Building', walkable: false, blocksLOS: true },
+    108: { name: 'Building Entrance', walkable: true, blocksLOS: false },
   },
 };

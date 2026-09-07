@@ -20,6 +20,7 @@ const BASE_QTY_MIN = 1;
 const BASE_QTY_MAX = 2;
 const QTY_RANK_SCALE = 0.35;
 const SECONDARY_CHANCE = 0.15;  // at rank 3+
+const SECONDARY_CHANCE_LOW = 0.10; // ranks 1-2: a trickle so early buildings are reachable
 const TERTIARY_CHANCE = 0.08;   // at rank 5+
 
 export function createEmptyMaterials() {
@@ -55,9 +56,9 @@ export function rollMaterialDrop(biome, rank = 1, opts = {}) {
       type = biomeMats.tertiary;
     }
   }
-  if (rank >= 3 && type === biomeMats.primary) {
+  if (type === biomeMats.primary) {
     const secondaryRoll = opts.forceSecondaryRoll ?? Math.random();
-    if (secondaryRoll < SECONDARY_CHANCE) {
+    if (secondaryRoll < (rank >= 3 ? SECONDARY_CHANCE : SECONDARY_CHANCE_LOW)) {
       type = biomeMats.secondary;
     }
   }

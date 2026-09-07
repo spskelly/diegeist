@@ -38,13 +38,22 @@ export class SaveData {
     this.permanentPerks = [];
     this.runHistory = [];
     this.settings = { sfxVolume: 0.7, ambientVolume: 0.7 };
-    this.pendingLoadoutItem = null;
+    // stash items queued for the next run (up to LOADOUT_SLOT_COUNT)
+    this.pendingLoadout = [];
+    // items from the last run that have not been stashed yet, so a reload
+    // between runs does not throw them away: { items, victory, stashedCount }
+    this.runCarryover = null;
     this.materials = { timber: 0, stone: 0, iron: 0, crystal: 0, aether: 0 };
     this.classXP = { fighter: 0, archer: 0, mage: 0 };
     this.classLevels = { fighter: 1, archer: 1, mage: 1 };
     this.skillPoints = { fighter: 0, archer: 0, mage: 0 };
     this.skillInvestments = { fighter: {}, archer: {}, mage: {} };
     this.townPlayerPos = null;
+    // town: placed buildings, found blueprints, and what is queued for the next run
+    this.buildings = [];
+    this.blueprints = [];
+    this.brewedPotions = [];
+    this.preRunBlessing = null;
   }
 
   addCurrency(amount) {
@@ -124,13 +133,18 @@ export class SaveData {
       permanentPerks: this.permanentPerks,
       runHistory: this.runHistory,
       settings: this.settings,
-      pendingLoadoutItem: this.pendingLoadoutItem,
+      pendingLoadout: this.pendingLoadout,
+      runCarryover: this.runCarryover,
       materials: this.materials,
       classXP: this.classXP,
       classLevels: this.classLevels,
       skillPoints: this.skillPoints,
       skillInvestments: this.skillInvestments,
       townPlayerPos: this.townPlayerPos,
+      buildings: this.buildings,
+      blueprints: this.blueprints,
+      brewedPotions: this.brewedPotions,
+      preRunBlessing: this.preRunBlessing,
     });
   }
 
@@ -146,6 +160,17 @@ export class SaveData {
     if (!save.skillPoints) save.skillPoints = { fighter: 0, archer: 0, mage: 0 };
     if (!save.skillInvestments) save.skillInvestments = { fighter: {}, archer: {}, mage: {} };
     if (!save.townPlayerPos) save.townPlayerPos = null;
+    if (!Array.isArray(save.pendingLoadout)) save.pendingLoadout = [];
+    // older saves queued a single item under pendingLoadoutItem
+    if (save.pendingLoadoutItem) {
+      save.pendingLoadout.push(save.pendingLoadoutItem);
+    }
+    delete save.pendingLoadoutItem;
+    if (!save.runCarryover || !Array.isArray(save.runCarryover.items)) save.runCarryover = null;
+    if (!Array.isArray(save.buildings)) save.buildings = [];
+    if (!Array.isArray(save.blueprints)) save.blueprints = [];
+    if (!Array.isArray(save.brewedPotions)) save.brewedPotions = [];
+    if (!save.preRunBlessing) save.preRunBlessing = null;
     return save;
   }
 }

@@ -7,17 +7,23 @@ import { InputHandler } from './input.js';
 import { SpriteRegistry } from './sprites.js';
 import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
-import { tickCooldowns } from './skills.js';
+import { tickCooldowns, updateActiveSkills } from './skills.js';
 import { HubShop, loadSaveData, persistSaveData, ACHIEVEMENTS } from './progression.js';
 import { AudioManager, BIOME_KEYS } from './audio.js';
-import { resolvePassiveEffects, canInvestSkill, investSkill } from './skill-tree.js';
+import { resolvePassiveEffects, canInvestSkill, investSkill, createTreeActiveSkills } from './skill-tree.js';
+import { clearRegions, findRegion, registerRegion, drawButton } from './ui.js';
+import { findPath } from './pathfinding.js';
 
 // game-utils.js — shared helpers
 import {
   isDirectionalAction,
   cloneItem,
   getEntityStatsWithEquipment,
+  getPlayerAttackType,
   getNaturalRegenInterval,
+  getRegenAmount,
+  recalcPlayerMaxHp,
+  rebuildPassiveEffects,
   addFloatingText,
   updateCombatVfx,
   syncMilestoneAchievements,
@@ -26,6 +32,7 @@ import {
   getSkillTreeNodes,
   getItemSellValue,
   getStashPaneItems,
+  getLoadoutCount,
 } from './game-utils.js';
 
 // game-save.js — save/load & run lifecycle
@@ -35,6 +42,13 @@ import {
   hasSavedRun,
   startNewRun,
   finalizeRun,
+  captureRunItemsForHub,
+  restoreRunCarryover,
+  persistRunCarryover,
+  clearRunCarryover,
+  requestStartRun,
+  queueLoadoutItem,
+  unqueueLoadoutItem,
 } from './game-save.js';
 
 // game-actions.js — player/enemy action processing
@@ -48,7 +62,13 @@ import {
 import { startFloor, handleFloorTransition } from './game-floor.js';
 
 // town.js — town map & spawn
-import { buildTownMap, getTownSpawnPos } from './town.js';
+import { buildTownMap, getTownSpawnPos, SHELTER_ENTRANCE_POS } from './town.js';
+import {
+  BUILDINGS, BUILDING_ORDER, BUILDING_SIZE, getBuildingDef, hasBlueprint, getBuildingByType,
+  canPlaceBuilding, placeBuilding, findBuildingAt, getEntrance, getBuildingMenu, getTownLevel,
+  canAffordCost, getBuildCost, formatCost,
+} from './town-buildings.js';
+import { MATERIAL_COLORS, MATERIALS } from './resources.js';
 
 // game-screens.js — all draw functions
 import {
@@ -68,8 +88,15 @@ import {
   drawStatsOverlay,
   drawMapOverlay,
   drawCombatVfx,
+  drawBuildMenu,
+  drawBuildingMenu,
 } from './game-screens.js';
 import { getXPForNextLevel, XP_TABLE } from './skill-tree.js';
+
+// height of the status bars drawn above and below the town view
+export const TOWN_BAR_HEIGHT = 30;
+// milliseconds between automatic steps when travelling to a tapped tile
+export const TRAVEL_STEP_MS = 70;
 
 export class Game {
   constructor(canvas) {
@@ -117,7 +144,9 @@ export class Game {
     this.hubRunCarryover = [];
     this.hubCanStashMultipleFromRun = false;
     this.hubStashedFromRunCount = 0;
-    this.pendingStashLoadoutItem = null;
+    // set while the hub waits for a second confirm before discarding run items
+    this.startRunConfirmPending = false;
+    this.victoryNotice = '';
     this.hubShop = new HubShop();
     this.pauseMenuIndex = 0;
     this.settingsMenuIndex = 0;
@@ -125,16 +154,29 @@ export class Game {
     this._currentAmbientBiome = null;
     this._settingsSavedAmbientBiome = null;
     this.skillTreeReturnState = 'pauseMenu';
-    this.combatVfx = { floatingTexts: [], projectiles: [] };
+    this.combatVfx = { floatingTexts: [], projectiles: [], swings: [] };
     this.townMap = null;
     this.townPlayerPos = null;
     this.townMoveTimer = 0;
     this.townInteractPrompt = false;
+    // tap targets registered by the draw functions each frame
+    this.ui = { regions: [] };
+    // tap-to-travel state for the dungeon and the town
+    this.travel = null;
+    this.townTravel = null;
+    // town building: build menu cursor, placement ghost, the building being used
+    this.buildMenuIndex = 0;
+    this.placement = null;
+    this.activeBuilding = null;
+    this.buildingCursor = 0;
+    this.forgeItemIndex = null;
+    this.buildingNotice = '';
+    this.townInteractBuilding = null;
   }
 
   init() {
     this.saveData = loadSaveData();
-    this.pendingStashLoadoutItem = this.saveData.pendingLoadoutItem || null;
+    restoreRunCarryover(this);
     if (this.saveData?.settings?.lastClass && this.classOrder.includes(this.saveData.settings.lastClass)) {
       this.selectedClass = this.saveData.settings.lastClass;
     }
@@ -163,6 +205,9 @@ export class Game {
     this.camera = new Camera(this.canvas.width, this.canvas.height - this.hud.hudHeight, this.getCameraZoom());
     this.renderer = new Renderer(this.canvas, this.sprites, this.camera);
     this.input.start();
+    this.input.attachPointer(this.canvas);
+    // browsers keep audio suspended until the first user gesture
+    this.input.onInput = () => { if (this.audio) this.audio.ensureContext(); };
 
     window.addEventListener('resize', () => {
       this.resizeCanvas();
@@ -180,23 +225,32 @@ export class Game {
     this.canvas.width = window.innerWidth;
     this.canvas.height = window.innerHeight;
     if (this.hud) this.hud.resize(this.canvas.width, this.canvas.height);
-    if (this.camera) {
-      this.camera.setZoom(this.getCameraZoom());
-      this.camera.resize(this.canvas.width, this.canvas.height - (this.hud?.hudHeight || 80));
-      if (this.map && this.player) {
-        this.camera.centerOn(this.player.position.x, this.player.position.y, this.map.width, this.map.height);
-      } else if (this.townMap && this.townPlayerPos) {
-        this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
-      }
+    this.syncCameraViewport();
+  }
+
+  // the town has no bottom hud, only two thin bars, so the camera gets a taller
+  // viewport there than in the dungeon. called whenever the mode or canvas changes.
+  syncCameraViewport() {
+    if (!this.camera) return;
+    this.camera.setZoom(this.getCameraZoom());
+    const inTown = ['town', 'townBuild', 'townPlace', 'building'].includes(this.state) || (!this.map && this.townMap);
+    const reserved = inTown ? TOWN_BAR_HEIGHT * 2 : (this.hud?.hudHeight || 80);
+    this.camera.resize(this.canvas.width, Math.max(1, this.canvas.height - reserved));
+    // the town bars sit at the top and bottom, so shift the viewport down past the top bar
+    this.camera.offsetY += inTown ? TOWN_BAR_HEIGHT : 0;
+    if (this.map && this.player) {
+      this.camera.centerOn(this.player.position.x, this.player.position.y, this.map.width, this.map.height);
+    } else if (this.townMap && this.townPlayerPos) {
+      this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
     }
   }
 
   getCameraZoom() {
     const usableHeight = this.canvas.height - (this.hud?.hudHeight || 80);
     const minDimension = Math.min(this.canvas.width, usableHeight);
-    if (minDimension >= 900) return 3;
-    if (minDimension >= 600) return 2;
-    return 1;
+    if (minDimension >= 800) return 3;
+    if (minDimension >= 500) return 2;
+    return 1.5;
   }
 
   getNowMs() {
@@ -213,6 +267,7 @@ export class Game {
 
   enterHubMenu(notice = '') {
     this.state = 'hubMenu';
+    this.startRunConfirmPending = false;
     this.player = null;
     this.map = null;
     this.hubMenuIndex = 0;
@@ -232,36 +287,27 @@ export class Game {
 
   enterTown(notice = '') {
     this.state = 'town';
+    this.startRunConfirmPending = false;
     this.player = null;
     this.map = null;
-    this.townMap = buildTownMap();
+    this.townMap = buildTownMap(this.saveData);
     this.townPlayerPos = getTownSpawnPos(this.saveData);
+    // never resume inside a building footprint (a building may have been placed since)
+    if (!TILE.properties[this.townMap.getTile(this.townPlayerPos.x, this.townPlayerPos.y)]?.walkable) {
+      this.townPlayerPos = getTownSpawnPos(null);
+    }
     this.townMoveTimer = 0;
     this.townInteractPrompt = false;
     this.sprites.setTown(BIOME_THEMES.town.palette);
-    this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
+    this.syncCameraViewport();
     if (this.audio) this.audio.startAmbientBiome('town');
     this._currentAmbientBiome = 'town';
     if (notice) this.hubNotice = notice;
+    else if (this.townIncomeNotice) { this.hubNotice = this.townIncomeNotice; this.townIncomeNotice = ''; }
     this.refreshHubShop();
   }
 
-  captureRunItemsForHub(victory = false) {
-    const sourceItems = [];
-    if (this.player) {
-      for (const item of this.player.inventory) {
-        if (item.type === 'consumable') continue;
-        sourceItems.push(cloneItem(item));
-      }
-      for (const item of Object.values(this.player.equipment)) {
-        if (item) sourceItems.push(cloneItem(item));
-      }
-    }
-    this.hubRunCarryover = sourceItems;
-    this.hubCanStashMultipleFromRun = !!victory;
-    this.hubStashedFromRunCount = 0;
-    this.hubRunItemsCursor = 0;
-  }
+  captureRunItemsForHub(victory = false) { return captureRunItemsForHub(this, victory); }
 
   // --- Overlay toggles ---
 
@@ -292,6 +338,14 @@ export class Game {
     if (this.audio) this.audio.uiClick();
   }
 
+  openSkillTree(returnState) {
+    this.skillTreeCursor = 0;
+    this.skillTreeScrollOffset = 0;
+    this.skillTreeReturnState = returnState;
+    this.state = 'skillTree';
+    if (this.audio) this.audio.uiClick();
+  }
+
   // --- Natural regen ---
 
   applyNaturalRegen() {
@@ -300,9 +354,10 @@ export class Game {
     const interval = getNaturalRegenInterval(this.player);
     if (this.regenCounter < interval) return;
     this.regenCounter = 0;
-    this.player.heal(1);
-    addFloatingText(this, this.player.position.x, this.player.position.y, '+1 HP', '#73e38e', 780);
-    this.messageLog.add('You recover 1 HP naturally.', this.turnCount);
+    const amount = getRegenAmount(this.player);
+    this.player.heal(amount);
+    addFloatingText(this, this.player.position.x, this.player.position.y, `+${amount} HP`, '#73e38e', 780);
+    this.messageLog.add(`You recover ${amount} HP naturally.`, this.turnCount);
   }
 
   // --- Delegated methods (thin wrappers around extracted modules) ---
@@ -318,6 +373,12 @@ export class Game {
   handleTownUpdate(action) {
     const currentTile = this.townMap.getTile(this.townPlayerPos.x, this.townPlayerPos.y);
     this.townInteractPrompt = (currentTile === TILE.SHELTER_ENTRANCE);
+    this.townInteractBuilding = currentTile === TILE.BUILDING_ENTRANCE
+      ? findBuildingAt(this.saveData.buildings, this.townPlayerPos.x, this.townPlayerPos.y)
+      : null;
+
+    if (action && action.type !== 'townTravel') this.townTravel = null;
+    if (action && action.type === 'townTravel') action = null;
 
     if (action) {
       if ((action.type === 'inventoryConfirm' || action.type === 'wait') && this.townInteractPrompt) {
@@ -326,24 +387,40 @@ export class Game {
         this.enterHubMenu();
         return;
       }
+      if ((action.type === 'inventoryConfirm' || action.type === 'wait') && this.townInteractBuilding) {
+        this.openBuilding(this.townInteractBuilding);
+        return;
+      }
+      if (action.type === 'build') {
+        this.openBuildMenu();
+        return;
+      }
       if (action.type === 'close') {
         this.state = 'startMenu';
         if (this.audio) this.audio.uiClick();
         return;
       }
-      if (action.type === 'stats') {
-        this.skillTreeCursor = 0;
-        this.skillTreeScrollOffset = 0;
-        this.skillTreeReturnState = 'town';
-        this.state = 'skillTree';
-        if (this.audio) this.audio.uiClick();
+      if (action.type === 'stats' || action.type === 'skillTree') {
+        this.openSkillTree('town');
         return;
       }
     }
 
     const now = this.getNowMs();
     if (now - this.townMoveTimer >= TOWN_MOVE_DELAY) {
-      const dir = this.input.getHeldDirection();
+      let dir = this.input.getHeldDirection();
+      if (dir) this.townTravel = null;
+      else if (this.townTravel) {
+        const next = this.townTravel.path.shift();
+        if (next) {
+          dir = { dx: next.x - this.townPlayerPos.x, dy: next.y - this.townPlayerPos.y };
+        }
+        if (this.townTravel.path.length === 0) {
+          const enter = this.townTravel.enterOnArrive;
+          this.townTravel = null;
+          if (enter) this.townTravel = { path: [], enterPending: true };
+        }
+      }
       if (dir) {
         const nx = this.townPlayerPos.x + dir.dx;
         const ny = this.townPlayerPos.y + dir.dy;
@@ -358,7 +435,352 @@ export class Game {
           }
         }
       }
+      // a tap on the shelter or a building walks to the door and steps inside
+      if (this.townTravel?.enterPending) {
+        this.townTravel = null;
+        const tile = this.townMap.getTile(this.townPlayerPos.x, this.townPlayerPos.y);
+        if (tile === TILE.SHELTER_ENTRANCE) {
+          this.saveData.townPlayerPos = { ...this.townPlayerPos };
+          persistSaveData(this.saveData);
+          this.enterHubMenu();
+        } else if (tile === TILE.BUILDING_ENTRANCE) {
+          const b = findBuildingAt(this.saveData.buildings, this.townPlayerPos.x, this.townPlayerPos.y);
+          if (b) this.openBuilding(b);
+        }
+      }
     }
+  }
+
+  // --- town building ---
+
+  openBuildMenu() {
+    this.state = 'townBuild';
+    this.buildMenuIndex = Math.max(0, Math.min(this.buildMenuIndex, BUILDING_ORDER.length - 1));
+    this.buildingNotice = '';
+    if (this.audio) this.audio.uiClick();
+  }
+
+  // whether a build-menu row can start placement right now
+  getBuildOption(type) {
+    const def = getBuildingDef(type);
+    const built = getBuildingByType(this.saveData, type);
+    const blueprint = hasBlueprint(this.saveData, type);
+    const cost = getBuildCost(type, 1);
+    const affordable = canAffordCost(this.saveData, cost);
+    let status = '';
+    if (built) status = `Built (level ${built.level})`;
+    else if (!blueprint) status = 'Blueprint needed';
+    else if (!affordable) status = 'Not enough materials';
+    return { def, built, blueprint, cost, affordable, placeable: !built && blueprint && affordable, status };
+  }
+
+  handleTownBuildAction(action) {
+    if (!action) return;
+    if (action.type === 'close' || action.type === 'build') {
+      this.state = 'town';
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+    if (isDirectionalAction(action)) {
+      const delta = action.dy !== 0 ? action.dy : action.dx;
+      if (delta !== 0) {
+        this.buildMenuIndex = (this.buildMenuIndex + delta + BUILDING_ORDER.length) % BUILDING_ORDER.length;
+        if (this.audio) this.audio.uiClick();
+      }
+      return;
+    }
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      const type = BUILDING_ORDER[this.buildMenuIndex];
+      const opt = this.getBuildOption(type);
+      if (!opt.placeable) {
+        this.buildingNotice = opt.status;
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      this.startPlacement(type);
+    }
+  }
+
+  startPlacement(type) {
+    // the ghost starts on the nearest valid spot around the player, so
+    // confirming immediately usually works; it can still be moved from there
+    const px = this.townPlayerPos.x;
+    const py = this.townPlayerPos.y;
+    let best = null;
+    for (let r = 1; r <= 8 && !best; r++) {
+      for (let dy = -r; dy <= r && !best; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const x = px + dx;
+          const y = py + dy;
+          if (canPlaceBuilding(this.townMap, x, y, this.saveData.buildings, this.townPlayerPos).ok) { best = { x, y }; break; }
+        }
+      }
+    }
+    this.placement = {
+      type,
+      x: best ? best.x : Math.max(1, Math.min(this.townMap.width - 1 - BUILDING_SIZE, px + 1)),
+      y: best ? best.y : Math.max(1, Math.min(this.townMap.height - 2 - BUILDING_SIZE, py - BUILDING_SIZE - 1)),
+    };
+    this.camera.centerOn(this.placement.x, this.placement.y, this.townMap.width, this.townMap.height);
+    this.state = 'townPlace';
+    this.buildingNotice = '';
+    if (this.audio) this.audio.uiClick();
+  }
+
+  movePlacement(dx, dy) {
+    if (!this.placement) return;
+    this.placement.x = Math.max(1, Math.min(this.townMap.width - 1 - BUILDING_SIZE, this.placement.x + dx));
+    this.placement.y = Math.max(1, Math.min(this.townMap.height - 2 - BUILDING_SIZE, this.placement.y + dy));
+    this.camera.centerOn(this.placement.x, this.placement.y, this.townMap.width, this.townMap.height);
+  }
+
+  handleTownPlaceAction(action) {
+    if (!action || !this.placement) return;
+    if (action.type === 'close') {
+      this.placement = null;
+      this.state = 'townBuild';
+      this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
+      if (this.audio) this.audio.uiClick();
+      return;
+    }
+    if (isDirectionalAction(action)) {
+      this.movePlacement(action.dx, action.dy);
+      return;
+    }
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      const { type, x, y } = this.placement;
+      const result = placeBuilding(this.saveData, this.townMap, type, x, y, this.townPlayerPos);
+      if (!result.ok) {
+        this.buildingNotice = result.reason;
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      persistSaveData(this.saveData);
+      this.placement = null;
+      this.state = 'town';
+      this.hubNotice = `${getBuildingDef(type).name} built.`;
+      this.camera.centerOn(this.townPlayerPos.x, this.townPlayerPos.y, this.townMap.width, this.townMap.height);
+      if (this.audio) this.audio.blessing();
+    }
+  }
+
+  openBuilding(building) {
+    this.activeBuilding = building;
+    this.buildingCursor = 0;
+    this.forgeItemIndex = null;
+    this.buildingNotice = '';
+    this.state = 'building';
+    if (this.audio) this.audio.uiClick();
+  }
+
+  leaveBuilding() {
+    this.activeBuilding = null;
+    this.forgeItemIndex = null;
+    this.state = 'town';
+    persistSaveData(this.saveData);
+    if (this.audio) this.audio.uiClick();
+  }
+
+  handleBuildingAction(action) {
+    if (!action || !this.activeBuilding) return;
+    if (action.type === 'close') {
+      if (this.forgeItemIndex !== null) { this.forgeItemIndex = null; this.buildingCursor = 0; return; }
+      this.leaveBuilding();
+      return;
+    }
+    const rows = getBuildingMenu(this, this.activeBuilding);
+    if (isDirectionalAction(action)) {
+      const delta = action.dy !== 0 ? action.dy : action.dx;
+      if (delta !== 0 && rows.length > 0) {
+        this.buildingCursor = (this.buildingCursor + delta + rows.length) % rows.length;
+        if (this.audio) this.audio.uiClick();
+      }
+      return;
+    }
+    if (action.type === 'inventoryConfirm' || action.type === 'wait') {
+      const row = rows[Math.min(this.buildingCursor, rows.length - 1)];
+      if (!row) return;
+      if (!row.enabled) {
+        this.buildingNotice = row.detail || 'Not available.';
+        if (this.audio) this.audio.uiClick();
+        return;
+      }
+      const notice = row.run(this);
+      if (notice) this.buildingNotice = notice;
+      if (this.state === 'building') {
+        persistSaveData(this.saveData);
+        const after = getBuildingMenu(this, this.activeBuilding);
+        this.buildingCursor = Math.min(this.buildingCursor, after.length - 1);
+        if (this.audio) this.audio.uiClick();
+      }
+    }
+  }
+
+  // --- pointer input: taps and swipes become ordinary actions ---
+
+  translatePointerAction(gesture) {
+    const overlayOpen = this.inventoryOpen || this.statsOpen || this.mapOpen;
+    if (gesture.type === 'tap') {
+      const region = findRegion(this.ui.regions, gesture.x, gesture.y);
+      if (region) {
+        return typeof region.action === 'function' ? region.action(this) : region.action;
+      }
+      if (this.state === 'playing' && !overlayOpen) return this.handleMapTap(gesture.x, gesture.y);
+      if (this.state === 'town') return this.handleTownTap(gesture.x, gesture.y);
+      if (this.state === 'townPlace' && this.placement) {
+        // tapping the ghost confirms; tapping elsewhere moves the ghost there
+        const { x, y } = this.camera.screenToTile(gesture.x, gesture.y);
+        const p = this.placement;
+        if (x >= p.x && x < p.x + BUILDING_SIZE && y >= p.y && y < p.y + BUILDING_SIZE) return { type: 'inventoryConfirm' };
+        if (this.townMap.inBounds(x, y)) this.movePlacement(x - p.x, y - p.y);
+        return null;
+      }
+      if (this.state === 'deathSplash' || this.state === 'victory') return { type: 'inventoryConfirm' };
+      return null;
+    }
+    // swipe: one step (or attack) in the dungeon, one step in town, cursor movement in menus
+    const { dx, dy } = gesture;
+    if (this.state === 'playing' && !overlayOpen && this.player) {
+      const nx = this.player.position.x + dx;
+      const ny = this.player.position.y + dy;
+      const enemy = this.map.entities.find(e => e.type === 'enemy' && e.isAlive() && e.position.x === nx && e.position.y === ny);
+      if (enemy) return { type: 'attack', dx, dy };
+      return { type: 'move', dx, dy };
+    }
+    if (this.state === 'town' && this.townMap) {
+      const nx = this.townPlayerPos.x + dx;
+      const ny = this.townPlayerPos.y + dy;
+      const props = TILE.properties[this.townMap.getTile(nx, ny)];
+      if (props && props.walkable) this.townTravel = { path: [{ x: nx, y: ny }] };
+      return { type: 'townTravel' };
+    }
+    return { type: 'move', dx, dy };
+  }
+
+  // attack action if the enemy is in reach for the equipped weapon type, else null
+  getAttackActionToward(enemy) {
+    const px = this.player.position.x;
+    const py = this.player.position.y;
+    const dx = enemy.position.x - px;
+    const dy = enemy.position.y - py;
+    const attackType = getPlayerAttackType(this.player);
+    if (Math.abs(dx) + Math.abs(dy) === 1) return { type: 'attack', dx, dy };
+    if (attackType === 'melee') return null;
+    if (dx !== 0 && dy !== 0) return null;
+    const dist = Math.abs(dx) + Math.abs(dy);
+    if (dist > 6) return null;
+    const sx = Math.sign(dx);
+    const sy = Math.sign(dy);
+    for (let step = 1; step < dist; step++) {
+      if (this.map.blocksLOS(px + sx * step, py + sy * step)) return null;
+      const blocker = this.map.entities.find(e => e.type === 'enemy' && e.isAlive() && e.position.x === px + sx * step && e.position.y === py + sy * step);
+      if (blocker) return null;
+    }
+    return { type: 'attack', dx: sx, dy: sy };
+  }
+
+  handleMapTap(sx, sy) {
+    if (!this.map || !this.player) return null;
+    if (sy >= this.canvas.height - this.hud.hudHeight) return null;
+    const { x, y } = this.camera.screenToTile(sx, sy);
+    if (!this.map.inBounds(x, y)) return null;
+    const p = this.player.position;
+    if (x === p.x && y === p.y) {
+      if (this.map.items.some(i => i.position.x === x && i.position.y === y)) return { type: 'pickup' };
+      if (this.map.getTile(x, y) === TILE.STAIRS_DOWN) return { type: 'descend' };
+      return { type: 'wait' };
+    }
+    const enemy = this.map.entities.find(e => e.type === 'enemy' && e.isAlive() && e.position.x === x && e.position.y === y && this.map.isVisible(x, y));
+    if (enemy) {
+      const attack = this.getAttackActionToward(enemy);
+      if (attack) return attack;
+      return this.startTravel(x, y, 'engage', enemy.id);
+    }
+    if (!this.map.isExplored(x, y)) return null;
+    return this.startTravel(x, y, 'explore', null);
+  }
+
+  // plans a path to the tapped tile and takes the first step. closed doors are
+  // walked through (moving into one opens it); unexplored tiles are off limits.
+  startTravel(tx, ty, mode, targetId) {
+    const map = this.map;
+    const passable = (x, y) => map.isExplored(x, y) && (map.isWalkable(x, y) || map.getTile(x, y) === TILE.DOOR);
+    if (mode === 'explore' && !passable(tx, ty)) return null;
+    const blocked = map.entities
+      .filter(e => e.type === 'enemy' && e.isAlive() && e.id !== targetId)
+      .map(e => e.position);
+    const path = findPath(map, this.player.position.x, this.player.position.y, tx, ty, blocked, passable);
+    if (!path || path.length === 0) {
+      this.messageLog.add('No path there.', this.turnCount);
+      return null;
+    }
+    if (mode === 'engage') path.pop(); // stop before the enemy's tile
+    const seenEnemies = new Set(map.entities.filter(e => e.type === 'enemy' && e.isAlive() && map.isVisible(e.position.x, e.position.y)).map(e => e.id));
+    this.travel = { path, mode, targetId, lastStepMs: 0, startHp: this.player.hp, seenEnemies };
+    return this.stepTravel();
+  }
+
+  // one step of an in-progress travel, or null when it is time to stop
+  stepTravel() {
+    const t = this.travel;
+    if (!t || this.state !== 'playing') { this.travel = null; return null; }
+    const now = this.getNowMs();
+    if (now - t.lastStepMs < TRAVEL_STEP_MS) return null;
+    if (this.player.hp < t.startHp) { this.travel = null; return null; }
+    const visible = this.map.entities.filter(e => e.type === 'enemy' && e.isAlive() && this.map.isVisible(e.position.x, e.position.y));
+    if (t.mode === 'explore' && visible.some(e => !t.seenEnemies.has(e.id))) {
+      this.travel = null;
+      this.messageLog.add('You stop: an enemy is in sight.', this.turnCount);
+      return null;
+    }
+    if (t.mode === 'engage') {
+      const enemy = this.map.entities.find(e => e.id === t.targetId && e.isAlive());
+      if (!enemy) { this.travel = null; return null; }
+      const attack = this.getAttackActionToward(enemy);
+      if (attack) { this.travel = null; return attack; }
+    }
+    const next = t.path.shift();
+    if (!next) { this.travel = null; return null; }
+    const dx = next.x - this.player.position.x;
+    const dy = next.y - this.player.position.y;
+    if (Math.abs(dx) + Math.abs(dy) !== 1) { this.travel = null; return null; }
+    if (this.map.entities.some(e => e.type === 'enemy' && e.isAlive() && e.position.x === next.x && e.position.y === next.y)) {
+      this.travel = null;
+      return null;
+    }
+    t.lastStepMs = now;
+    if (t.path.length === 0 && t.mode === 'explore') this.travel = null;
+    return { type: 'move', dx, dy };
+  }
+
+  handleTownTap(sx, sy) {
+    if (!this.townMap) return null;
+    if (sy < TOWN_BAR_HEIGHT || sy > this.canvas.height - TOWN_BAR_HEIGHT) return null;
+    const { x, y } = this.camera.screenToTile(sx, sy);
+    if (!this.townMap.inBounds(x, y)) return null;
+    const tile = this.townMap.getTile(x, y);
+    let target = { x, y };
+    let enterOnArrive = false;
+    if (tile === TILE.SHELTER || tile === TILE.SHELTER_ENTRANCE) {
+      target = { ...SHELTER_ENTRANCE_POS };
+      enterOnArrive = true;
+    } else if (tile === TILE.BUILDING || tile === TILE.BUILDING_ENTRANCE) {
+      const b = findBuildingAt(this.saveData.buildings, x, y);
+      if (!b) return null;
+      target = getEntrance(b);
+      enterOnArrive = true;
+    } else if (!TILE.properties[tile]?.walkable) {
+      return null;
+    }
+    if (target.x === this.townPlayerPos.x && target.y === this.townPlayerPos.y) {
+      return enterOnArrive ? { type: 'inventoryConfirm' } : null;
+    }
+    const passable = (tx, ty) => !!TILE.properties[this.townMap.getTile(tx, ty)]?.walkable;
+    const path = findPath(this.townMap, this.townPlayerPos.x, this.townPlayerPos.y, target.x, target.y, [], passable);
+    if (!path || path.length === 0) return null;
+    this.townTravel = { path, enterOnArrive };
+    return { type: 'townTravel' };
   }
 
   handleStartMenuAction(action) {
@@ -414,6 +836,7 @@ export class Game {
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
       if (this.deathSaveIndex === 0) {
         this.hubCanStashMultipleFromRun = false;
+        persistRunCarryover(this);
       } else {
         if (this.rawRunMaterials && this.committedMaterials) {
           const restored = {};
@@ -422,12 +845,14 @@ export class Game {
             if (diff > 0) restored[key] = diff;
           }
           this.saveData.addMaterials(restored);
-          persistSaveData(this.saveData);
         }
-        this.hubRunCarryover = [];
+        clearRunCarryover(this);
+        persistSaveData(this.saveData);
       }
       this.state = 'postDeathMenu';
       this.postDeathMenuIndex = 0;
+      this.startRunConfirmPending = false;
+      this.hubNotice = '';
     }
   }
 
@@ -438,6 +863,7 @@ export class Game {
       if (delta !== 0) {
         const optionCount = 3;
         this.postDeathMenuIndex = (this.postDeathMenuIndex + delta + optionCount) % optionCount;
+        this.startRunConfirmPending = false;
         if (this.audio) this.audio.uiClick();
       }
       return;
@@ -448,7 +874,7 @@ export class Game {
     }
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
       if (this.postDeathMenuIndex === 0) {
-        this.startNewRun();
+        requestStartRun(this);
       } else if (this.postDeathMenuIndex === 1) {
         this.enterTown();
       } else {
@@ -459,22 +885,19 @@ export class Game {
 
   handleVictoryAction(action) {
     if (!action) return;
-    if (action.type === 'hub') {
-      this.enterTown('Victory rewards available in stash.');
-      return;
-    }
-    if (action.type === 'inventoryConfirm' || action.type === 'wait' || action.type === 'close') {
-      this.enterTown();
+    if (action.type === 'hub' || action.type === 'inventoryConfirm' || action.type === 'wait' || action.type === 'close') {
+      this.enterTown(this.victoryNotice || 'Victory rewards available in stash.');
     }
   }
 
   handleHubMenuAction(action) {
     if (!action) return;
-    const options = getHubMenuOptions();
+    const options = getHubMenuOptions(this);
     if (isDirectionalAction(action)) {
       const delta = action.dy !== 0 ? action.dy : action.dx;
       if (delta !== 0) {
         this.hubMenuIndex = (this.hubMenuIndex + delta + options.length) % options.length;
+        this.startRunConfirmPending = false;
         if (this.audio) this.audio.uiClick();
       }
       return;
@@ -485,7 +908,8 @@ export class Game {
     }
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
       if (this.hubMenuIndex === 0) {
-        this.startNewRun();
+        requestStartRun(this);
+        return;
       } else if (this.hubMenuIndex === 1) {
         this.state = 'hubShop';
       } else if (this.hubMenuIndex === 2) {
@@ -580,19 +1004,22 @@ export class Game {
 
     if (action.type === 'inventoryConfirm' || action.type === 'wait') {
       if (this.hubStashPane === 'stash') {
-        if (!this.saveData.stash || this.saveData.stash.length === 0) return;
-        const idx = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
-        const removed = this.saveData.removeFromStash(this.saveData.stash[idx].id);
-        if (!removed) return;
-        if (this.pendingStashLoadoutItem) {
-          this.saveData.addToStash(this.pendingStashLoadoutItem);
+        // the pane lists queued loadout rows first, then the stash proper
+        const loadoutCount = getLoadoutCount(this);
+        const total = loadoutCount + (this.saveData.stash ? this.saveData.stash.length : 0);
+        if (total === 0) return;
+        const idx = Math.max(0, Math.min(this.hubStashCursor, total - 1));
+        const changed = idx < loadoutCount
+          ? unqueueLoadoutItem(this, idx)
+          : queueLoadoutItem(this, idx - loadoutCount);
+        const newLoadoutCount = getLoadoutCount(this);
+        const stashLen = this.saveData.stash.length;
+        if (changed && idx >= loadoutCount) {
+          // keep the cursor on the next stash row rather than the row just queued
+          this.hubStashCursor = newLoadoutCount + Math.min(idx - loadoutCount, Math.max(0, stashLen - 1));
         }
-        this.pendingStashLoadoutItem = cloneItem(removed);
-        this.saveData.pendingLoadoutItem = this.pendingStashLoadoutItem;
-        this.hubNotice = `Queued ${removed.name} for next run.`;
-        this.hubStashCursor = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
-        persistSaveData(this.saveData);
-        if (this.audio) this.audio.itemPickup();
+        this.hubStashCursor = Math.max(0, Math.min(this.hubStashCursor, Math.max(0, newLoadoutCount + stashLen - 1)));
+        if (this.audio) { if (changed) this.audio.itemPickup(); else this.audio.uiClick(); }
         return;
       }
 
@@ -615,34 +1042,31 @@ export class Game {
       this.hubNotice = `Stashed: ${item.name}.`;
       this.hubRunItemsCursor = Math.max(0, Math.min(this.hubRunItemsCursor, this.hubRunCarryover.length - 1));
       setAchievementProgress(this, 'collector', this.saveData.stash.length);
-      persistSaveData(this.saveData);
+      persistRunCarryover(this);
       if (this.audio) this.audio.itemPickup();
     }
 
     if (action.type === 'inventoryDrop') {
-      if (this.pendingStashLoadoutItem) {
-        const returned = this.saveData.addToStash(this.pendingStashLoadoutItem);
-        if (returned) {
-          this.hubNotice = `Returned ${this.pendingStashLoadoutItem.name} to stash.`;
-          this.pendingStashLoadoutItem = null;
-          this.saveData.pendingLoadoutItem = null;
-          persistSaveData(this.saveData);
-          if (this.audio) this.audio.uiClick();
-        } else {
-          this.hubNotice = 'Stash is full.';
-          if (this.audio) this.audio.uiClick();
-        }
-      } else if (this.hubStashPane === 'stash' && this.saveData.stash && this.saveData.stash.length > 0) {
-        const idx = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
-        const item = this.saveData.stash[idx];
-        const value = getItemSellValue(item);
-        this.saveData.removeFromStash(item.id);
-        this.saveData.currency = (this.saveData.currency || 0) + value;
-        this.hubNotice = `Sold ${item.name} for ${value} essence.`;
-        this.hubStashCursor = Math.max(0, Math.min(this.hubStashCursor, this.saveData.stash.length - 1));
-        persistSaveData(this.saveData);
+      if (this.hubStashPane !== 'stash') return;
+      const loadoutCount = getLoadoutCount(this);
+      const stash = this.saveData.stash || [];
+      const total = loadoutCount + stash.length;
+      if (total === 0) return;
+      const idx = Math.max(0, Math.min(this.hubStashCursor, total - 1));
+      if (idx < loadoutCount) {
+        // x on a queued row sends it back to the stash instead of selling it
+        unqueueLoadoutItem(this, idx);
         if (this.audio) this.audio.uiClick();
+        return;
       }
+      const item = stash[idx - loadoutCount];
+      const value = getItemSellValue(item);
+      this.saveData.removeFromStash(item.id);
+      this.saveData.currency = (this.saveData.currency || 0) + value;
+      this.hubNotice = `Sold ${item.name} for ${value} essence.`;
+      this.hubStashCursor = Math.max(0, Math.min(this.hubStashCursor, Math.max(0, getLoadoutCount(this) + this.saveData.stash.length - 1)));
+      persistSaveData(this.saveData);
+      if (this.audio) this.audio.uiClick();
     }
   }
 
@@ -805,7 +1229,14 @@ export class Game {
     this.saveData.skillInvestments[classKey] = investments;
     this.saveData.skillPoints[classKey] = available - 1;
 
-    this.treePassiveEffects = resolvePassiveEffects(classKey, investments);
+    // mid-run investment: rebuild the tree actives (keeping cooldowns) and hp
+    if (this.player && this.player.playerClass === classKey) {
+      rebuildPassiveEffects(this);
+      const saved = Object.fromEntries((this.player.treeActiveSkills || []).map(s => [s.id, s.currentCooldown || 0]));
+      this.player.treeActiveSkills = createTreeActiveSkills(classKey, investments, saved);
+      updateActiveSkills(this.player);
+      recalcPlayerMaxHp(this);
+    }
     persistSaveData(this.saveData);
     if (this.audio) this.audio.uiClick();
   }
@@ -813,7 +1244,16 @@ export class Game {
   // --- Main update loop ---
 
   update() {
-    const action = this.input.consume();
+    let action = this.input.consume();
+    if (action && (action.type === 'tap' || action.type === 'swipe')) {
+      action = this.translatePointerAction(action);
+    } else if (action) {
+      // any explicit input cancels an automatic walk
+      this.travel = null;
+    }
+    if (!action && this.state === 'playing' && this.travel && !this.inventoryOpen && !this.statsOpen && !this.mapOpen) {
+      action = this.stepTravel();
+    }
 
     if (this.state === 'startMenu') {
       this.handleStartMenuAction(action);
@@ -837,6 +1277,18 @@ export class Game {
     }
     if (this.state === 'town') {
       this.handleTownUpdate(action);
+      return;
+    }
+    if (this.state === 'townBuild') {
+      this.handleTownBuildAction(action);
+      return;
+    }
+    if (this.state === 'townPlace') {
+      this.handleTownPlaceAction(action);
+      return;
+    }
+    if (this.state === 'building') {
+      this.handleBuildingAction(action);
       return;
     }
     if (this.state === 'hubMenu') {
@@ -899,6 +1351,10 @@ export class Game {
       this.toggleStatsOverlay();
       return;
     }
+    if (action.type === 'skillTree') {
+      this.openSkillTree('playing');
+      return;
+    }
     if (action.type === 'close') {
       this.state = 'pauseMenu';
       this.pauseMenuIndex = 0;
@@ -921,7 +1377,7 @@ export class Game {
       if (this.treeRegenCounter >= this.treePassiveEffects.passive_regen) {
         this.treeRegenCounter = 0;
         if (this.player.hp < this.player.maxHp) {
-          this.player.heal(1);
+          this.player.heal(getRegenAmount(this.player));
         }
       }
     }
@@ -930,13 +1386,18 @@ export class Game {
     for (const effect of this.player.statusEffects) {
       if (effect.type === 'regeneration') {
         const before = this.player.hp;
-        this.player.heal(effect.value);
+        // values below 1 are a fraction of max hp; larger values are flat (legacy items)
+        this.player.heal(effect.value < 1 ? getRegenAmount(this.player, effect.value) : effect.value);
         if (this.player.hp > before) {
           this.messageLog.add(`Regeneration heals ${this.player.hp - before} HP.`, this.turnCount);
         }
       }
     }
     this.player.tickStatusEffects();
+    // enemy effects (stun, slow) expire on the player's clock
+    for (const entity of this.map.entities) {
+      if (entity.type === 'enemy' && entity.isAlive()) entity.tickStatusEffects();
+    }
 
     // Run ticks until the player gets another turn
     let safety = 0;
@@ -967,6 +1428,7 @@ export class Game {
 
   drawTown() {
     this.renderer.render({ map: this.townMap, player: null });
+    this.drawTownBuildings();
 
     const spriteKey = 'player_' + this.selectedClass;
     const sprite = this.sprites.get(spriteKey);
@@ -975,7 +1437,14 @@ export class Game {
       this.ctx.drawImage(sprite, sx, sy, this.camera.tileSize, this.camera.tileSize);
     }
 
-    if (this.townInteractPrompt) {
+    if (this.state === 'townPlace' && this.placement) this.drawPlacementGhost();
+
+    const promptText = this.townInteractPrompt
+      ? 'Enter / Space : Enter Shelter'
+      : this.townInteractBuilding
+        ? `Enter / Space : Enter ${getBuildingDef(this.townInteractBuilding.type)?.name || 'building'}`
+        : null;
+    if (promptText && this.state === 'town') {
       const cx = Math.floor(this.canvas.width / 2);
       const py = this.canvas.height - 100;
       this.ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
@@ -983,11 +1452,73 @@ export class Game {
       this.ctx.fillStyle = '#ffd700';
       this.ctx.font = '14px monospace';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText('Enter / Space : Enter Shelter', cx, py + 5);
+      this.ctx.fillText(promptText, cx, py + 5);
       this.ctx.textAlign = 'left';
+      registerRegion(this, cx - 130, py - 14, 260, 28, { type: 'inventoryConfirm' });
     }
 
     this.drawTownHUD();
+  }
+
+  // buildings are painted over their tile sprites: a coloured body, a roof
+  // strip and the name, so each type reads at a glance
+  drawTownBuildings() {
+    const ctx = this.ctx;
+    const ts = this.camera.tileSize;
+    for (const b of this.saveData?.buildings || []) {
+      const def = getBuildingDef(b.type);
+      if (!def || !this.camera.isInView(b.x, b.y) && !this.camera.isInView(b.x + 1, b.y + 1)) continue;
+      const { sx, sy } = this.camera.tileToScreen(b.x, b.y);
+      const w = ts * BUILDING_SIZE;
+      const h = ts * BUILDING_SIZE;
+      ctx.fillStyle = def.color;
+      ctx.fillRect(sx + 2, sy + Math.floor(h * 0.3), w - 4, h - Math.floor(h * 0.3) - 2);
+      ctx.fillStyle = def.roof;
+      ctx.fillRect(sx, sy, w, Math.floor(h * 0.34));
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.strokeRect(sx + 0.5, sy + 0.5, w - 1, h - 1);
+      const font = Math.max(9, Math.floor(ts * 0.42));
+      ctx.font = `bold ${font}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#000000';
+      ctx.fillText(def.name, sx + w / 2 + 1, sy + Math.floor(h * 0.68) + 1);
+      ctx.fillStyle = '#f4efe0';
+      ctx.fillText(def.name, sx + w / 2, sy + Math.floor(h * 0.68));
+      ctx.font = `${Math.max(8, Math.floor(ts * 0.33))}px monospace`;
+      ctx.fillStyle = '#ffd700';
+      ctx.fillText(`L${b.level}`, sx + w / 2, sy + Math.floor(h * 0.94));
+      ctx.textAlign = 'left';
+    }
+  }
+
+  drawPlacementGhost() {
+    const ctx = this.ctx;
+    const ts = this.camera.tileSize;
+    const p = this.placement;
+    const check = canPlaceBuilding(this.townMap, p.x, p.y, this.saveData.buildings, this.townPlayerPos);
+    const { sx, sy } = this.camera.tileToScreen(p.x, p.y);
+    ctx.fillStyle = check.ok ? 'rgba(90, 220, 110, 0.45)' : 'rgba(230, 70, 70, 0.45)';
+    ctx.fillRect(sx, sy, ts * BUILDING_SIZE, ts * BUILDING_SIZE);
+    ctx.strokeStyle = check.ok ? '#8dff9d' : '#ff7a7a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx + 1, sy + 1, ts * BUILDING_SIZE - 2, ts * BUILDING_SIZE - 2);
+    ctx.lineWidth = 1;
+    // door marker
+    ctx.fillStyle = check.ok ? 'rgba(255, 215, 0, 0.6)' : 'rgba(255, 120, 120, 0.5)';
+    ctx.fillRect(sx + 3, sy + ts * BUILDING_SIZE + 3, ts - 6, ts - 6);
+    // instructions
+    const def = getBuildingDef(p.type);
+    const cx = Math.floor(this.canvas.width / 2);
+    const py = this.canvas.height - 100;
+    const text = check.ok ? `Place ${def.name}: Enter / tap the ghost.  Esc: cancel` : `${def.name}: ${check.reason || this.buildingNotice}`;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(cx - 200, py - 14, 400, 28);
+    ctx.fillStyle = check.ok ? '#ffd700' : '#ff9a9a';
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(text, cx, py + 5);
+    ctx.textAlign = 'left';
+    if (check.ok) registerRegion(this, cx - 200, py - 14, 400, 28, { type: 'inventoryConfirm' });
   }
 
   drawTownHUD() {
@@ -996,30 +1527,56 @@ export class Game {
     const h = this.canvas.height;
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-    ctx.fillRect(0, 0, w, 30);
+    ctx.fillRect(0, 0, w, TOWN_BAR_HEIGHT);
     ctx.fillStyle = '#e0d8c0';
     ctx.font = '14px monospace';
     const classInfo = PLAYER_CLASSES[this.selectedClass];
     const className = classInfo ? classInfo.name : this.selectedClass;
     const lvl = this.saveData?.classLevels?.[this.selectedClass] || 1;
-    ctx.fillText(`${className} Lv.${lvl}`, 10, 20);
+    const leftText = `${className} Lv.${lvl}   Town Lv.${getTownLevel(this.saveData)}`;
+    ctx.fillText(leftText, 10, 20);
 
     const essenceText = `Essence: ${this.saveData?.currency || 0}`;
     ctx.fillStyle = '#ffd700';
     ctx.fillText(essenceText, w - ctx.measureText(essenceText).width - 10, 20);
 
+    // material totals between the two, abbreviated on narrow screens
+    const mats = this.saveData?.materials || {};
+    const abbr = { timber: 'TMB', stone: 'STN', iron: 'IRN', crystal: 'CRY', aether: 'ATH' };
+    const narrow = w < 720;
+    ctx.font = `bold ${narrow ? 11 : 13}px monospace`;
+    const parts = MATERIALS.map(m => ({ m, label: `${narrow ? abbr[m] : m} ${mats[m] || 0}` }));
+    const totalW = parts.reduce((s, p) => s + ctx.measureText(p.label).width + 12, 0);
+    let mx = narrow ? 10 : Math.max(ctx.measureText(leftText).width + 30, Math.floor((w - totalW) / 2));
+    const my = narrow ? h - TOWN_BAR_HEIGHT - 8 : 20;
+    if (narrow) { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, my - 12, totalW + 8, 16); }
+    for (const p of parts) {
+      ctx.fillStyle = '#000';
+      ctx.fillText(p.label, mx + 1, my + 1);
+      ctx.fillStyle = MATERIAL_COLORS[p.m];
+      ctx.fillText(p.label, mx, my);
+      mx += ctx.measureText(p.label).width + 12;
+    }
+    ctx.font = '14px monospace';
+
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-    ctx.fillRect(0, h - 28, w, 28);
+    ctx.fillRect(0, h - TOWN_BAR_HEIGHT, w, TOWN_BAR_HEIGHT);
     ctx.fillStyle = '#8a9aaa';
     ctx.font = '12px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('Arrows: Move | ESC: Menu | P: Skills', w / 2, h - 10);
+    if (w >= 640) ctx.fillText('Arrows / tap: Move   Enter: Shelter or building   B: Build   K: Skills   Esc: Menu', w / 2, h - 11);
     ctx.textAlign = 'left';
+    // tappable buttons in the bottom bar
+    const btnH = TOWN_BAR_HEIGHT - 8;
+    drawButton(this, 8, h - TOWN_BAR_HEIGHT + 4, 70, btnH, 'Skills', { type: 'skillTree' }, { fontSize: 11 });
+    drawButton(this, 84, h - TOWN_BAR_HEIGHT + 4, 70, btnH, 'Build', { type: 'build' }, { fontSize: 11, active: this.state === 'townBuild' });
+    drawButton(this, w - 78, h - TOWN_BAR_HEIGHT + 4, 70, btnH, 'Menu', { type: 'close' }, { fontSize: 11 });
   }
 
   // --- Main draw dispatcher ---
 
   draw(nowMs = this.getNowMs()) {
+    clearRegions(this);
     if (this.state === 'startMenu') {
       drawStartMenu(this);
       return;
@@ -1041,6 +1598,20 @@ export class Game {
     }
     if (this.state === 'town') {
       this.drawTown();
+      return;
+    }
+    if (this.state === 'townBuild') {
+      this.drawTown();
+      drawBuildMenu(this);
+      return;
+    }
+    if (this.state === 'townPlace') {
+      this.drawTown();
+      return;
+    }
+    if (this.state === 'building') {
+      this.drawTown();
+      drawBuildingMenu(this);
       return;
     }
     if (this.state === 'hubMenu') {
@@ -1070,7 +1641,7 @@ export class Game {
       return;
     }
 
-    this.renderer.render({ map: this.map, player: this.player });
+    this.renderer.render({ map: this.map, player: this.player, nowMs });
     drawCombatVfx(this, nowMs);
     // Build XP data for HUD
     let xpData = null;
@@ -1087,7 +1658,7 @@ export class Game {
       xpData = { level: lvl, progress: prog };
     }
 
-    this.hud.draw(this.player, this.messageLog, getEntityStatsWithEquipment(this.player), this.runMaterials, xpData);
+    this.hud.draw(this.player, this.messageLog, getEntityStatsWithEquipment(this.player), this.runMaterials, xpData, this);
 
     if (this.state === 'deathSplash') {
       drawDeathSplash(this);

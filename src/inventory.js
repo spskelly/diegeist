@@ -1,4 +1,23 @@
+export function isSameStack(a, b) {
+  return !!a && !!b && a.stackable && b.stackable && a.name === b.name && a.effect === b.effect && a.rarity === b.rarity;
+}
+
 export function addToInventory(entity, item) {
+  // stackable consumables merge into an existing stack on the belt or in the bag
+  if (item.stackable) {
+    const qty = item.count || 1;
+    const beltStack = entity.belt.find(b => isSameStack(b, item));
+    if (beltStack) {
+      beltStack.count = (beltStack.count || 1) + qty;
+      return true;
+    }
+    const bagStack = entity.inventory.find(i => isSameStack(i, item));
+    if (bagStack) {
+      bagStack.count = (bagStack.count || 1) + qty;
+      return true;
+    }
+    item.count = qty;
+  }
   if (entity.inventory.length >= 12) return false;
   entity.inventory.push(item);
   return true;
@@ -80,6 +99,11 @@ export function useBeltSlot(entity, beltSlot) {
   if (beltSlot < 0 || beltSlot > 2) return null;
   const item = entity.belt[beltSlot];
   if (!item) return null;
+  // a stack of several uses stays on the belt; hand back a single-use copy
+  if ((item.count || 1) > 1) {
+    item.count -= 1;
+    return { ...item, count: 1 };
+  }
   entity.belt[beltSlot] = null;
   return item;
 }

@@ -62,16 +62,16 @@ export const STAT_SUFFIXES = {
 
 const SKILL_POOL = [
   // Melee weapon skills
-  { name: 'Cleave', description: 'Hit all adjacent enemies', range: 1, area: { type: 'cone', size: 3 }, statScaling: 'STR', baseDamage: 4, allowedTags: ['melee'] },
+  { name: 'Cleave', description: 'Hit all adjacent enemies', range: 1, area: { type: 'cone', size: 3 }, statScaling: 'STR', baseDamage: 14, allowedTags: ['melee'] },
   // Shield-only skill
-  { name: 'Shield Bash', description: 'Stun adjacent enemy for 1 turn', range: 1, area: { type: 'single', size: 1 }, statScaling: 'STR', baseDamage: 2, allowedTags: ['shield'] },
+  { name: 'Shield Bash', description: 'Stun adjacent enemy for 1 turn', range: 1, area: { type: 'single', size: 1 }, statScaling: 'STR', baseDamage: 8, allowedTags: ['shield'] },
   // Ranged weapon skills
-  { name: 'Power Shot', description: 'Piercing shot through first target', range: 6, area: { type: 'line', size: 6 }, statScaling: 'DEX', baseDamage: 5, allowedTags: ['ranged'] },
-  { name: 'Multishot', description: 'Fire at 2-3 targets', range: 5, area: { type: 'single', size: 1 }, statScaling: 'DEX', baseDamage: 3, allowedTags: ['ranged'] },
+  { name: 'Power Shot', description: 'Piercing shot through first target', range: 6, area: { type: 'line', size: 6 }, statScaling: 'DEX', baseDamage: 18, allowedTags: ['ranged'] },
+  { name: 'Multishot', description: 'Fire at 2-3 targets', range: 5, area: { type: 'single', size: 1 }, statScaling: 'DEX', baseDamage: 10, allowedTags: ['ranged'] },
   // Magic weapon skills
-  { name: 'Fireball', description: 'AoE explosion at target (3x3)', range: 5, area: { type: 'circle', size: 3 }, statScaling: 'INT', baseDamage: 6, allowedTags: ['magic'] },
-  { name: 'Chain Lightning', description: 'Hits target + jumps to 1-2 nearby', range: 5, area: { type: 'single', size: 1 }, statScaling: 'INT', baseDamage: 4, allowedTags: ['magic'] },
-  { name: 'Frost Nova', description: 'AoE around caster, slows enemies', range: 0, area: { type: 'circle', size: 3 }, statScaling: 'INT', baseDamage: 3, allowedTags: ['magic'] },
+  { name: 'Fireball', description: 'AoE explosion at target (3x3)', range: 5, area: { type: 'circle', size: 3 }, statScaling: 'INT', baseDamage: 22, allowedTags: ['magic'] },
+  { name: 'Chain Lightning', description: 'Hits target + jumps to 1-2 nearby', range: 5, area: { type: 'single', size: 1 }, statScaling: 'INT', baseDamage: 14, allowedTags: ['magic'] },
+  { name: 'Frost Nova', description: 'AoE around caster, slows enemies', range: 0, area: { type: 'circle', size: 3 }, statScaling: 'INT', baseDamage: 10, allowedTags: ['magic'] },
   // Armor skills (defensive/reactive, self-targeted)
   { name: 'Thorns', description: 'Reflect damage to melee attackers for 3 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'CON', baseDamage: 0, allowedTags: ['armor'], skillType: 'self', effect: { type: 'thorns', duration: 3, value: 0.5 } },
   { name: 'Fortify', description: 'Reduce incoming damage by 40% for 3 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'CON', baseDamage: 0, allowedTags: ['armor'], skillType: 'self', effect: { type: 'fortify', duration: 3, value: 0.4 } },
@@ -79,9 +79,9 @@ const SKILL_POOL = [
   { name: 'Iron Skin', description: 'Reduce all damage taken by 50% for 2 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'CON', baseDamage: 0, allowedTags: ['armor'], skillType: 'self', effect: { type: 'iron_skin', duration: 2, value: 0.5 } },
   // Accessory skills (buff/aura, self-targeted)
   { name: 'War Cry', description: 'Boost damage by 30% for 3 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'WIS', baseDamage: 0, allowedTags: ['accessory'], skillType: 'self', effect: { type: 'war_cry', duration: 3, value: 1.3 } },
-  { name: 'Regeneration', description: 'Heal 2 HP per turn for 4 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'WIS', baseDamage: 0, allowedTags: ['accessory'], skillType: 'self', effect: { type: 'regeneration', duration: 4, value: 2 } },
+  { name: 'Regeneration', description: 'Heal 4% of max HP per turn for 4 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'WIS', baseDamage: 0, allowedTags: ['accessory'], skillType: 'self', effect: { type: 'regeneration', duration: 4, value: 0.04 } },
   { name: 'Lucky Strike', description: 'Double crit chance for 3 turns', range: 0, area: { type: 'single', size: 1 }, statScaling: 'WIS', baseDamage: 0, allowedTags: ['accessory'], skillType: 'self', effect: { type: 'lucky_strike', duration: 3, value: 2.0 } },
-  { name: 'Mana Shield', description: 'Absorb next 8 damage', range: 0, area: { type: 'single', size: 1 }, statScaling: 'WIS', baseDamage: 0, allowedTags: ['accessory'], skillType: 'self', effect: { type: 'mana_shield', duration: 999, value: 8 } },
+  { name: 'Mana Shield', description: 'Absorb the next 30 damage', range: 0, area: { type: 'single', size: 1 }, statScaling: 'WIS', baseDamage: 0, allowedTags: ['accessory'], skillType: 'self', effect: { type: 'mana_shield', duration: 999, value: 30 } },
 ];
 
 const STARTER_CLASS_WEAPONS = {
@@ -272,7 +272,7 @@ export const CONSUMABLE_TYPES = [
   { name: 'Minor Health Potion', effect: 'heal', magnitudeBase: 0.25, rarity: 'common' },
   { name: 'Major Health Potion', effect: 'heal', magnitudeBase: 0.60, rarity: 'uncommon' },
   { name: 'Scroll of Mapping', effect: 'reveal_map', magnitudeBase: 1, rarity: 'uncommon' },
-  { name: 'Bomb', effect: 'aoe_damage', magnitudeBase: 8, rarity: 'uncommon' },
+  { name: 'Bomb', effect: 'aoe_damage', magnitudeBase: 30, rarity: 'uncommon' },
   { name: 'Speed Potion', effect: 'speed_boost', magnitudeBase: 10, rarity: 'rare' },
   { name: 'Invisibility Potion', effect: 'invisibility', magnitudeBase: 8, rarity: 'rare' },
   { name: 'Scroll of Teleportation', effect: 'teleport', magnitudeBase: 1, rarity: 'rare' },
@@ -280,6 +280,65 @@ export const CONSUMABLE_TYPES = [
 
 export function generateConsumable(floorLevel) {
   const template = CONSUMABLE_TYPES[Math.floor(Math.random() * CONSUMABLE_TYPES.length)];
+  return {
+    id: `item_${nextItemId++}`,
+    name: template.name,
+    type: 'consumable',
+    rarity: template.rarity,
+    slot: null,
+    statBonuses: {},
+    skill: null,
+    effect: template.effect,
+    magnitude: template.magnitudeBase,
+    floorLevel,
+    description: `${template.name}.`,
+    sprite: 'consumable',
+    stackable: true,
+  };
+}
+
+// --- forge helpers: rework an existing item in place ---
+
+const RARITY_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+
+function templateForItem(item) {
+  return ITEM_TEMPLATES.find(t => t.baseName.toLowerCase().replace(/\s+/g, '_') === item.sprite)
+    || ITEM_TEMPLATES.find(t => t.slot === item.slot)
+    || ITEM_TEMPLATES[0];
+}
+
+export function rerollItemStats(item) {
+  const template = templateForItem(item);
+  item.statBonuses = generateStatBonuses(item.rarity || 'common', item.floorLevel || 1, template.primaryStat);
+  return item;
+}
+
+export function promoteItemRarity(item) {
+  const idx = RARITY_ORDER.indexOf(item.rarity || 'common');
+  if (idx === -1 || idx >= RARITY_ORDER.length - 2) return item;
+  item.rarity = RARITY_ORDER[idx + 1];
+  // regenerate bonuses at the new rarity but never below the old primary stat
+  const template = templateForItem(item);
+  const old = item.statBonuses || {};
+  const fresh = generateStatBonuses(item.rarity, item.floorLevel || 1, template.primaryStat);
+  for (const [stat, val] of Object.entries(old)) fresh[stat] = Math.max(fresh[stat] || 0, val);
+  item.statBonuses = fresh;
+  if (!item.skill) item.skill = generateSkill(item.rarity, getSkillTag(template));
+  return item;
+}
+
+export function socketItemStat(item, amount = 3) {
+  const bonuses = item.statBonuses || (item.statBonuses = {});
+  const missing = STAT_NAMES.filter(s => !bonuses[s]);
+  const pool = missing.length > 0 ? missing : STAT_NAMES;
+  const stat = pool[Math.floor(Math.random() * pool.length)];
+  bonuses[stat] = (bonuses[stat] || 0) + amount;
+  return item;
+}
+
+export function createConsumableByName(name, floorLevel = 1) {
+  const template = CONSUMABLE_TYPES.find(c => c.name === name);
+  if (!template) return null;
   return {
     id: `item_${nextItemId++}`,
     name: template.name,

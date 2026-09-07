@@ -68,7 +68,8 @@ describe('rollMaterialDrop', () => {
   });
 
   it('returns a material drop when roll is under drop chance', () => {
-    const result = rollMaterialDrop('wilds', 1, { forceRoll: 0.1, forceQtyRoll: 0.5 });
+    // low ranks still have a small secondary chance, so pin that roll too
+    const result = rollMaterialDrop('wilds', 1, { forceRoll: 0.1, forceQtyRoll: 0.5, forceSecondaryRoll: 0.99 });
     expect(result).not.toBeNull();
     expect(result.type).toBe('timber');
     expect(result.quantity).toBeGreaterThanOrEqual(1);

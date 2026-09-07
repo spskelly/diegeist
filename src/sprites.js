@@ -200,6 +200,8 @@ export function buildTownTileSprites(palette) {
     town_hill:      { size: TILE_SIZE, draw: makeHillDraw(palette.hill) },
     town_shelter:   { size: TILE_SIZE, draw: makeShelterDraw(palette.shelter) },
     town_shelter_entrance: { size: TILE_SIZE, draw: makeShelterEntranceDraw(palette.grass, palette.shelter) },
+    town_building:  { size: TILE_SIZE, draw: makeShelterDraw(palette.building || palette.shelter) },
+    town_building_entrance: { size: TILE_SIZE, draw: makeShelterEntranceDraw(palette.grass, palette.building || palette.shelter) },
   };
 }
 
@@ -395,6 +397,155 @@ export const SPRITE_DEFINITIONS = {
       ctx.fillStyle = '#9ff3ff';
       ctx.fillRect(7, 4, 2, 2);
       ctx.fillRect(7, 8, 2, 2);
+    },
+  },
+  // weapon sprites used by attack animations. every weapon is drawn pointing
+  // right (+x) with the grip around x=2..5 and the business end at x=15, so
+  // the renderer can pivot it at the attacker's hand and rotate toward the
+  // target. backgrounds are transparent.
+  weapon_sword: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = '#5a3a1e';
+      ctx.fillRect(1, 7, 4, 2);
+      ctx.fillStyle = '#c9a23a';
+      ctx.fillRect(5, 5, 1, 6);
+      ctx.fillStyle = '#d8dce6';
+      ctx.fillRect(6, 7, 8, 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(6, 7, 8, 1);
+      ctx.fillRect(14, 7, 1, 2);
+      ctx.fillRect(15, 8, 1, 1);
+    },
+  },
+  weapon_greataxe: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = '#6a4a2a';
+      ctx.fillRect(1, 7, 10, 2);
+      ctx.fillStyle = '#9aa2ad';
+      ctx.fillRect(10, 3, 3, 10);
+      ctx.fillRect(13, 4, 2, 8);
+      ctx.fillStyle = '#e0e6ee';
+      ctx.fillRect(14, 5, 2, 6);
+      ctx.fillRect(15, 4, 1, 8);
+    },
+  },
+  weapon_dagger: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = '#3a2a1a';
+      ctx.fillRect(3, 7, 3, 2);
+      ctx.fillStyle = '#c9a23a';
+      ctx.fillRect(6, 6, 1, 4);
+      ctx.fillStyle = '#d8dce6';
+      ctx.fillRect(7, 7, 5, 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(7, 7, 5, 1);
+      ctx.fillRect(12, 8, 1, 1);
+    },
+  },
+  weapon_longbow: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.strokeStyle = '#8b6914';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(6, 8, 7, -1.25, 1.25);
+      ctx.stroke();
+      ctx.strokeStyle = '#e8e8e8';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(8.5, 1.5);
+      ctx.lineTo(8.5, 14.5);
+      ctx.stroke();
+    },
+  },
+  weapon_crossbow: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = '#5a3a1e';
+      ctx.fillRect(1, 7, 11, 2);
+      ctx.fillStyle = '#8b6914';
+      ctx.fillRect(10, 2, 2, 12);
+      ctx.fillStyle = '#e8e8e8';
+      ctx.fillRect(12, 2, 1, 12);
+      ctx.fillStyle = '#d6b35c';
+      ctx.fillRect(9, 7, 6, 2);
+    },
+  },
+  weapon_staff: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = '#6a4a2a';
+      ctx.fillRect(0, 7, 13, 2);
+      ctx.fillStyle = '#8b6914';
+      ctx.fillRect(11, 5, 2, 6);
+      ctx.fillStyle = '#b070ff';
+      ctx.fillRect(13, 6, 3, 4);
+      ctx.fillStyle = '#e8d0ff';
+      ctx.fillRect(14, 7, 1, 2);
+    },
+  },
+  weapon_wand: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = '#5a3a1e';
+      ctx.fillRect(2, 7, 9, 2);
+      ctx.fillStyle = '#40d0ff';
+      ctx.fillRect(11, 6, 3, 4);
+      ctx.fillStyle = '#d0f4ff';
+      ctx.fillRect(12, 7, 1, 2);
+      ctx.fillRect(14, 8, 1, 1);
+    },
+  },
+  weapon_shield: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = '#7a7a86';
+      ctx.fillRect(6, 3, 8, 10);
+      ctx.fillStyle = '#4a4a56';
+      ctx.fillRect(7, 4, 6, 8);
+      ctx.fillStyle = '#c9a23a';
+      ctx.fillRect(9, 6, 2, 4);
+      ctx.fillRect(8, 7, 4, 2);
+    },
+  },
+  weapon_orb: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = 'rgba(200, 220, 255, 0.5)';
+      ctx.fillRect(8, 4, 8, 8);
+      ctx.fillStyle = '#e0f0ff';
+      ctx.fillRect(9, 5, 6, 6);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(10, 6, 2, 2);
+    },
+  },
+  weapon_fist: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = '#d4a574';
+      ctx.fillRect(8, 5, 6, 6);
+      ctx.fillStyle = '#b08050';
+      ctx.fillRect(9, 6, 1, 4);
+      ctx.fillRect(11, 6, 1, 4);
+      ctx.fillRect(13, 6, 1, 4);
+    },
+  },
+  weapon_claw: {
+    size: TILE_SIZE,
+    draw(ctx) {
+      ctx.fillStyle = '#f0f0f0';
+      ctx.fillRect(6, 3, 8, 1);
+      ctx.fillRect(13, 4, 2, 1);
+      ctx.fillRect(6, 7, 9, 1);
+      ctx.fillRect(14, 8, 2, 1);
+      ctx.fillRect(6, 11, 8, 1);
+      ctx.fillRect(13, 12, 2, 1);
+      ctx.fillStyle = '#ffb0b0';
+      ctx.fillRect(15, 5, 1, 1);
+      ctx.fillRect(15, 13, 1, 1);
     },
   },
   bat: {
@@ -750,6 +901,8 @@ export const TILE_SPRITE_MAP = {
   104: 'town_hill',
   105: 'town_shelter',
   106: 'town_shelter_entrance',
+  107: 'town_building',
+  108: 'town_building_entrance',
 };
 
 export class SpriteRegistry {

@@ -13,9 +13,11 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "build": "node build.js"
+    "build": "node build.js",
+    "playtest": "node scripts/playtest.mjs"
   },
   "devDependencies": {
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "playwright": "^1.56.0"
   }
 }

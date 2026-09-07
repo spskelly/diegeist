@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateDamage, resolveAttack, getEffectiveStat } from '../src/combat.js';
+import { calculateDamage, resolveAttack, getEffectiveStat, getMitigation, getTrapDamage } from '../src/combat.js';
 import { Entity } from '../src/entity.js';
 
 function makeAttacker(overrides = {}) {
@@ -41,8 +41,8 @@ describe('calculateDamage', () => {
       isMagic: false,
       targetWIS: 0,
     });
-    // 3 * (8/5) * 1.0 - 0 = 4.8 -> 4 (floored)
-    expect(dmg).toBe(4);
+    // 3 * (8/5) * 1.0 = 4.8 -> 5 (rounded, no mitigation)
+    expect(dmg).toBe(5);
   });
 
   it('applies weapon multiplier', () => {
@@ -59,18 +59,33 @@ describe('calculateDamage', () => {
     expect(dmg).toBe(6);
   });
 
-  it('subtracts defense', () => {
+  it('reduces damage by a percentage per point of defense', () => {
     const dmg = calculateDamage({
-      baseDamage: 3,
+      baseDamage: 10,
       stat: 5,
       isAffinity: true,
       weaponMultiplier: 1.0,
-      defense: 2,
+      defense: 10,
       isMagic: false,
       targetWIS: 0,
     });
-    // 3 * 1.0 * 1.0 - 2 = 1
-    expect(dmg).toBe(1);
+    // 10 * 1.0 * 1.0 * (1 - 10 * 0.02) = 8
+    expect(dmg).toBe(8);
+  });
+
+  it('caps mitigation at 60%', () => {
+    expect(getMitigation(100)).toBe(0.6);
+    const dmg = calculateDamage({
+      baseDamage: 10, stat: 5, isAffinity: true, weaponMultiplier: 1.0, defense: 100, isMagic: false, targetWIS: 0,
+    });
+    expect(dmg).toBe(4);
+  });
+
+  it('ignores WIS for physical hits and CON for magic hits', () => {
+    const physical = calculateDamage({ baseDamage: 10, stat: 5, isAffinity: true, weaponMultiplier: 1, defense: 0, isMagic: false, targetWIS: 20 });
+    const magic = calculateDamage({ baseDamage: 10, stat: 5, isAffinity: true, weaponMultiplier: 1, defense: 20, isMagic: true, targetWIS: 0 });
+    expect(physical).toBe(10);
+    expect(magic).toBe(10);
   });
 
   it('minimum damage is 1', () => {
@@ -94,10 +109,10 @@ describe('calculateDamage', () => {
       weaponMultiplier: 1.0,
       defense: 0,
       isMagic: true,
-      targetWIS: 6,
+      targetWIS: 10,
     });
-    // 5 * (8/5) * 1.0 - 0 - (6*0.5) = 8 - 3 = 5
-    expect(dmg).toBe(5);
+    // 5 * (8/5) * 1.0 * (1 - 10 * 0.02) = 6.4 -> 6
+    expect(dmg).toBe(6);
   });
 });
 
@@ -260,6 +275,66 @@ describe('status effects in combat', () => {
   });
 });
 
+describe('status effects added by tree actives', () => {
+  it('berserk multiplies outgoing damage and increases damage taken', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['STR', 'CON'];
+    const raging = makeAttacker();
+    raging.affinityStats = ['STR', 'CON'];
+    raging.addStatusEffect({ type: 'berserk', duration: 5, value: 1.4, defenseReduction: 0.2 });
+    const d1 = makeDefender({ maxHp: 100 });
+    const d2 = makeDefender({ maxHp: 100 });
+    const r1 = resolveAttack(attacker, d1, { baseDamage: 10, damageType: 'melee', forceCrit: false, forceDodge: false });
+    const r2 = resolveAttack(raging, d2, { baseDamage: 10, damageType: 'melee', forceCrit: false, forceDodge: false });
+    expect(r2.damage).toBeGreaterThan(r1.damage);
+
+    const enemy = makeDefender({ maxHp: 100 });
+    const calm = makeAttacker({ maxHp: 100 });
+    const hurt = makeAttacker({ maxHp: 100 });
+    hurt.addStatusEffect({ type: 'berserk', duration: 5, value: 1.4, defenseReduction: 0.2 });
+    const r3 = resolveAttack(enemy, calm, { baseDamage: 30, damageType: 'melee', forceCrit: false, forceDodge: false });
+    const r4 = resolveAttack(enemy, hurt, { baseDamage: 30, damageType: 'melee', forceCrit: false, forceDodge: false });
+    expect(r4.damage).toBeGreaterThan(r3.damage);
+  });
+
+  it('tactical advance boosts one attack and is consumed', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['STR', 'CON'];
+    attacker.addStatusEffect({ type: 'tactical', duration: 2, value: 0.25 });
+    const d1 = makeDefender({ maxHp: 100 });
+    const d2 = makeDefender({ maxHp: 100 });
+    const r1 = resolveAttack(attacker, d1, { baseDamage: 10, damageType: 'melee', forceCrit: false, forceDodge: false });
+    expect(attacker.hasStatusEffect('tactical')).toBeNull();
+    const r2 = resolveAttack(attacker, d2, { baseDamage: 10, damageType: 'melee', forceCrit: false, forceDodge: false });
+    expect(r1.damage).toBeGreaterThan(r2.damage);
+  });
+
+  it('counterspell can negate a magic attack', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['INT', 'WIS'];
+    const defender = makeDefender({ maxHp: 100 });
+    const result = resolveAttack(attacker, defender, {
+      baseDamage: 10, damageType: 'magic', forceCrit: false, forceDodge: false,
+      defenderTreeEffects: { counterspell_chance: 1.0 },
+    });
+    expect(result.countered).toBe(true);
+    expect(defender.hp).toBe(100);
+  });
+
+  it('magic resistance only applies to magic damage', () => {
+    const attacker = makeAttacker();
+    attacker.affinityStats = ['STR', 'CON'];
+    const d1 = makeDefender({ maxHp: 100 });
+    const d2 = makeDefender({ maxHp: 100 });
+    const r1 = resolveAttack(attacker, d1, { baseDamage: 20, damageType: 'melee', forceCrit: false, forceDodge: false });
+    const r2 = resolveAttack(attacker, d2, {
+      baseDamage: 20, damageType: 'melee', forceCrit: false, forceDodge: false,
+      defenderTreeEffects: { magic_resistance: 0.5 },
+    });
+    expect(r2.damage).toBe(r1.damage);
+  });
+});
+
 describe('skill tree combat effects', () => {
   it('applies melee damage multiplier from tree effects', () => {
     const attacker = makeAttacker();
@@ -403,26 +478,17 @@ describe('Trap mechanics', () => {
     });
   });
 
-  describe('trap disarm damage', () => {
-    it('disarm deals 50% of full trap damage', () => {
-      for (const floor of [1, 5, 10]) {
-        const fullDamage = 2 + floor;
-        const disarmDamage = Math.max(1, Math.floor(fullDamage * 0.5));
-        expect(disarmDamage).toBe(Math.floor(fullDamage / 2));
-      }
+  describe('trap damage', () => {
+    it('scales with floor number', () => {
+      expect(getTrapDamage(1)).toBe(9);
+      expect(getTrapDamage(10)).toBeGreaterThan(getTrapDamage(1));
     });
 
-    it('disarm damage is at least 1', () => {
-      // Even on floor 0 (hypothetical), minimum damage is 1
-      const fullDamage = 2 + 0;
-      const disarmDamage = Math.max(1, Math.floor(fullDamage * 0.5));
-      expect(disarmDamage).toBeGreaterThanOrEqual(1);
-    });
-
-    it('disarm damage is less than full trap damage', () => {
-      for (const floor of [1, 3, 7, 10]) {
-        const fullDamage = 2 + floor;
+    it('disarm deals 50% of full trap damage and at least 1', () => {
+      for (const floor of [0, 1, 5, 10]) {
+        const fullDamage = getTrapDamage(floor);
         const disarmDamage = Math.max(1, Math.floor(fullDamage * 0.5));
+        expect(disarmDamage).toBeGreaterThanOrEqual(1);
         expect(disarmDamage).toBeLessThan(fullDamage);
       }
     });

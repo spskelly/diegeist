@@ -1,10 +1,11 @@
 import { TILE, TOWN_SIZE } from './constants.js';
 import { GameMap } from './game-map.js';
+import { stampBuildings } from './town-buildings.js';
 
 export const SHELTER_POS = { x: 15, y: 15 };
 export const SHELTER_ENTRANCE_POS = { x: 16, y: 17 };
 
-export function buildTownMap() {
+export function buildTownMap(saveData = null) {
   const map = new GameMap(TOWN_SIZE, TOWN_SIZE);
 
   // 1. Fill with grass
@@ -66,6 +67,9 @@ export function buildTownMap() {
 
   // Entrance tile below the shelter
   map.setTile(SHELTER_ENTRANCE_POS.x, SHELTER_ENTRANCE_POS.y, TILE.SHELTER_ENTRANCE);
+
+  // 6b. Player-built structures
+  stampBuildings(map, saveData?.buildings || []);
 
   // 7. Mark all tiles explored and visible (no FOV in town)
   for (let y = 0; y < TOWN_SIZE; y++) {

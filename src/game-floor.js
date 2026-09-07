@@ -8,7 +8,7 @@ import { updateActiveSkills } from './skills.js';
 import { computeFOV } from './fov.js';
 import { Camera } from './camera.js';
 import { Renderer } from './renderer.js';
-import { resolvePassiveEffects } from './skill-tree.js';
+import { resolvePassiveEffects, createTreeActiveSkills } from './skill-tree.js';
 import { persistSaveData } from './progression.js';
 import { getFloorClearMaterials, getBossKillMaterials, MATERIAL_COLORS } from './resources.js';
 import {
@@ -16,8 +16,35 @@ import {
   syncMilestoneAchievements,
   awardXP,
   getEnemyXP,
+  clearCombatVfx,
+  recalcPlayerMaxHp,
+  rebuildPassiveEffects,
 } from './game-utils.js';
+import { getWatchtowerRevealFloors } from './town-buildings.js';
 import { applyStarterLoadout, applyPendingHubLoadout } from './game-save.js';
+
+// marks whole rooms (plus their walls) explored, in random order, until the
+// given fraction of walkable tiles is known. returns the number of rooms revealed.
+export function revealRooms(map, fraction) {
+  let walkable = 0;
+  for (let y = 0; y < map.height; y++) for (let x = 0; x < map.width; x++) if (map.isWalkable(x, y)) walkable++;
+  const target = Math.floor(walkable * fraction);
+  const rooms = map.rooms.slice().sort(() => Math.random() - 0.5);
+  let explored = 0;
+  let revealed = 0;
+  for (const room of rooms) {
+    if (explored >= target) break;
+    for (let y = room.y - 1; y <= room.y + room.height; y++) {
+      for (let x = room.x - 1; x <= room.x + room.width; x++) {
+        if (!map.inBounds(x, y) || map.isExplored(x, y)) continue;
+        map.setExplored(x, y, true);
+        if (map.isWalkable(x, y)) explored++;
+      }
+    }
+    revealed++;
+  }
+  return revealed;
+}
 
 export function getEnemyBaseTemplatesForFloor(floorNumber) {
   const biome = getBiome(floorNumber);
@@ -25,51 +52,51 @@ export function getEnemyBaseTemplatesForFloor(floorNumber) {
   const ENEMY_POOLS = {
     wilds: [
       {
-        name: 'Leech', maxHp: 5, speed: 80, behavior: 'rushdown',
+        name: 'Leech', maxHp: 20, speed: 80, behavior: 'rushdown',
         stats: { STR: 3, DEX: 2, CON: 4, INT: 1, WIS: 1, LCK: 2 },
         spriteKey: 'leech', weight: 40,
       },
       {
-        name: 'Slime', maxHp: 8, speed: 70, behavior: 'ambush',
+        name: 'Slime', maxHp: 32, speed: 70, behavior: 'ambush',
         stats: { STR: 2, DEX: 1, CON: 6, INT: 1, WIS: 1, LCK: 2 },
         spriteKey: 'slime', weight: 35,
       },
     ],
     cave: [
       {
-        name: 'Rat', maxHp: 5, speed: 100, behavior: 'rushdown',
+        name: 'Rat', maxHp: 20, speed: 100, behavior: 'rushdown',
         stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 },
         spriteKey: 'rat', weight: Math.max(12, 52 - floorNumber * 3),
       },
       {
-        name: 'Bat', maxHp: 3, speed: 145, behavior: 'rushdown',
+        name: 'Bat', maxHp: 12, speed: 145, behavior: 'rushdown',
         stats: { STR: 2, DEX: 3, CON: 2, INT: 1, WIS: 1, LCK: 3 },
         spriteKey: 'bat', weight: 22 + floorNumber * 1.2,
       },
     ],
     dungeon: [
       {
-        name: 'Skeleton', maxHp: 7, speed: 100, behavior: 'rushdown',
+        name: 'Skeleton', maxHp: 28, speed: 100, behavior: 'rushdown',
         stats: { STR: 5, DEX: 4, CON: 4, INT: 2, WIS: 2, LCK: 2 },
         spriteKey: 'skeleton', weight: 40,
       },
       {
-        name: 'Zombie', maxHp: 12, speed: 65, behavior: 'rushdown',
+        name: 'Zombie', maxHp: 48, speed: 65, behavior: 'rushdown',
         stats: { STR: 6, DEX: 1, CON: 7, INT: 1, WIS: 1, LCK: 1 },
         spriteKey: 'zombie', weight: 35,
       },
       {
-        name: 'Skeleton Archer', maxHp: 5, speed: 95, behavior: 'kiting',
+        name: 'Skeleton Archer', maxHp: 20, speed: 95, behavior: 'kiting',
         stats: { STR: 2, DEX: 6, CON: 3, INT: 2, WIS: 2, LCK: 3 },
         spriteKey: 'skeleton_archer', weight: 25,
       },
     ],
     eldritch: [
       {
-        name: 'Demon', maxHp: 10, speed: 95, behavior: 'summoner',
+        name: 'Demon', maxHp: 40, speed: 95, behavior: 'summoner',
         stats: { STR: 5, DEX: 3, CON: 5, INT: 6, WIS: 5, LCK: 3 },
         spriteKey: 'demon', weight: 50,
-        summonTemplate: { name: 'Imp', spriteKey: 'leech', stats: { STR: 3, DEX: 2, CON: 2, INT: 1, WIS: 1, LCK: 1 }, maxHp: 4 },
+        summonTemplate: { name: 'Imp', spriteKey: 'leech', stats: { STR: 3, DEX: 2, CON: 2, INT: 1, WIS: 1, LCK: 1 }, maxHp: 16 },
       },
     ],
   };
@@ -99,7 +126,7 @@ export function scaleEnemyTemplate(template, floorNumber) {
   const enemy = {
     ...template,
     stats: scaledStats,
-    maxHp: Math.max(template.maxHp + floorNumber - 1, Math.floor(template.maxHp * hpScale)),
+    maxHp: Math.max(template.maxHp + 4 * (floorNumber - 1), Math.floor(template.maxHp * hpScale)),
     speed: Math.max(70, Math.floor(template.speed * speedScale)),
     isElite: false,
   };
@@ -121,26 +148,26 @@ export function scaleEnemyTemplate(template, floorNumber) {
 export function getFloorBossTemplate(floorNumber) {
   const BOSS_TEMPLATES = {
     3: {
-      name: 'Brood Mother', spriteKey: 'boss_brood_mother', behavior: 'summoner',
-      stats: { STR: 8, DEX: 4, CON: 10, INT: 6, WIS: 4, LCK: 3 }, maxHp: 60, speed: 80,
+      name: 'Brood Mother', spriteKey: 'boss_brood_mother', behavior: 'summoner', bossKey: 'brood_mother',
+      stats: { STR: 8, DEX: 4, CON: 10, INT: 6, WIS: 4, LCK: 3 }, maxHp: 180, speed: 80,
       renderScale: 1.5, auraColor: 'rgba(50, 180, 50, 0.25)',
-      summonTemplate: { name: 'Leech', spriteKey: 'leech', stats: { STR: 3, DEX: 2, CON: 4, INT: 1, WIS: 1, LCK: 2 }, maxHp: 5 },
+      summonTemplate: { name: 'Leech', spriteKey: 'leech', stats: { STR: 3, DEX: 2, CON: 4, INT: 1, WIS: 1, LCK: 2 }, maxHp: 20 },
     },
     6: {
-      name: 'Rat King', spriteKey: 'boss_rat_king', behavior: 'summoner',
-      stats: { STR: 10, DEX: 8, CON: 10, INT: 4, WIS: 4, LCK: 6 }, maxHp: 100, speed: 95,
+      name: 'Rat King', spriteKey: 'boss_rat_king', behavior: 'summoner', bossKey: 'rat_king',
+      stats: { STR: 10, DEX: 8, CON: 10, INT: 4, WIS: 4, LCK: 6 }, maxHp: 300, speed: 95,
       renderScale: 1.5, auraColor: 'rgba(160, 120, 60, 0.25)',
-      summonTemplate: { name: 'Rat', spriteKey: 'rat', stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 }, maxHp: 5 },
+      summonTemplate: { name: 'Rat', spriteKey: 'rat', stats: { STR: 3, DEX: 3, CON: 3, INT: 1, WIS: 1, LCK: 2 }, maxHp: 20 },
     },
     9: {
-      name: 'Bone Lord', spriteKey: 'boss_bone_lord', behavior: 'summoner',
-      stats: { STR: 14, DEX: 8, CON: 14, INT: 10, WIS: 8, LCK: 4 }, maxHp: 140, speed: 100,
+      name: 'Bone Lord', spriteKey: 'boss_bone_lord', behavior: 'summoner', bossKey: 'bone_lord',
+      stats: { STR: 14, DEX: 8, CON: 14, INT: 10, WIS: 8, LCK: 4 }, maxHp: 400, speed: 100,
       renderScale: 1.5, auraColor: 'rgba(80, 80, 200, 0.25)',
-      summonTemplate: { name: 'Skeleton', spriteKey: 'skeleton', stats: { STR: 5, DEX: 4, CON: 4, INT: 2, WIS: 2, LCK: 2 }, maxHp: 7 },
+      summonTemplate: { name: 'Skeleton', spriteKey: 'skeleton', stats: { STR: 5, DEX: 4, CON: 4, INT: 2, WIS: 2, LCK: 2 }, maxHp: 28 },
     },
     10: {
-      name: 'Void Tyrant', spriteKey: 'boss_tyrant', behavior: 'rushdown',
-      stats: { STR: 18, DEX: 10, CON: 16, INT: 12, WIS: 10, LCK: 8 }, maxHp: 180, speed: 125,
+      name: 'Void Tyrant', spriteKey: 'boss_tyrant', behavior: 'rushdown', bossKey: 'void_tyrant',
+      stats: { STR: 15, DEX: 10, CON: 16, INT: 12, WIS: 10, LCK: 8 }, maxHp: 500, speed: 125,
       renderScale: 2.0, auraColor: 'rgba(200, 40, 40, 0.25)',
     },
   };
@@ -184,6 +211,9 @@ export function spawnFloorBoss(game) {
   });
   boss.spriteKey = template.spriteKey;
   boss.isFloorBoss = true;
+  boss.bossKey = template.bossKey || null;
+  boss.enrageStage = 0;
+  boss.bossTurnCounter = 0;
   boss.renderScale = template.renderScale || 1;
   boss.auraColor = template.auraColor || 'rgba(200, 40, 40, 0.25)';
   if (template.summonTemplate) {
@@ -218,7 +248,7 @@ export function spawnFloorItems(game, rooms) {
     const item = Math.random() < 0.4
       ? generateConsumable(game.floorNumber)
       : generateItem({
-        floorLevel: game.floorNumber,
+        floorLevel: game.floorNumber + (game.treePassiveEffects?.gear_level_bonus || 0),
         luck: getEntityStatsWithEquipment(game.player).LCK,
         context: 'drop',
       });
@@ -257,23 +287,23 @@ export function startFloor(game) {
   const startY = Math.floor(startRoom.y + startRoom.height / 2);
 
   if (!game.player) {
-    game.player = createPlayer(game.selectedClass, startX, startY, game.saveData?.permanentStats || {});
+    const classKey = game.selectedClass;
+    const level = game.saveData?.classLevels?.[classKey] || 1;
+    game.player = createPlayer(classKey, startX, startY, game.saveData?.permanentStats || {}, level);
     game.player.floorNumber = game.floorNumber;
     game.runSummary.classKey = game.player.playerClass;
+
+    // Resolve skill tree passive effects before gear so max hp accounts for both.
+    // the hub loadout may hand over a shrine blessing, so rebuild after it too.
+    const investments = game.saveData?.skillInvestments?.[classKey] || {};
+    game.player.treeActiveSkills = createTreeActiveSkills(classKey, investments);
+    rebuildPassiveEffects(game);
+
     applyStarterLoadout(game);
     applyPendingHubLoadout(game);
-
-    // Resolve skill tree passive effects
-    const classKey = game.selectedClass;
-    const investments = game.saveData?.skillInvestments?.[classKey] || {};
-    game.treePassiveEffects = resolvePassiveEffects(classKey, investments);
-
-    // Apply max HP multiplier from skill tree
-    if (game.treePassiveEffects.max_hp_mult > 1.0) {
-      const hpBonus = Math.floor(game.player.maxHp * (game.treePassiveEffects.max_hp_mult - 1));
-      game.player.maxHp += hpBonus;
-      game.player.hp += hpBonus;
-    }
+    rebuildPassiveEffects(game);
+    recalcPlayerMaxHp(game);
+    game.player.hp = game.player.maxHp;
   } else {
     game.player.moveTo(startX, startY);
     game.player.floorNumber = game.floorNumber;
@@ -282,6 +312,12 @@ export function startFloor(game) {
   }
 
   game.turnSystem.addEntity(game.player);
+  // per-floor resets: unbreakable, enchant, corpses for the bone lord
+  game.deathSaveUsedThisFloor = false;
+  game.corpses = [];
+  for (const s of game.player.treeActiveSkills || []) {
+    if (s.treeEffect?.type === 'gear_enchant') s.currentCooldown = 0;
+  }
   updateActiveSkills(game.player);
 
   // Spawn enemy groups
@@ -402,7 +438,14 @@ export function startFloor(game) {
   game._currentAmbientBiome = getBiome(game.floorNumber);
 
   computeFOV(game.map, game.player.position.x, game.player.position.y, FOV_RADIUS);
-  game.camera.centerOn(game.player.position.x, game.player.position.y, game.map.width, game.map.height);
+  // watchtower: the first floors of a run start with part of the map scouted
+  if (game.floorNumber <= getWatchtowerRevealFloors(game.saveData)) {
+    const revealed = revealRooms(game.map, 0.34);
+    if (revealed > 0) game.messageLog.add('Your watchtower scouted this floor ahead of you.', game.turnCount, '#9fd0ff');
+  }
+  // the camera viewport differs between town and dungeon; make sure it is dungeon-sized now
+  if (game.syncCameraViewport) game.syncCameraViewport();
+  else game.camera.centerOn(game.player.position.x, game.player.position.y, game.map.width, game.map.height);
 }
 
 export function handleFloorTransition(game) {
@@ -463,6 +506,8 @@ export function handleFloorTransition(game) {
 
   // Clear old entities from turn system
   game.turnSystem = new TurnSystem();
+  // floating text and projectiles are in tile coordinates of the old floor; drop them
+  clearCombatVfx(game);
 
   startFloor(game);
   if (game.audio) game.audio.stairsDescend();

@@ -1,8 +1,10 @@
-import { PLAYER_CLASSES, STAT_NAMES, STAT_DESCRIPTIONS, TILE } from './constants.js';
+import { PLAYER_CLASSES, STAT_NAMES, STAT_DESCRIPTIONS, TILE, SKILL_SLOT_COUNT, LOADOUT_SLOT_COUNT } from './constants.js';
+import { SKILL_SLOT_KEYS } from './skills.js';
 import { getEquippedStats } from './inventory.js';
 import { ACHIEVEMENTS } from './progression.js';
 import { getXPForNextLevel, XP_TABLE, canInvestSkill, SKILL_TREES } from './skill-tree.js';
-import { MATERIAL_COLORS } from './resources.js';
+import { MATERIAL_COLORS, MATERIALS } from './resources.js';
+import { BUILDING_ORDER, BLUEPRINT_SOURCES, getBuildingDef, getBuildingMenu, describeBuilding, formatCost } from './town-buildings.js';
 import {
   getRarityColor,
   formatSlotName,
@@ -20,10 +22,16 @@ import {
   getStashPaneItems,
   getEntityStatsWithEquipment,
   getNaturalRegenInterval,
+  getRegenAmount,
   wrapTextLines,
+  getSwingPose,
+  CAST_GLOW_BY_SPRITE,
+  getLoadoutCount,
+  getLoadoutLabel,
 } from './game-utils.js';
 import { hasSavedRun } from './game-save.js';
 import { BIOME_KEYS } from './audio.js';
+import { registerRegion, drawButton, rowSelectAction, rowConfirmAction } from './ui.js';
 
 export function drawInventoryItemIcon(game, ctx, item, x, y, size) {
   if (!item) return;
@@ -136,8 +144,8 @@ export function getItemInspectLines(game, item, slotLabel = null) {
       lines.push(...wrapTextLines(item.skill.description, 30));
     }
     if (game.player) {
-      const bindings = game.player.skillSlotBindings || [null, null, null];
-      const slotLabels = ['Q', 'E', 'R'];
+      const bindings = game.player.skillSlotBindings || [];
+      const slotLabels = SKILL_SLOT_KEYS;
       let boundLabel = null;
       for (const [eqSlot, equipped] of Object.entries(game.player.equipment)) {
         if (equipped === item) {
@@ -146,7 +154,7 @@ export function getItemInspectLines(game, item, slotLabel = null) {
           break;
         }
       }
-      lines.push(boundLabel ? `Bound to: ${boundLabel}` : 'Q/E/R to assign slot');
+      lines.push(boundLabel ? `Bound to: ${boundLabel}` : 'Q/E/R/F to assign slot');
     }
   }
 
@@ -246,9 +254,53 @@ export function getStashItemSummaryLines(game, item) {
   return lines;
 }
 
+// weapon swings: the weapon sprite pivots at the attacker's hand and rotates
+// toward the target following the pose curve for its style
+function drawWeaponSwings(game, nowMs) {
+  const swings = game.combatVfx.swings;
+  if (!swings || swings.length === 0) return;
+  const ctx = game.ctx;
+  const cam = game.camera;
+  const ts = cam.tileSize;
+  for (const vfx of swings) {
+    if (game.map && !game.map.isVisible(vfx.x, vfx.y)) continue;
+    if (!cam.isInView(vfx.x, vfx.y)) continue;
+    const t = Math.max(0, Math.min(1, (nowMs - vfx.startMs) / vfx.durationMs));
+    const pose = getSwingPose(vfx.style, t);
+    if (pose.alpha <= 0) continue;
+    const { sx, sy } = cam.tileToScreen(vfx.x, vfx.y);
+    const pivotX = sx + ts / 2 + vfx.dirX * pose.offset * ts;
+    const pivotY = sy + ts / 2 + vfx.dirY * pose.offset * ts;
+    const size = Math.max(8, Math.floor(ts * 0.85 * pose.scale));
+    const sprite = game.sprites.get(vfx.spriteKey);
+    ctx.save();
+    ctx.globalAlpha = pose.alpha;
+    ctx.translate(pivotX, pivotY);
+    ctx.rotate(Math.atan2(vfx.dirY, vfx.dirX) + pose.angle);
+    // the grip sits a little behind the pivot so the blade extends outward
+    if (sprite) {
+      ctx.drawImage(sprite, -size * 0.25, -size / 2, size, size);
+    } else {
+      ctx.fillStyle = '#e8e8e8';
+      ctx.fillRect(-size * 0.25, -2, size, 4);
+    }
+    if (pose.glow > 0) {
+      const glowColor = CAST_GLOW_BY_SPRITE[vfx.spriteKey] || '#ffffff';
+      ctx.globalAlpha = pose.alpha * Math.min(1, 0.35 + pose.glow * 0.6);
+      ctx.fillStyle = glowColor;
+      ctx.beginPath();
+      ctx.arc(size * 0.62, 0, Math.max(2, ts * 0.22 * pose.glow), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
 export function drawCombatVfx(game, nowMs) {
   const ctx = game.ctx;
   const cam = game.camera;
+
+  drawWeaponSwings(game, nowMs);
 
   for (const vfx of game.combatVfx.projectiles) {
     const t = Math.max(0, Math.min(1, (nowMs - vfx.startMs) / vfx.durationMs));
@@ -281,7 +333,8 @@ export function drawCombatVfx(game, nowMs) {
     const rise = t * cam.tileSize * 0.9;
     const { sx, sy } = cam.tileToScreen(vfx.tileX, vfx.tileY);
     const textX = sx + cam.tileSize / 2;
-    const textY = sy + cam.tileSize * 0.2 - rise;
+    // stacked texts on the same tile start one line higher each
+    const textY = sy + cam.tileSize * 0.2 - rise - (vfx.stackIndex || 0) * (fontSize + 2);
     ctx.globalAlpha = alpha;
     ctx.fillStyle = '#000000';
     ctx.fillText(vfx.text, textX + 1, textY + 1);
@@ -345,6 +398,13 @@ export function drawInventoryOverlay(game) {
     }
 
     const row = eqRows[i];
+    registerRegion(game, x + Math.round(14 * uiScale), rowY - Math.round(13 * uiScale), listW - Math.round(20 * uiScale), eqLineH, (g) => {
+      if (g.inventorySection === 'equipment' && g.inventoryCursorByTab.equipment === i) return { type: 'inventoryConfirm' };
+      g.inventorySection = 'equipment';
+      g.inventoryCursorByTab.equipment = i;
+      if (g.audio) g.audio.uiClick();
+      return null;
+    });
     const baseX = x + Math.round(20 * uiScale);
     const label = `${formatSlotName(row.slot)}: `;
     ctx.fillStyle = selected ? '#ffffff' : '#c3cbd4';
@@ -354,9 +414,9 @@ export function drawInventoryOverlay(game) {
       ctx.fillStyle = getRarityColor(row.item.rarity, selected ? '#ffffff' : '#c3cbd4');
       ctx.fillText(truncateLabel(row.item.name, 18), itemX, rowY);
       if (row.item.skill) {
-        const bindings = game.player.skillSlotBindings || [null, null, null];
-        const slotLabels = ['Q', 'E', 'R'];
-        for (let si = 0; si < 3; si++) {
+        const bindings = game.player.skillSlotBindings || [];
+        const slotLabels = SKILL_SLOT_KEYS;
+        for (let si = 0; si < SKILL_SLOT_COUNT; si++) {
           if (bindings[si] === row.slot) {
             const nameEndX = itemX + ctx.measureText(truncateLabel(row.item.name, 18)).width + Math.round(6 * uiScale);
             ctx.fillStyle = '#6bc4ff';
@@ -409,6 +469,13 @@ export function drawInventoryOverlay(game) {
 
     ctx.fillStyle = '#1d242d';
     ctx.fillRect(cellX, cellY, cellSize, cellSize);
+    registerRegion(game, cellX, cellY, cellSize, cellSize, (g) => {
+      if (g.inventorySection === 'items' && g.inventoryCursorByTab.inventory === slotIndex) return item ? { type: 'inventoryConfirm' } : null;
+      g.inventorySection = 'items';
+      g.inventoryCursorByTab.inventory = slotIndex;
+      if (g.audio) g.audio.uiClick();
+      return null;
+    });
     ctx.strokeStyle = selected ? '#f4f7fa' : '#495664';
     ctx.lineWidth = selected ? Math.max(2, Math.floor(uiScale * 2)) : 1;
     ctx.strokeRect(cellX, cellY, cellSize, cellSize);
@@ -429,6 +496,11 @@ export function drawInventoryOverlay(game) {
       ctx.font = `${Math.max(8, Math.round(9 * uiScale))}px monospace`;
       const label = truncateLabel(item.name, 12);
       ctx.fillText(label, cellX + Math.round(4 * uiScale), cellY + cellSize - Math.round(6 * uiScale));
+      if ((item.count || 1) > 1) {
+        const countLabel = `x${item.count}`;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(countLabel, cellX + cellSize - ctx.measureText(countLabel).width - Math.round(4 * uiScale), cellY + Math.round(12 * uiScale));
+      }
     } else {
       ctx.fillStyle = '#6f7b89';
       ctx.font = `${Math.max(8, Math.round(9 * uiScale))}px monospace`;
@@ -459,19 +531,56 @@ export function drawInventoryOverlay(game) {
     ctx.fillText(line, detailX, y + Math.round(72 * uiScale) + i * detailLineH);
   }
 
-  // --- Control hints ---
-  ctx.fillStyle = '#94a0ad';
-  ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-  ctx.fillText(
-    'Arrows: navigate  Z/Enter: equip/unequip  X: drop  U: unequip',
-    x + Math.round(16 * uiScale),
-    y + panelH - Math.round(36 * uiScale)
-  );
-  ctx.fillText(
-    '1/2/3: belt  Q/E/R: skill slot  C: auto belt  Tab/I/ESC: close',
-    x + Math.round(16 * uiScale),
-    y + panelH - Math.round(18 * uiScale)
-  );
+  // --- Action buttons (inspect column) ---
+  const btnH = Math.round(24 * uiScale);
+  const btnGap = Math.round(6 * uiScale);
+  const btnRowY = y + panelH - Math.round(96 * uiScale);
+  const colW = x + panelW - detailX - Math.round(16 * uiScale);
+  const isEquipmentSel = game.inventorySection === 'equipment';
+  const selItem = inspectTarget.item;
+  const primaryLabel = isEquipmentSel ? 'Unequip' : (selItem?.slot ? 'Equip' : 'Use/Equip');
+  const actions = [
+    [primaryLabel, { type: 'inventoryConfirm' }, { dim: !selItem }],
+    ['Drop', { type: 'inventoryDrop' }, { dim: !selItem }],
+    ['Belt', { type: 'inventoryBelt' }, { dim: !(selItem && selItem.type === 'consumable') }],
+    ['Close', { type: 'close' }, {}],
+  ];
+  // narrow columns (phones) get two rows of two buttons
+  const perRow = colW < Math.round(260 * uiScale) ? 2 : 4;
+  const bw = Math.floor((colW - btnGap * (perRow - 1)) / perRow);
+  const firstRowY = perRow === 2 ? btnRowY - btnH - btnGap : btnRowY;
+  actions.forEach(([label, action, opts], i) => {
+    const col = i % perRow;
+    const row = Math.floor(i / perRow);
+    drawButton(game, detailX + col * (bw + btnGap), firstRowY + row * (btnH + btnGap), bw, btnH, label, action, opts);
+  });
+  if (isEquipmentSel && selItem?.skill) {
+    const slotRowY = firstRowY - btnH - btnGap * 2;
+    ctx.fillStyle = '#94a0ad';
+    ctx.font = `${Math.round(10 * uiScale)}px monospace`;
+    ctx.fillText('Bind to slot:', detailX, slotRowY - Math.round(4 * uiScale));
+    const sw = Math.floor((colW - btnGap * (SKILL_SLOT_COUNT - 1)) / SKILL_SLOT_COUNT);
+    for (let si = 0; si < SKILL_SLOT_COUNT; si++) {
+      const active = game.player.skillSlotBindings?.[si] === eqRows[game.inventoryCursorByTab.equipment || 0]?.slot;
+      drawButton(game, detailX + si * (sw + btnGap), slotRowY, sw, btnH, SKILL_SLOT_KEYS[si], { type: 'skill', slot: si }, { active });
+    }
+  }
+
+  // --- Control hints (wide panels only; phones use the buttons) ---
+  if (panelW >= Math.round(600 * uiScale)) {
+    ctx.fillStyle = '#94a0ad';
+    ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+    ctx.fillText(
+      'Arrows: navigate  Z/Enter: equip/unequip  X: drop  U: unequip',
+      x + Math.round(16 * uiScale),
+      y + panelH - Math.round(36 * uiScale)
+    );
+    ctx.fillText(
+      '1/2/3: belt  Q/E/R/F: skill slot  C: auto belt  Tab/I/ESC: close',
+      x + Math.round(16 * uiScale),
+      y + panelH - Math.round(18 * uiScale)
+    );
+  }
 }
 
 export function drawStatsOverlay(game) {
@@ -500,11 +609,11 @@ export function drawStatsOverlay(game) {
 
   ctx.font = `${Math.round(13 * uiScale)}px monospace`;
   ctx.fillStyle = '#cad4de';
-  ctx.fillText(`Class: ${getClassLabel(game.player.playerClass)}`, x + Math.round(16 * uiScale), y + Math.round(58 * uiScale));
+  ctx.fillText(`Class: ${getClassLabel(game.player.playerClass)} Lv${game.player.level || 1}`, x + Math.round(16 * uiScale), y + Math.round(58 * uiScale));
   ctx.fillText(`HP: ${game.player.hp}/${game.player.maxHp}`, x + Math.round(16 * uiScale), y + Math.round(78 * uiScale));
   ctx.fillText(`Floor: ${game.floorNumber}`, x + Math.round(180 * uiScale), y + Math.round(58 * uiScale));
   ctx.fillText(`Essence: ${game.player.gold}`, x + Math.round(180 * uiScale), y + Math.round(78 * uiScale));
-  ctx.fillText(`Natural Regen: 1 HP every ${getNaturalRegenInterval(game.player)} turns`, x + Math.round(16 * uiScale), y + Math.round(98 * uiScale));
+  ctx.fillText(`Natural Regen: ${getRegenAmount(game.player)} HP every ${getNaturalRegenInterval(game.player)} turns`, x + Math.round(16 * uiScale), y + Math.round(98 * uiScale));
 
   const classDef = PLAYER_CLASSES[game.player.playerClass];
   const affinitySet = classDef ? classDef.affinityStats : [];
@@ -532,9 +641,9 @@ export function drawStatsOverlay(game) {
   ctx.fillStyle = '#d8e3ee';
   ctx.fillText('Active Skills:', x + Math.round(16 * uiScale), skillStartY);
   const skills = game.player.activeSkills || [];
-  const slotLabels = ['Q', 'E', 'R'];
+  const slotLabels = SKILL_SLOT_KEYS;
   let drawnCount = 0;
-  for (let i = 0; i < Math.min(3, skills.length); i++) {
+  for (let i = 0; i < Math.min(SKILL_SLOT_COUNT, skills.length); i++) {
     const skill = skills[i];
     if (!skill) continue;
     ctx.fillStyle = '#9ab3c9';
@@ -543,12 +652,14 @@ export function drawStatsOverlay(game) {
   }
   if (drawnCount === 0) {
     ctx.fillStyle = '#7d8894';
-    ctx.fillText('No skills equipped via gear.', x + Math.round(28 * uiScale), skillStartY + Math.round(18 * uiScale));
+    ctx.fillText('No active skills. Gear with skills and skill tree actives fill Q/E/R/F.', x + Math.round(28 * uiScale), skillStartY + Math.round(18 * uiScale));
   }
 
   ctx.fillStyle = '#94a0ad';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
   ctx.fillText('P or ESC: close', x + Math.round(16 * uiScale), y + panelH - Math.round(18 * uiScale));
+  registerRegion(game, 0, 0, game.canvas.width, game.canvas.height, { type: 'close' });
+  drawButton(game, x + panelW - Math.round(76 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(60 * uiScale), Math.round(24 * uiScale), 'Close', { type: 'close' });
 }
 
 export function drawMapOverlay(game) {
@@ -636,7 +747,8 @@ export function drawMapOverlay(game) {
   // Hint
   ctx.fillStyle = '#7f8a94';
   ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-  ctx.fillText('M or ESC: close', ox, oy + mapPixelH + Math.round(16 * uiScale));
+  ctx.fillText('M or ESC: close (or tap anywhere)', ox, oy + mapPixelH + Math.round(16 * uiScale));
+  registerRegion(game, 0, 0, cw, ch, { type: 'close' });
 }
 
 export function drawStartMenu(game) {
@@ -657,7 +769,7 @@ export function drawStartMenu(game) {
   ctx.fillRect(0, 0, w, h);
 
   const panelW = Math.min(Math.round(720 * uiScale), w - 50);
-  const panelH = Math.min(Math.round(460 * uiScale), h - 50);
+  const panelH = Math.min(panelW < Math.round(560 * uiScale) ? Math.round(600 * uiScale) : Math.round(460 * uiScale), h - 50);
   const x = Math.floor((w - panelW) / 2);
   const y = Math.floor((h - panelH) / 2);
 
@@ -672,7 +784,7 @@ export function drawStartMenu(game) {
 
   ctx.fillStyle = '#8ca2b8';
   ctx.font = `${Math.round(14 * uiScale)}px monospace`;
-  ctx.fillText('Select class with arrows, then press Enter to begin.', x + Math.round(26 * uiScale), y + Math.round(98 * uiScale));
+  ctx.fillText(panelW < Math.round(560 * uiScale) ? 'Pick a class, then Start Run.' : 'Select class with arrows, then press Enter to begin.', x + Math.round(26 * uiScale), y + Math.round(98 * uiScale));
 
   const hasSave = hasSavedRun();
   const baseY = y + Math.round(146 * uiScale);
@@ -682,6 +794,7 @@ export function drawStartMenu(game) {
   // Continue Run option (if saved run exists)
   if (hasSave) {
     const selected = game.startMenuIndex === 0;
+    registerRegion(game, x + Math.round(24 * uiScale), baseY - Math.round(19 * uiScale), Math.round(250 * uiScale), rowH, rowSelectAction('startMenuIndex', 0));
     if (selected) {
       ctx.fillStyle = '#2a3648';
       ctx.fillRect(x + Math.round(24 * uiScale), baseY - Math.round(19 * uiScale), Math.round(250 * uiScale), Math.round(24 * uiScale));
@@ -696,6 +809,8 @@ export function drawStartMenu(game) {
     const key = game.classOrder[i];
     const menuIdx = i + rowIndex;
     const selected = menuIdx === game.startMenuIndex;
+    registerRegion(game, x + Math.round(24 * uiScale), baseY - Math.round(19 * uiScale) + menuIdx * rowH, Math.round(250 * uiScale), rowH,
+      rowSelectAction('startMenuIndex', menuIdx, { type: 'inventoryConfirm' }, (g) => { g.selectedClass = key; }));
     if (selected) {
       ctx.fillStyle = '#2a3648';
       ctx.fillRect(x + Math.round(24 * uiScale), baseY - Math.round(19 * uiScale) + menuIdx * rowH, Math.round(250 * uiScale), Math.round(24 * uiScale));
@@ -705,8 +820,9 @@ export function drawStartMenu(game) {
     ctx.fillText(getClassLabel(key), x + Math.round(34 * uiScale), baseY + menuIdx * rowH);
   }
 
-  const statX = x + Math.round(320 * uiScale);
-  const statY = y + Math.round(132 * uiScale);
+  const stacked = panelW < Math.round(560 * uiScale);
+  const statX = stacked ? x + Math.round(26 * uiScale) : x + Math.round(320 * uiScale);
+  const statY = stacked ? baseY + (game.classOrder.length + rowIndex) * rowH + Math.round(4 * uiScale) : y + Math.round(132 * uiScale);
   ctx.fillStyle = '#d4dfeb';
   ctx.font = `${Math.round(16 * uiScale)}px monospace`;
   ctx.fillText(`${classDef.name}`, statX, statY);
@@ -737,6 +853,10 @@ export function drawStartMenu(game) {
   ctx.fillStyle = '#7f94ab';
   ctx.fillText('Enter/Z: Start Run', x + Math.round(26 * uiScale), y + panelH - Math.round(22 * uiScale));
   ctx.fillText('H: Hub Menu', x + Math.round(210 * uiScale), y + panelH - Math.round(22 * uiScale));
+  const sbW = Math.round(120 * uiScale);
+  const sbH = Math.round(30 * uiScale);
+  drawButton(game, x + panelW - sbW * 2 - Math.round(36 * uiScale), y + panelH - sbH - Math.round(16 * uiScale), sbW, sbH, 'Hub', { type: 'hub' });
+  drawButton(game, x + panelW - sbW - Math.round(24 * uiScale), y + panelH - sbH - Math.round(16 * uiScale), sbW, sbH, hasSave && game.startMenuIndex === 0 ? 'Continue' : 'Start Run', { type: 'inventoryConfirm' }, { active: true });
 }
 
 export function drawDeathSplash(game) {
@@ -760,8 +880,9 @@ export function drawDeathSplash(game) {
   ctx.fillText(`Killed by: ${cause}`, Math.round(w * 0.5 - 100 * uiScale), Math.round(h * 0.45) + Math.round(40 * uiScale));
   if (game.deathSplashFrames >= 25) {
     ctx.fillStyle = '#f2f6fb';
-    ctx.fillText('Press Enter to continue', Math.round(w * 0.5 - 120 * uiScale), Math.round(h * 0.45) + Math.round(78 * uiScale));
+    ctx.fillText('Press Enter or tap to continue', Math.round(w * 0.5 - 140 * uiScale), Math.round(h * 0.45) + Math.round(78 * uiScale));
   }
+  registerRegion(game, 0, 0, w, h, { type: 'inventoryConfirm' });
 }
 
 export function drawDeathSaveChoice(game) {
@@ -787,15 +908,16 @@ export function drawDeathSaveChoice(game) {
 
   ctx.fillStyle = '#7a8a9a';
   ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-  ctx.fillText('Without a save, items are lost and materials are halved.', x + Math.round(20 * uiScale), y + Math.round(56 * uiScale));
+  ctx.fillText('Death halves your material haul. Choose what to protect:', x + Math.round(20 * uiScale), y + Math.round(56 * uiScale));
 
   ctx.fillStyle = '#afc0d2';
   ctx.font = `${Math.round(13 * uiScale)}px monospace`;
   ctx.fillText('Choose one to keep:', x + Math.round(20 * uiScale), y + Math.round(76 * uiScale));
 
-  const options = ['Keep 1 item (lose all materials)', 'Keep all materials (lose all items)'];
+  const options = ['Keep 1 item (materials halved)', 'Keep all materials (lose all items)'];
   for (let i = 0; i < options.length; i++) {
     const selected = i === game.deathSaveIndex;
+    registerRegion(game, x + Math.round(18 * uiScale), y + Math.round(96 * uiScale) + i * Math.round(36 * uiScale), panelW - Math.round(36 * uiScale), Math.round(32 * uiScale), rowConfirmAction('deathSaveIndex', i));
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(x + Math.round(18 * uiScale), y + Math.round(96 * uiScale) + i * Math.round(36 * uiScale), panelW - Math.round(36 * uiScale), Math.round(28 * uiScale));
@@ -861,6 +983,7 @@ export function drawPostDeathMenu(game) {
   const options = ['Retry', 'Hub', 'Main Menu'];
   for (let i = 0; i < options.length; i++) {
     const selected = i === game.postDeathMenuIndex;
+    registerRegion(game, x + Math.round(18 * uiScale), y + Math.round(186 * uiScale) + matOffset + i * Math.round(36 * uiScale), Math.round(170 * uiScale), Math.round(34 * uiScale), rowConfirmAction('postDeathMenuIndex', i));
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(x + Math.round(18 * uiScale), y + Math.round(186 * uiScale) + matOffset + i * Math.round(36 * uiScale), Math.round(170 * uiScale), Math.round(26 * uiScale));
@@ -870,6 +993,11 @@ export function drawPostDeathMenu(game) {
     ctx.fillText(options[i], x + Math.round(28 * uiScale), y + Math.round(206 * uiScale) + matOffset + i * Math.round(36 * uiScale));
   }
 
+  if (game.hubNotice) {
+    ctx.fillStyle = '#ffb36b';
+    ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+    ctx.fillText(game.hubNotice, x + Math.round(20 * uiScale), y + panelH - Math.round(40 * uiScale));
+  }
   ctx.fillStyle = '#7d8e9f';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
   ctx.fillText('Up/Down: Select  Enter/Z: Confirm', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
@@ -929,8 +1057,11 @@ export function drawVictoryScreen(game) {
 
   ctx.fillStyle = '#86c99b';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-  ctx.fillText('Press Enter to return to main menu', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
-  ctx.fillText('Press H to open Hub', x + Math.round(20 * uiScale), y + panelH - Math.round(36 * uiScale));
+  ctx.fillText('Press Enter to return to town', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
+  ctx.fillText('Press H to open the Hub', x + Math.round(20 * uiScale), y + panelH - Math.round(36 * uiScale));
+  registerRegion(game, 0, 0, w, h, { type: 'inventoryConfirm' });
+  drawButton(game, x + panelW - Math.round(200 * uiScale), y + panelH - Math.round(44 * uiScale), Math.round(80 * uiScale), Math.round(26 * uiScale), 'Hub', { type: 'hub' });
+  drawButton(game, x + panelW - Math.round(108 * uiScale), y + panelH - Math.round(44 * uiScale), Math.round(88 * uiScale), Math.round(26 * uiScale), 'Town', { type: 'inventoryConfirm' }, { active: true });
 }
 
 export function drawHubMenu(game) {
@@ -942,7 +1073,7 @@ export function drawHubMenu(game) {
   const panelH = Math.min(Math.round(430 * uiScale), h - 40);
   const x = Math.floor((w - panelW) / 2);
   const y = Math.floor((h - panelH) / 2);
-  const options = getHubMenuOptions();
+  const options = getHubMenuOptions(game);
 
   ctx.fillStyle = '#0b0f16';
   ctx.fillRect(0, 0, w, h);
@@ -958,9 +1089,10 @@ export function drawHubMenu(game) {
   ctx.fillStyle = '#b7c7d8';
   ctx.font = `${Math.round(14 * uiScale)}px monospace`;
   ctx.fillText(`Essence: ${game.saveData?.currency || 0}`, x + Math.round(20 * uiScale), y + Math.round(78 * uiScale));
-  const pendingText = game.pendingStashLoadoutItem
-    ? `Pending loadout: ${game.pendingStashLoadoutItem.name}`
-    : 'Pending loadout: none';
+  const loadout = game.saveData?.pendingLoadout || [];
+  const pendingText = loadout.length > 0
+    ? `Loadout ${getLoadoutLabel(game.saveData)}: ${truncateLabel(loadout.map(i => i.name).join(', '), 40)}`
+    : `Loadout ${getLoadoutLabel(game.saveData)}: none (queue gear in Stash)`;
   ctx.fillText(pendingText, x + Math.round(220 * uiScale), y + Math.round(78 * uiScale));
 
   // Material totals
@@ -982,6 +1114,7 @@ export function drawHubMenu(game) {
   const optionY = y + Math.round(140 * uiScale);
   for (let i = 0; i < options.length; i++) {
     const selected = i === game.hubMenuIndex;
+    registerRegion(game, x + Math.round(20 * uiScale), optionY - Math.round(20 * uiScale) + i * Math.round(38 * uiScale), Math.round(280 * uiScale), Math.round(36 * uiScale), rowConfirmAction('hubMenuIndex', i));
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(x + Math.round(20 * uiScale), optionY - Math.round(20 * uiScale) + i * Math.round(38 * uiScale), Math.round(280 * uiScale), Math.round(28 * uiScale));
@@ -993,7 +1126,14 @@ export function drawHubMenu(game) {
 
   ctx.fillStyle = '#9fb2c5';
   ctx.font = `${Math.round(13 * uiScale)}px monospace`;
-  ctx.fillText(`Run stash candidates: ${game.hubRunCarryover.length}`, x + Math.round(340 * uiScale), y + Math.round(134 * uiScale));
+  if (game.hubRunCarryover.length > 0) {
+    // unstashed run items are lost when a run starts, so make that loud
+    ctx.fillStyle = '#ffb36b';
+    ctx.fillText(`${game.hubRunCarryover.length} run item${game.hubRunCarryover.length === 1 ? '' : 's'} not stashed (lost on Start Run)`, x + Math.round(340 * uiScale), y + Math.round(134 * uiScale));
+    ctx.fillStyle = '#9fb2c5';
+  } else {
+    ctx.fillText('Run items: none waiting', x + Math.round(340 * uiScale), y + Math.round(134 * uiScale));
+  }
   ctx.fillText(`Last run: ${game.runSummary?.causeOfDeath || 'N/A'}`, x + Math.round(340 * uiScale), y + Math.round(156 * uiScale));
   if (game.hubNotice) {
     ctx.fillStyle = '#d9e7f5';
@@ -1056,6 +1196,7 @@ export function drawHubShop(game) {
     const row = i - shopSv.startIdx;
     const item = game.hubShop.items[i];
     const selected = i === game.hubShopCursor;
+    registerRegion(game, x + Math.round(18 * uiScale), startY - Math.round(18 * uiScale) + row * lineH, panelW - Math.round(36 * uiScale), lineH, rowSelectAction('hubShopCursor', i));
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(x + Math.round(18 * uiScale), startY - Math.round(18 * uiScale) + row * lineH, panelW - Math.round(36 * uiScale), Math.round(24 * uiScale));
@@ -1082,6 +1223,8 @@ export function drawHubShop(game) {
   ctx.fillStyle = '#7d8e9f';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
   ctx.fillText('Up/Down: Select  Enter/Z: Buy  ESC: Back', x + Math.round(20 * uiScale), y + panelH - Math.round(20 * uiScale));
+  drawButton(game, x + panelW - Math.round(150 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(64 * uiScale), Math.round(24 * uiScale), 'Buy', { type: 'inventoryConfirm' }, { active: true });
+  drawButton(game, x + panelW - Math.round(78 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(64 * uiScale), Math.round(24 * uiScale), 'Back', { type: 'close' });
 }
 
 export function drawHubStash(game) {
@@ -1112,9 +1255,13 @@ export function drawHubStash(game) {
   ctx.fillStyle = '#e8eef5';
   ctx.font = `${Math.round(28 * uiScale)}px monospace`;
   ctx.fillText('Stash', x + Math.round(20 * uiScale), y + Math.round(42 * uiScale));
+  // selling happens here, so the wallet is always in view
+  ctx.fillStyle = '#e7d38a';
+  ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+  ctx.fillText(`Essence: ${game.saveData?.currency || 0}`, x + Math.round(150 * uiScale), y + Math.round(42 * uiScale));
   ctx.fillStyle = '#a7b7c7';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-  ctx.fillText('Left pane: persistent stash  |  Right pane: last run items', x + Math.round(20 * uiScale), y + Math.round(66 * uiScale));
+  ctx.fillText(`Left: loadout (${getLoadoutLabel(game.saveData)}) + stash  |  Right: last run items`, x + Math.round(20 * uiScale), y + Math.round(66 * uiScale));
 
   ctx.strokeStyle = game.hubStashPane === 'stash' ? '#d9ecff' : '#394754';
   ctx.strokeRect(leftX, paneTop, paneW, paneHeight);
@@ -1126,8 +1273,9 @@ export function drawHubStash(game) {
   ctx.fillText(`Stash (${game.saveData.stash.length})`, leftX + Math.round(8 * uiScale), paneTop + Math.round(20 * uiScale));
   ctx.fillText(`Run Items (${game.hubRunCarryover.length})`, rightX + Math.round(8 * uiScale), paneTop + Math.round(20 * uiScale));
 
-  // Scroll views for both panes
-  const stashItems = game.saveData.stash || [];
+  // Scroll views for both panes. the left list is the queued loadout followed by the stash
+  const loadoutCount = getLoadoutCount(game);
+  const stashItems = getStashPaneItems({ hubStashPane: 'stash', saveData: game.saveData });
   const stashSv = getScrollView(game.hubStashCursor, game.hubStashScrollOffset, stashItems.length, maxVisible);
   game.hubStashScrollOffset = stashSv.scrollOffset;
   const runSv = getScrollView(game.hubRunItemsCursor, game.hubRunScrollOffset, game.hubRunCarryover.length, maxVisible);
@@ -1137,13 +1285,22 @@ export function drawHubStash(game) {
   for (let i = stashSv.startIdx; i < stashSv.endIdx; i++) {
     const row = i - stashSv.startIdx;
     const selected = game.hubStashPane === 'stash' && i === game.hubStashCursor;
+    registerRegion(game, leftX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + row * lineH, paneW - Math.round(12 * uiScale), lineH, (g) => {
+      if (g.hubStashPane === 'stash' && g.hubStashCursor === i) return { type: 'inventoryConfirm' };
+      g.hubStashPane = 'stash';
+      g.hubStashCursor = i;
+      if (g.audio) g.audio.uiClick();
+      return null;
+    });
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(leftX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + row * lineH, paneW - Math.round(12 * uiScale), Math.round(20 * uiScale));
     }
-    ctx.fillStyle = selected ? '#ffffff' : getRarityColor(stashItems[i].rarity, '#b6c6d6');
+    const queued = i < loadoutCount;
+    ctx.fillStyle = selected ? '#ffffff' : queued ? '#a3c9f0' : getRarityColor(stashItems[i].rarity, '#b6c6d6');
     ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-    ctx.fillText(truncateLabel(stashItems[i].name, 24), leftX + Math.round(10 * uiScale), startY + row * lineH);
+    const label = queued ? `> ${truncateLabel(stashItems[i].name, 22)}` : truncateLabel(stashItems[i].name, 24);
+    ctx.fillText(label, leftX + Math.round(10 * uiScale), startY + row * lineH);
   }
   drawScrollIndicators(ctx, leftX + Math.round(8 * uiScale),
     paneTop + Math.round(28 * uiScale), paneTop + paneHeight - Math.round(6 * uiScale),
@@ -1153,6 +1310,13 @@ export function drawHubStash(game) {
   for (let i = runSv.startIdx; i < runSv.endIdx; i++) {
     const row = i - runSv.startIdx;
     const selected = game.hubStashPane === 'run' && i === game.hubRunItemsCursor;
+    registerRegion(game, rightX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + row * lineH, paneW - Math.round(12 * uiScale), lineH, (g) => {
+      if (g.hubStashPane === 'run' && g.hubRunItemsCursor === i) return { type: 'inventoryConfirm' };
+      g.hubStashPane = 'run';
+      g.hubRunItemsCursor = i;
+      if (g.audio) g.audio.uiClick();
+      return null;
+    });
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(rightX + Math.round(6 * uiScale), startY - Math.round(16 * uiScale) + row * lineH, paneW - Math.round(12 * uiScale), Math.round(20 * uiScale));
@@ -1171,9 +1335,10 @@ export function drawHubStash(game) {
   const selectedItem = game.hubStashPane === 'stash'
     ? (stashItems[game.hubStashCursor] || null)
     : (game.hubRunCarryover[game.hubRunItemsCursor] || null);
+  const onLoadoutRow = game.hubStashPane === 'stash' && game.hubStashCursor < loadoutCount;
   const summaryLines = getStashItemSummaryLines(game, selectedItem);
   if (selectedItem && game.hubStashPane === 'stash') {
-    summaryLines.push(`Sell value: ${getItemSellValue(selectedItem)} essence`);
+    summaryLines.push(onLoadoutRow ? 'Queued for next run' : `Sell value: ${getItemSellValue(selectedItem)} essence`);
   }
   ctx.font = `${Math.round(11 * uiScale)}px monospace`;
   for (let i = 0; i < Math.min(4, summaryLines.length); i++) {
@@ -1183,10 +1348,12 @@ export function drawHubStash(game) {
 
   const statusY = bottomY + Math.round(50 * uiScale);
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
-  if (game.pendingStashLoadoutItem) {
-    ctx.fillStyle = '#a3c9f0';
-    ctx.fillText(`Next run loadout: ${game.pendingStashLoadoutItem.name}`, x + Math.round(20 * uiScale), statusY);
-  }
+  const loadout = game.saveData.pendingLoadout || [];
+  ctx.fillStyle = '#a3c9f0';
+  const loadoutText = loadout.length > 0
+    ? `Next run loadout (${getLoadoutLabel(game.saveData)}): ${truncateLabel(loadout.map(i => i.name).join(', '), 60)}`
+    : `Next run loadout (0/${LOADOUT_SLOT_COUNT}): none. Enter on a stash item queues it, one per slot.`;
+  ctx.fillText(loadoutText, x + Math.round(20 * uiScale), statusY);
   if (game.hubNotice) {
     ctx.fillStyle = '#d9e7f5';
     ctx.fillText(game.hubNotice, x + Math.round(20 * uiScale), statusY + Math.round(16 * uiScale));
@@ -1194,12 +1361,22 @@ export function drawHubStash(game) {
 
   ctx.fillStyle = '#7d8e9f';
   let controls;
-  if (game.pendingStashLoadoutItem) {
-    controls = 'Arrows: navigate  Enter/Z: move  X: unqueue loadout  ESC: Back';
+  if (onLoadoutRow) {
+    controls = 'Arrows: navigate  Enter/Z: unqueue  X: unqueue  ESC: Back';
+  } else if (game.hubStashPane === 'stash') {
+    controls = 'Arrows: navigate  Enter/Z: queue for run  X: sell item  ESC: Back';
   } else {
-    controls = 'Arrows: navigate  Enter/Z: move  X: sell item  ESC: Back';
+    controls = 'Arrows: navigate  Enter/Z: move to stash  ESC: Back';
   }
   ctx.fillText(controls, x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
+  const sbw = Math.round(72 * uiScale);
+  const sby = y + panelH - Math.round(38 * uiScale);
+  const moveLabel = onLoadoutRow ? 'Unqueue' : game.hubStashPane === 'stash' ? 'Queue' : 'Stash';
+  drawButton(game, x + panelW - sbw * 3 - Math.round(36 * uiScale), sby, sbw, Math.round(24 * uiScale), moveLabel, { type: 'inventoryConfirm' }, { active: true });
+  if (game.hubStashPane === 'stash' && !onLoadoutRow) {
+    drawButton(game, x + panelW - sbw * 2 - Math.round(28 * uiScale), sby, sbw, Math.round(24 * uiScale), 'Sell', { type: 'inventoryDrop' });
+  }
+  drawButton(game, x + panelW - sbw - Math.round(20 * uiScale), sby, sbw, Math.round(24 * uiScale), 'Back', { type: 'close' });
 }
 
 export function drawHubAchievements(game) {
@@ -1241,6 +1418,7 @@ export function drawHubAchievements(game) {
     const ach = ACHIEVEMENTS[i];
     const record = game.saveData.achievements[ach.id] || { progress: 0, unlocked: false };
     const selected = i === game.hubAchievementsCursor;
+    registerRegion(game, x + Math.round(16 * uiScale), startY - Math.round(17 * uiScale) + row * lineH, listW - Math.round(28 * uiScale), lineH, (g) => { g.hubAchievementsCursor = i; return null; });
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(x + Math.round(16 * uiScale), startY - Math.round(17 * uiScale) + row * lineH, listW - Math.round(28 * uiScale), Math.round(22 * uiScale));
@@ -1276,6 +1454,7 @@ export function drawHubAchievements(game) {
   ctx.fillStyle = '#7d8e9f';
   ctx.font = `${Math.round(12 * uiScale)}px monospace`;
   ctx.fillText('Up/Down: Select  ESC: Back', x + Math.round(20 * uiScale), y + panelH - Math.round(14 * uiScale));
+  drawButton(game, x + panelW - Math.round(78 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(64 * uiScale), Math.round(24 * uiScale), 'Back', { type: 'close' });
 }
 
 export function drawPauseMenu(game) {
@@ -1288,10 +1467,10 @@ export function drawPauseMenu(game) {
   ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
   ctx.fillRect(0, 0, w, h);
 
-  const panelW = Math.round(300 * uiScale);
+  const panelW = Math.min(Math.round(300 * uiScale), w - 24);
   const panelH = Math.round(240 * uiScale);
   const px = Math.floor((w - panelW) / 2);
-  const py = Math.floor((h - panelH) / 2);
+  const py = Math.floor((h - panelH) / 2) - Math.round(24 * uiScale);
 
   ctx.fillStyle = '#171d28';
   ctx.fillRect(px, py, panelW, panelH);
@@ -1309,6 +1488,7 @@ export function drawPauseMenu(game) {
 
   for (let i = 0; i < options.length; i++) {
     const selected = i === game.pauseMenuIndex;
+    registerRegion(game, px + Math.round(10 * uiScale), startY + i * lineH - Math.round(16 * uiScale), panelW - Math.round(20 * uiScale), lineH, rowConfirmAction('pauseMenuIndex', i));
     if (selected) {
       ctx.fillStyle = '#2b3a4d';
       ctx.fillRect(px + Math.round(10 * uiScale), startY + i * lineH - Math.round(16 * uiScale), panelW - Math.round(20 * uiScale), Math.round(22 * uiScale));
@@ -1316,6 +1496,27 @@ export function drawPauseMenu(game) {
     ctx.fillStyle = selected ? '#ffffff' : '#a0aab5';
     ctx.fillText(options[i], px + Math.round(20 * uiScale), startY + i * lineH);
   }
+
+  // keyboard reference lives here now that the hud shows buttons instead
+  const helpY = py + panelH + Math.round(14 * uiScale);
+  const helpLines = w < 640 ? [
+    'Move: Arrows / tap a tile',
+    'Attack: WASD / tap an enemy',
+    'Wait: Space  Pick up: G  Stairs: >',
+    'Skills: Q/E/R/F  Belt: 1/2/3',
+    'Bag: I  Tree: K  Stats: P  Map: M',
+  ] : [
+    'Move: Arrows / tap a tile   Attack: WASD / tap an enemy',
+    'Wait: Space   Pick up: G   Stairs: >   Skills: Q/E/R/F   Belt: 1/2/3',
+    'Inventory: I   Skill tree: K   Stats: P   Map: M   Menu: Esc',
+  ];
+  ctx.fillStyle = '#6f7d8a';
+  ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+  ctx.textAlign = 'center';
+  for (let i = 0; i < helpLines.length; i++) {
+    ctx.fillText(helpLines[i], Math.floor(w / 2), helpY + i * Math.round(16 * uiScale));
+  }
+  ctx.textAlign = 'left';
 }
 
 export function drawSettingsMenu(game) {
@@ -1366,6 +1567,18 @@ export function drawSettingsMenu(game) {
   for (let i = 0; i < rows.length; i++) {
     const selected = i === game.settingsMenuIndex;
     const rowY = startY + i * lineH;
+    const rowTop = rowY - Math.round(14 * uiScale);
+    if (rows[i].type === 'action') {
+      registerRegion(game, px + Math.round(8 * uiScale), rowTop, panelW - Math.round(16 * uiScale), lineH, { type: 'close' });
+    } else {
+      // left half of the control nudges left, right half nudges right
+      const mid = barX + barW / 2;
+      registerRegion(game, px + Math.round(8 * uiScale), rowTop, mid - px - Math.round(8 * uiScale), lineH, (g) => { g.settingsMenuIndex = i; return { type: 'move', dx: -1, dy: 0 }; });
+      registerRegion(game, mid, rowTop, px + panelW - mid - Math.round(8 * uiScale), lineH, (g) => { g.settingsMenuIndex = i; return { type: 'move', dx: 1, dy: 0 }; });
+      if (rows[i].type === 'biome') {
+        registerRegion(game, barX, rowTop, barW, lineH, (g) => { g.settingsMenuIndex = i; return { type: 'inventoryConfirm' }; });
+      }
+    }
 
     // Selection highlight
     if (selected) {
@@ -1444,8 +1657,14 @@ export function drawSkillTree(game) {
   const fromHub = game.skillTreeReturnState === 'hubMenu';
   ctx.fillStyle = '#e8eef5';
   ctx.font = `bold ${Math.round(18 * uiScale)}px monospace`;
-  const headerText = fromHub ? `< ${className} Skill Tree >` : `${className} Skill Tree`;
+  const canSwitchClass = fromHub || game.skillTreeReturnState === 'town';
+  const headerText = canSwitchClass ? `< ${className} Skill Tree >` : `${className} Skill Tree`;
   ctx.fillText(headerText, x + Math.round(20 * uiScale), y + Math.round(30 * uiScale));
+  if (canSwitchClass) {
+    const headerW = ctx.measureText(headerText).width;
+    registerRegion(game, x + Math.round(10 * uiScale), y + Math.round(10 * uiScale), Math.round(40 * uiScale), Math.round(30 * uiScale), { type: 'move', dx: -1, dy: 0 });
+    registerRegion(game, x + Math.round(20 * uiScale) + headerW - Math.round(30 * uiScale), y + Math.round(10 * uiScale), Math.round(40 * uiScale), Math.round(30 * uiScale), { type: 'move', dx: 1, dy: 0 });
+  }
 
   // Level and XP
   ctx.fillStyle = '#afc0d2';
@@ -1473,7 +1692,7 @@ export function drawSkillTree(game) {
   // Skill nodes — build flat display rows (branch headers + nodes)
   const nodeStartY = y + Math.round(74 * uiScale);
   const lineH = Math.round(24 * uiScale);
-  const detailY = y + panelH - Math.round(92 * uiScale);
+  const detailY = y + panelH - Math.round(112 * uiScale);
   const listAreaH = detailY - nodeStartY - Math.round(8 * uiScale);
   const maxVisible = Math.max(1, Math.floor(listAreaH / lineH));
 
@@ -1513,6 +1732,7 @@ export function drawSkillTree(game) {
       const canInv = canInvestSkill(classKey, node.id, investments) && available > 0;
       const isMaxed = rank >= node.maxRank;
 
+      registerRegion(game, x + Math.round(10 * uiScale), rowY - Math.round(14 * uiScale), panelW - Math.round(20 * uiScale), lineH, rowSelectAction('skillTreeCursor', nodeIdx));
       if (nodeIdx === game.skillTreeCursor) {
         ctx.fillStyle = '#1f2d42';
         ctx.fillRect(x + Math.round(10 * uiScale), rowY - Math.round(14 * uiScale), panelW - Math.round(20 * uiScale), Math.round(20 * uiScale));
@@ -1577,8 +1797,178 @@ export function drawSkillTree(game) {
   // Controls
   ctx.fillStyle = '#7d8e9f';
   ctx.font = `${Math.round(11 * uiScale)}px monospace`;
-  const controlsText = fromHub
+  const controlsText = canSwitchClass
     ? 'L/R: Class  Up/Down: Select  Enter: Invest  ESC: Close'
     : 'Up/Down: Select  Enter/Space: Invest  ESC: Close';
-  ctx.fillText(controlsText, x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
+  if (panelW >= Math.round(560 * uiScale)) ctx.fillText(controlsText, x + Math.round(20 * uiScale), y + panelH - Math.round(12 * uiScale));
+  const tbY = y + panelH - Math.round(30 * uiScale);
+  drawButton(game, x + panelW - Math.round(156 * uiScale), tbY, Math.round(70 * uiScale), Math.round(22 * uiScale), 'Invest', { type: 'inventoryConfirm' }, { active: available > 0 });
+  drawButton(game, x + panelW - Math.round(78 * uiScale), tbY, Math.round(64 * uiScale), Math.round(22 * uiScale), 'Close', { type: 'close' });
+}
+
+// --- town: build menu and building service menu ---
+
+export function drawBuildMenu(game) {
+  const ctx = game.ctx;
+  const w = game.canvas.width;
+  const h = game.canvas.height;
+  const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+  const panelW = Math.min(Math.round(640 * uiScale), w - 24);
+  const panelH = Math.min(Math.round(440 * uiScale), h - 80);
+  const x = Math.floor((w - panelW) / 2);
+  const y = Math.floor((h - panelH) / 2);
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#171d28';
+  ctx.fillRect(x, y, panelW, panelH);
+  ctx.strokeStyle = '#4f6075';
+  ctx.strokeRect(x, y, panelW, panelH);
+
+  ctx.fillStyle = '#e8eef5';
+  ctx.font = `${Math.round(22 * uiScale)}px monospace`;
+  ctx.fillText('Build', x + Math.round(20 * uiScale), y + Math.round(36 * uiScale));
+
+  // material totals
+  const mats = game.saveData?.materials || {};
+  ctx.font = `bold ${Math.round(12 * uiScale)}px monospace`;
+  let mx = x + Math.round(20 * uiScale);
+  const my = y + Math.round(58 * uiScale);
+  for (const m of MATERIALS) {
+    const label = `${m} ${mats[m] || 0}`;
+    ctx.fillStyle = '#000';
+    ctx.fillText(label, mx + 1, my + 1);
+    ctx.fillStyle = MATERIAL_COLORS[m];
+    ctx.fillText(label, mx, my);
+    mx += ctx.measureText(label).width + Math.round(12 * uiScale);
+  }
+
+  const rowH = Math.round(30 * uiScale);
+  const startY = y + Math.round(88 * uiScale);
+  const narrow = panelW < Math.round(520 * uiScale);
+  for (let i = 0; i < BUILDING_ORDER.length; i++) {
+    const type = BUILDING_ORDER[i];
+    const opt = game.getBuildOption(type);
+    const rowY = startY + i * rowH;
+    const selected = i === game.buildMenuIndex;
+    registerRegion(game, x + Math.round(12 * uiScale), rowY - Math.round(18 * uiScale), panelW - Math.round(24 * uiScale), rowH, rowSelectAction('buildMenuIndex', i));
+    if (selected) {
+      ctx.fillStyle = '#2b3a4d';
+      ctx.fillRect(x + Math.round(12 * uiScale), rowY - Math.round(18 * uiScale), panelW - Math.round(24 * uiScale), rowH - 2);
+    }
+    // colour swatch
+    ctx.fillStyle = opt.def.color;
+    ctx.fillRect(x + Math.round(20 * uiScale), rowY - Math.round(12 * uiScale), Math.round(14 * uiScale), Math.round(14 * uiScale));
+    ctx.fillStyle = opt.placeable ? (selected ? '#ffffff' : '#c8d4e0') : (opt.built ? '#9ce2a3' : '#6a7a8a');
+    ctx.font = `${Math.round(14 * uiScale)}px monospace`;
+    ctx.fillText(opt.def.name, x + Math.round(42 * uiScale), rowY);
+    ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+    ctx.fillStyle = opt.built ? '#9ce2a3' : (opt.blueprint ? (opt.affordable ? '#afc0d2' : '#c98a7a') : '#7a8a9a');
+    const right = opt.built ? opt.status : (opt.blueprint ? formatCost(opt.cost) : 'Blueprint needed');
+    ctx.fillText(right, x + Math.round(narrow ? 42 : 220 * uiScale), rowY + (narrow ? Math.round(12 * uiScale) : 0));
+    if (!narrow) {
+      ctx.fillStyle = '#6f7d8a';
+      ctx.fillText(opt.def.blurb, x + Math.round(400 * uiScale), rowY);
+    }
+  }
+
+  const sel = game.getBuildOption(BUILDING_ORDER[game.buildMenuIndex]);
+  const infoY = startY + BUILDING_ORDER.length * rowH + Math.round(6 * uiScale);
+  ctx.fillStyle = '#afc0d2';
+  ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+  ctx.fillText(sel.def.blurb, x + Math.round(20 * uiScale), infoY);
+  ctx.fillStyle = '#d9e7f5';
+  const selStatus = !sel.blueprint ? `Blueprint drops from ${BLUEPRINT_SOURCES[sel.def.blueprint] || 'a boss'}.` : sel.status;
+  ctx.fillText(game.buildingNotice || (sel.placeable ? `Costs ${formatCost(sel.cost)}. Enter to place.` : selStatus), x + Math.round(20 * uiScale), infoY + Math.round(18 * uiScale));
+
+  drawButton(game, x + panelW - Math.round(156 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(70 * uiScale), Math.round(24 * uiScale), 'Place', { type: 'inventoryConfirm' }, { active: sel.placeable, dim: !sel.placeable });
+  drawButton(game, x + panelW - Math.round(78 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(64 * uiScale), Math.round(24 * uiScale), 'Close', { type: 'close' });
+  ctx.fillStyle = '#7d8e9f';
+  ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+  ctx.fillText('Up/Down: Select  Enter: Place  ESC: Close', x + Math.round(20 * uiScale), y + panelH - Math.round(16 * uiScale));
+}
+
+export function drawBuildingMenu(game) {
+  const building = game.activeBuilding;
+  if (!building) return;
+  const def = getBuildingDef(building.type);
+  const ctx = game.ctx;
+  const w = game.canvas.width;
+  const h = game.canvas.height;
+  const uiScale = Math.max(1, Math.min(1.5, Math.min(w, h) / 900));
+  const panelW = Math.min(Math.round(640 * uiScale), w - 24);
+  const panelH = Math.min(Math.round(460 * uiScale), h - 80);
+  const x = Math.floor((w - panelW) / 2);
+  const y = Math.floor((h - panelH) / 2);
+  const rows = getBuildingMenu(game, building);
+  if (game.buildingCursor >= rows.length) game.buildingCursor = Math.max(0, rows.length - 1);
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#171d28';
+  ctx.fillRect(x, y, panelW, panelH);
+  ctx.strokeStyle = def.color;
+  ctx.strokeRect(x, y, panelW, panelH);
+
+  ctx.fillStyle = '#e8eef5';
+  ctx.font = `${Math.round(22 * uiScale)}px monospace`;
+  ctx.fillText(`${def.name}  L${building.level}`, x + Math.round(20 * uiScale), y + Math.round(36 * uiScale));
+  ctx.fillStyle = '#afc0d2';
+  ctx.font = `${Math.round(12 * uiScale)}px monospace`;
+  const descLines = wrapTextLines(describeBuilding(game.saveData, building), Math.floor((panelW - 40 * uiScale) / (7.2 * uiScale)));
+  for (let i = 0; i < Math.min(2, descLines.length); i++) {
+    ctx.fillText(descLines[i], x + Math.round(20 * uiScale), y + Math.round(58 * uiScale) + i * Math.round(15 * uiScale));
+  }
+
+  const mats = game.saveData?.materials || {};
+  ctx.font = `bold ${Math.round(11 * uiScale)}px monospace`;
+  let mx = x + Math.round(20 * uiScale);
+  const my = y + Math.round(92 * uiScale);
+  for (const m of MATERIALS) {
+    const label = `${m} ${mats[m] || 0}`;
+    ctx.fillStyle = '#000';
+    ctx.fillText(label, mx + 1, my + 1);
+    ctx.fillStyle = MATERIAL_COLORS[m];
+    ctx.fillText(label, mx, my);
+    mx += ctx.measureText(label).width + Math.round(10 * uiScale);
+  }
+
+  const rowH = Math.round(26 * uiScale);
+  const startY = y + Math.round(120 * uiScale);
+  const maxVisible = Math.max(1, Math.floor((panelH - Math.round(200 * uiScale)) / rowH));
+  const sv = getScrollView(game.buildingCursor, game.buildingScrollOffset || 0, rows.length, maxVisible);
+  game.buildingScrollOffset = sv.scrollOffset;
+  for (let i = sv.startIdx; i < sv.endIdx; i++) {
+    const row = rows[i];
+    const rowY = startY + (i - sv.startIdx) * rowH;
+    const selected = i === game.buildingCursor;
+    registerRegion(game, x + Math.round(12 * uiScale), rowY - Math.round(16 * uiScale), panelW - Math.round(24 * uiScale), rowH, rowSelectAction('buildingCursor', i));
+    if (selected) {
+      ctx.fillStyle = '#2b3a4d';
+      ctx.fillRect(x + Math.round(12 * uiScale), rowY - Math.round(16 * uiScale), panelW - Math.round(24 * uiScale), rowH - 2);
+    }
+    ctx.font = `${Math.round(13 * uiScale)}px monospace`;
+    ctx.fillStyle = row.enabled ? (selected ? '#ffffff' : '#c8d4e0') : '#6a7a8a';
+    ctx.fillText(row.label, x + Math.round(22 * uiScale), rowY);
+    if (row.cost) {
+      const costText = formatCost(row.cost);
+      ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+      ctx.fillStyle = row.enabled ? '#afc0d2' : '#8a6a6a';
+      ctx.fillText(costText, x + panelW - Math.round(22 * uiScale) - ctx.measureText(costText).width, rowY);
+    }
+  }
+  drawScrollIndicators(ctx, x + Math.round(22 * uiScale), startY - Math.round(26 * uiScale), startY + maxVisible * rowH - Math.round(6 * uiScale), sv.showUpArrow, sv.showDownArrow, uiScale);
+
+  const selRow = rows[game.buildingCursor];
+  const infoY = y + panelH - Math.round(64 * uiScale);
+  ctx.font = `${Math.round(11 * uiScale)}px monospace`;
+  ctx.fillStyle = '#8fa5bb';
+  if (selRow?.detail) ctx.fillText(selRow.detail, x + Math.round(20 * uiScale), infoY);
+  ctx.fillStyle = '#d9e7f5';
+  if (game.buildingNotice) ctx.fillText(game.buildingNotice, x + Math.round(20 * uiScale), infoY + Math.round(16 * uiScale));
+
+  drawButton(game, x + panelW - Math.round(156 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(70 * uiScale), Math.round(24 * uiScale), 'Select', { type: 'inventoryConfirm' }, { active: !!selRow?.enabled });
+  drawButton(game, x + panelW - Math.round(78 * uiScale), y + panelH - Math.round(34 * uiScale), Math.round(64 * uiScale), Math.round(24 * uiScale), 'Leave', { type: 'close' });
+  ctx.fillStyle = '#7d8e9f';
+  ctx.fillText('Up/Down: Select  Enter: Confirm  ESC: Leave', x + Math.round(20 * uiScale), y + panelH - Math.round(16 * uiScale));
 }
